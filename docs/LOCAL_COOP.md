@@ -98,7 +98,7 @@ for those and performs the action with player 2's own body:
 | L2 | The weapon's combat art, spending their own Ultimate charge, as for player 1 |
 | D-pad down | Drink the gourd: heals player 2 and uses player 2's own charges |
 | Options | Player 2's own menu: the game's pause menu with a PLAYER 2 badge, where what's put on is player 2's (both pads drive it) |
-| Select / touchpad | Quest-direction sense; it reports on both screens |
+| Select / touchpad | Held: the quest-direction sense, reported on both screens. Tapped: player 2's own menu, on the map |
 
 Player 2's prompts are the game's own: the same widget and animations as player 1's, set down on the thing itself in their half
 of the screen, with the button of their own pad. They follow the game's rules: in reach and faced (by player 2's own view), on the

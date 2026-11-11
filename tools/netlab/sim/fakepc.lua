@@ -1389,7 +1389,7 @@ function Fake.new(id, scripts, ini, link)
     pc.interactComps, pc.switches, pc.bellMenus, pc.screens, pc.keys2, pc.loadedAt = {}, {}, {}, {}, {}, 0
     pc.afterHooks = {}
     pc.inputActions = {}
-    for _, action in ipairs({ "IA_UseBottomItem", "IA_PushGameSystemMenu" }) do
+    for _, action in ipairs({ "IA_UseBottomItem", "IA_PushGameSystemMenu", "IA_Map" }) do
         local a = object(pc, "InputAction")
         rawset(a, "__name", action)
         pc.inputActions[#pc.inputActions + 1] = a
@@ -1967,12 +1967,18 @@ function Fake.new(id, scripts, ini, link)
         found[path] = object(pc, "AnimSequence", { Skeleton = pc.chestSkeleton })
         rawset(found[path], "__path", path)
     end
-    -- The pause menu's input action, which local co-op asks for on player 1's input for player 2's Options.
+    -- The pause menu's input action, which local co-op asks for on player 1's input for player 2's Options; the map's for
+    -- their Select; and the game's sense-only set, which goes over player 2's others.
     for _, a in ipairs(pc.inputActions) do
-        if rawget(a, "__name") == "IA_PushGameSystemMenu" then
-            found["/Game/PBZContent/Input/InputActions/IA_PushGameSystemMenu.IA_PushGameSystemMenu"] = a
+        local n = rawget(a, "__name")
+        if n == "IA_PushGameSystemMenu" or n == "IA_Map" then
+            found["/Game/PBZContent/Input/InputActions/" .. n .. "." .. n] = a
         end
     end
+    pc.senseSet = object(pc, "InputMappingContext")
+    rawset(pc.senseSet, "__name", "IMC_OnlySense")
+    pc.inputContexts[#pc.inputContexts + 1] = pc.senseSet
+    found["/Game/PBZContent/Input/IMC_OnlySense.IMC_OnlySense"] = pc.senseSet
     local statics = object(pc, "StaticObject", {}, true)
     pc.found = found
     pc.montages, pc.weaponConfigs = {}, {}

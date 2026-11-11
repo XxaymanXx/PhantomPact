@@ -6452,6 +6452,21 @@ local function localButtons()
     check(pc.inputSets[1][useSet] == nil and pc.inputSets[1][climbSet] == nil, "nothing offered, no set: Circle is the execution button again")
     allErrors(s)
 
+    -- Select: the game's sense-only set over player 2's others (the hold is the sense; the map's tap isn't the game's for them), and
+    -- a tap opens their own menu on the map.
+    local m, mpc, mstate = localGame()
+    m:run(1.5)
+    check(mpc.inputSets[1][mpc.senseSet] == 100 and mpc.inputSets[0][mpc.senseSet] == nil, "the sense-only set on player 2's pad, not player 1's")
+    local n0 = #mpc.injected
+    Session.press2(m, "Gamepad_Special_Left")
+    check(#mpc.injected == n0 + 1 and mpc.injected[#mpc.injected] == "IA_Map", "a tap of Select asks for the map")
+    mpc.keys2["Gamepad_Special_Left"] = true
+    m:run(0.6)
+    mpc.keys2["Gamepad_Special_Left"] = false
+    m:run(0.2)
+    check(#mpc.injected == n0 + 1, "a hold is the sense, the game's: no map")
+    allErrors(m)
+
     -- Screens the game plays on under keep player 2's pad theirs; a menu still shares both.
     local t, tpc, tstate = localGame()
     t:run(1.5)

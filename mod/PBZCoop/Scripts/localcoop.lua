@@ -2110,8 +2110,9 @@ return function(api)
         local _, p1 = getPlayer1()
         local ic1 = valid(p1) and p1:GetComponentByClass(StaticFindObject("/Script/ProjectPBZ.PBZInteractComponent")) or nil
         local offered = valid(ic1) and valid(ic1:GetInteractActor())
-        -- (Not player 2's prompt sets, V.promptSets: those are theirs alone, and on player 1 Circle would only ever use.)
-        local promptSet = {}
+        -- (Not player 2's prompt sets, V.promptSets: those are theirs alone, and on player 1 Circle would only ever use. Nor their
+        -- sense-only set, V.mapAsTheirs: on player 1 it would keep the map from Select.)
+        local promptSet = { IMC_OnlySense = true }
         for _, name in pairs(V.PROMPT_SETS) do
             promptSet[name] = true
         end
@@ -3543,6 +3544,35 @@ return function(api)
         end
     end
 
+    -- Player 2's Select: tapped, the game's map (IA_Map) came up as the shared menu, player 1's, and from its tabs a gear change
+    -- went on player 1 (bench, 11-12). Held, the quest sense, which is fine as it is. Pad 2's Select reaches player 2's controller
+    -- (unlike Options), so the game's sense-only set (IMC_OnlySense) goes over their others: the sense stays on the hold, and its
+    -- action, taking the button, keeps the map's tap from the game (IA_Map is the HUD set's, below it). The tap itself is the
+    -- mod's: player 2's own menu (loadout.lua), opened on the map as their Options opens it on its first page.
+    V.SENSE_SET, V.SENSE_PRIORITY, V.MAP_ACTION = "/Game/PBZContent/Input/IMC_OnlySense.IMC_OnlySense", 100,
+        "/Game/PBZContent/Input/InputActions/IA_Map.IA_Map"
+    V.TAP_S = 0.4               -- the game's own: longer is the sense (PBZInputTriggerHoldNonTouchpadGamepad 0.40)
+    function V.mapAsTheirs()
+        local s = inputSubsystemOf(state.p2Controller)
+        local set = StaticFindObject(V.SENSE_SET)
+        if s and valid(set) and not s:HasMappingContext(set, {}) then
+            s:AddMappingContext(set, V.SENSE_PRIORITY, {})
+        end
+    end
+    function V.openMapAsTheirs(pc)
+        local own = select(2, pcall(api.loadout.begin, 2)) == true
+        local action, asked = StaticFindObject(V.MAP_ACTION), false
+        for _, s in ipairs(FindAllOf("EnhancedInputLocalPlayerSubsystem") or {}) do
+            if valid(action) and s:GetOuter().ControllerId == pc.Player.ControllerId then
+                s:InjectInputVectorForAction(action, { X = 1, Y = 0, Z = 0 }, {}, {})
+                asked = true
+            end
+        end
+        if own and not asked then
+            pcall(api.loadout.finish, "no map to ask for")
+        end
+    end
+
     -- Player 2's Options: the game's menu layer takes every joystick's as player 1's, so main.dll keeps pad 2's from it
     -- (pad_route.hpp) while it's theirs to press, asked again every frame (nil: not now, the game's own). True once for
     -- each press kept since the last look. Without that call (an older main.dll), the press reaches the game as before.
@@ -3570,6 +3600,7 @@ return function(api)
                 climbHeld = p2pc:IsInputKeyDown({ KeyName = FName("Gamepad_FaceButton_Bottom") })
                 useHeld = p2pc:IsInputKeyDown({ KeyName = FName("Gamepad_FaceButton_Right") })
             end
+            V.selectDownAt = nil        -- (a Select pressed in a menu is the menu's)
             return
         end
         local _, p1 = getPlayer1()
@@ -3595,6 +3626,17 @@ return function(api)
             end
         end
         optionsHeld = pressed
+        -- Pad 2's Select: a tap is their own menu on the map (V.openMapAsTheirs); a hold stays the game's sense.
+        local sel = p2pc:IsInputKeyDown({ KeyName = FName("Gamepad_Special_Left") })
+        if sel and not V.selectDownAt then
+            V.selectDownAt = os.clock()
+        elseif not sel and V.selectDownAt then
+            local held = os.clock() - V.selectDownAt
+            V.selectDownAt = nil
+            if held < V.TAP_S then
+                pcall(V.openMapAsTheirs, pc)
+            end
+        end
         -- As the game binds them for player 1: Cross (Space) starts a climb, Circle (E) interacts with the rest.
         local climb = p2pc:IsInputKeyDown({ KeyName = FName("Gamepad_FaceButton_Bottom") })
             or (config.p2 == "kbm" and p2pc:IsInputKeyDown({ KeyName = FName("SpaceBar") }))
@@ -3713,6 +3755,9 @@ return function(api)
                 -- (Out of a fight at once when down or out of play; in it again from noticePlayer2's next pass.)
                 if V.inCombatOn and (paused or p2DownSince) then
                     pcall(V.setInCombat, false)
+                end
+                if not paused then
+                    pcall(V.mapAsTheirs)
                 end
                 if valid(state.p2Pawn) then
                     pcall(V.pointPictures, getPlayer1())
