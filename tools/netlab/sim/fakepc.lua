@@ -1323,8 +1323,10 @@ function Fake.new(id, scripts, ini, link)
             end,
         })
         put(p, "look", look)
+        -- (Its camera: the combat mode wants the body in a fight, the one tag.)
+        local cam = object(pc, "NBCameraComponent", { CombatModeTag = { RequireTags = { GameplayTags = list({ { TagName = name("CharacterState.InCombat") } }) } } })
         put(p, "GetComponentByClass", function(_, class)
-            return (class == pc.interactClass and ic) or (class == pc.appearanceClass and look) or nil
+            return (class == pc.interactClass and ic) or (class == pc.appearanceClass and look) or (class == pc.cameraClass and cam) or nil
         end)
         local points = {}
         local pointPairs = {}
@@ -1763,6 +1765,16 @@ function Fake.new(id, scripts, ini, link)
             Ability = { IsValid = function() return true end, GetClass = function() return cls end } }
     end
     local abilities = object(pc, "AbilitySystemLibrary")
+    local function loose(actor, tags, by)
+        local mine = rawget(actor, "__tags") or {}
+        tags.GameplayTags:ForEach(function(_, t)
+            local n = t:get().TagName:ToString()
+            mine[n] = math.max(0, (mine[n] or 0) + by)
+        end)
+        rawset(actor, "__tags", mine)
+    end
+    put(abilities, "AddLooseGameplayTags", function(_, actor, tags) loose(actor, tags, 1) end)
+    put(abilities, "RemoveLooseGameplayTags", function(_, actor, tags) loose(actor, tags, -1) end)
     defs(pc, abilities, { GetAbilitySystemComponent = function(_, actor)
         local asc = rawget(actor, "__fields").asc
         if asc == nil then
@@ -1891,6 +1903,8 @@ function Fake.new(id, scripts, ini, link)
     found["/Script/Engine.SkeletalMeshComponent"] = object(pc, "Class")
     pc.appearanceClass = pc.appearanceClass or object(pc, "Class")
     found["/Script/ProjectPBZ.PBZAppearanceComponent"] = pc.appearanceClass
+    pc.cameraClass = pc.cameraClass or object(pc, "Class")
+    found["/Script/NBCamera.NBCameraComponent"] = pc.cameraClass
     -- Effects: spawned on a body (the ghost's), and what was spawned where.
     for _, k in ipairs({ "/Script/Niagara.NiagaraComponent", "/Script/Niagara.NiagaraSystem", "/Script/Engine.Character" }) do
         found[k] = object(pc, "Class")

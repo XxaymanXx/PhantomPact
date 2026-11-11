@@ -938,6 +938,7 @@ return function(api)
         V.nextNotice = os.clock() + 0.25
         local here = p2:K2_GetActorLocation()
         local now = os.clock()
+        local fights = false
         for _, e in ipairs(game.listEnemies(true)) do
             pcall(function()
                 local addr = e:GetAddress()
@@ -949,6 +950,8 @@ return function(api)
                 if not q.X or (q.X == 0 and q.Y == 0) then
                     return
                 end
+                -- (In a fight with player 2, however far: V.setInCombat.)
+                fights = fights or select(2, pcall(V.fightsPlayer2, e, p2)) == true
                 local d = distance(q, here)
                 if d > V.NOTICE_FRONT_CM then
                     V.inFace[addr] = nil
@@ -1001,6 +1004,71 @@ return function(api)
                 end
             end)
         end
+        pcall(V.setInCombat, fights)
+    end
+
+    -- The game counts player 1 in a fight (CharacterState.InCombat) while enemies fight them: each that comes into combat with them
+    -- adds to it, each that leaves takes it off (bench, 11-12: two thugs, 2; both given up 7 s after player 1 left, 0). Player 2 it
+    -- never counts, though the same thugs hated them too; a thug fighting player 2 alone gave player 1 nothing either. And it's
+    -- read all over: the camera's combat mode (CombatModeTag: player 2 fought with the walking-about camera while player 1's framed
+    -- the fight), the body's fighting stance, health coming back only out of a fight, the quest sense. So player 2 is in a fight
+    -- (once) while a live enemy in combat has them on its hatred list, and out when none has: looked at in noticePlayer2's pass, on
+    -- the enemies it finds that same frame (an enemy kept from an earlier look may be gone, and calling into one kills the game).
+    -- The tags go on through the camera's own requirement, which is that one tag: a container built by hand
+    -- (MakeGameplayTagContainerFromTag) killed UE4SS (bench, 11-12).
+    V.inCombatOn, V.inCombatBody = false, nil
+    function V.inCombatTags(pawn)
+        local cam = pawn:GetComponentByClass(StaticFindObject("/Script/NBCamera.NBCameraComponent"))
+        if not valid(cam) then
+            return nil
+        end
+        local tags, n, only = cam.CombatModeTag.RequireTags, 0, nil
+        tags.GameplayTags:ForEach(function(_, t)
+            n = n + 1
+            only = t:get().TagName:ToString()
+        end)
+        -- (Only while it's that tag alone: anything else in it would go on player 2 as well.)
+        return (n == 1 and only == "CharacterState.InCombat") and tags or nil
+    end
+    -- Whether this enemy (live, found this frame) is in combat with player 2 on its hatred list.
+    function V.fightsPlayer2(e, p2)
+        V.combatTagName = V.combatTagName or FName("AI.State.Combat")
+        local asc = StaticFindObject("/Script/GameplayAbilities.Default__AbilitySystemBlueprintLibrary"):GetAbilitySystemComponent(e)
+        if not (valid(asc) and asc:GetGameplayTagCount({ TagName = V.combatTagName }) > 0) then
+            return false
+        end
+        local me, hates = p2:GetAddress(), false
+        e.BP_PBZHatredManagerComponent.HatredList:ForEach(function(_, el)
+            local a = el:get()
+            hates = hates or (valid(a) and a:GetAddress() == me)
+        end)
+        return hates
+    end
+    -- Player 2 in or out of a fight (want), as their Soul is now: down, dead or out of play, out.
+    function V.setInCombat(want)
+        local p2 = state.p2Pawn
+        if not valid(p2) then
+            V.inCombatOn, V.inCombatBody = false, nil
+            return
+        end
+        if V.inCombatBody ~= p2:GetAddress() then
+            V.inCombatOn, V.inCombatBody = false, p2:GetAddress()      -- (a new Soul starts out of it)
+        end
+        want = want and not (paused or p2DownSince or game.isDead(p2))
+        if want == V.inCombatOn then
+            return
+        end
+        local tags = V.inCombatTags(p2)
+        if not tags then
+            return
+        end
+        local lib = StaticFindObject("/Script/GameplayAbilities.Default__AbilitySystemBlueprintLibrary")
+        if want then
+            lib:AddLooseGameplayTags(p2, tags, false)
+        else
+            lib:RemoveLooseGameplayTags(p2, tags, false)
+        end
+        V.inCombatOn = want
     end
 
     -- The game's camera sits over the shoulder, with the Soul off to the left. With the screen split each Soul belongs
@@ -1344,6 +1412,10 @@ return function(api)
                 p2DownSince = os.clock()
                 log("Player 2 is down.")
                 leaveDomains(p2)
+                -- Down is out of the fight, as a partner down online is: off every enemy's list, not to be put back, and an enemy
+                -- that was after them turns to player 1. (Bench, 11-12: a spear thug spent the whole 6 s on the body on the ground,
+                -- three special attacks it couldn't die of, and turned only when the body went.)
+                pcall(game.ghostInFight, p2, false, game.listEnemies(true))
                 pcall(function() p2:DisableInput(state.p2Controller) end)
                 pcall(function() p2.Mesh:SetSimulatePhysics(true) end)      -- no real death, so no death animation
                 V.showDeathCard(pc)
@@ -3535,6 +3607,10 @@ return function(api)
                 updateBar()
                 updateBossBar(getPlayer1())
                 updatePrompt()
+                -- (Out of a fight at once when down or out of play; in it again from noticePlayer2's next pass.)
+                if V.inCombatOn and (paused or p2DownSince) then
+                    pcall(V.setInCombat, false)
+                end
                 if valid(state.p2Pawn) then
                     pcall(V.pointPictures, getPlayer1())
                 end

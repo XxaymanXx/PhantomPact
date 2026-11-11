@@ -107,6 +107,10 @@ time (the nearer of a thing to use and a climb), and while it is, the game's own
 climbs instead of jumping, Circle uses instead of executing. A chapter's title or a tip the game plays on under doesn't stop
 player 2: their pad stays theirs.
 
+In a fight player 2 is counted in it as player 1 is (the game's own in-combat state, while an enemy fighting them has them on its
+list): their camera goes to the game's combat view with its soft focus on the enemy, their body to its fighting stance. Down, they're
+out of the fight: enemies turn to player 1 until they're back.
+
 Player 2 has the game's own HUD in their half too: health and ShaChi bars, gourd, weapons, buffs, a boss's bar, arrows to enemies
 out of view, and execution points on the enemies they can finish, all their own. The gourd on it shows their own charges. Going
 down, the game's death card plays in their half alone, and they get back up off the ground beside player 1.

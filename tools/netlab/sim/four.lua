@@ -6481,6 +6481,57 @@ local function localButtons()
     allErrors(t)
 end
 
+-- Player 2 in a fight as the game puts player 1 in one: its InCombat while an enemy in combat hates them (11-12).
+local function localFight()
+    part("player 2 in a fight")
+    local c, cpc, cstate = localGame()
+    c:run(1.5)
+    local p2 = cstate.p2Pawn
+    local inFight = function(body) return (rawget(body, "__tags") or {})["CharacterState.InCombat"] or 0 end
+    local foe = Session.enemyOn(cpc, "thug1")
+    field(foe, "BP_PBZHatredManagerComponent"):AddActorToHatredList(p2, {})
+    c:run(1.2)
+    check(inFight(p2) == 0, "hated by an enemy that isn't fighting yet: not in a fight")
+    rawset(foe, "__tags", { ["AI.State.Combat"] = 1 })
+    c:run(1.2)
+    check(inFight(p2) == 1, "an enemy in combat after them: in a fight, as the game has player 1 (its camera, its stance)")
+    c:run(1.0)
+    check(inFight(p2) == 1, "once, however long it lasts")
+    check(inFight(cpc.pawn) == 0, "and player 1 isn't put in it for them")
+    rawset(foe, "__tags", nil)
+    c:run(1.2)
+    check(inFight(p2) == 0, "the enemy out of combat: out of the fight")
+    rawset(foe, "__tags", { ["AI.State.Combat"] = 1 })
+    c:run(1.2)
+    check(inFight(p2) == 1, "back in")
+    Fake.setHealth(foe, 0)
+    c:run(1.2)
+    check(inFight(p2) == 0, "and out when it dies")
+    allErrors(c)
+
+    -- Down is out of the fight, as a partner down online: off the enemy's list, and the enemy turns to player 1.
+    local d, dpc, dstate = localGame()
+    d:run(1.5)
+    local body = dstate.p2Pawn
+    local thug = Session.enemyOn(dpc, "thug2")
+    local hm = field(thug, "BP_PBZHatredManagerComponent")
+    hm:AddActorToHatredList(body, {})
+    rawset(thug, "__tags", { ["AI.State.Combat"] = 1 })
+    d:run(1.2)
+    check(inFight(body) == 1, "a thug fighting player 2")
+    Fake.setHealth(body, 1)
+    d:run(1.2)
+    local listed = {}
+    for _, a in ipairs(rawget(hm, "__fields").HatredList.items) do
+        listed[a] = true
+    end
+    check(not listed[body], "down, they're off its list")
+    check(field(field(body, "BP_PBZHatredManagerComponent"), "CanBeHatredNow") == false, "and can't be put back on it while down")
+    check(listed[dpc.pawn] == true, "player 1 is on it, so it has someone to turn to")
+    check(inFight(body) == 0, "and they're out of the fight")
+    allErrors(d)
+end
+
 local function localOptions()
     part("player 2's Options, kept by main.dll")
     local s, pc = localGame()
@@ -9239,6 +9290,7 @@ return function(print_, scripts)
     padHold()
     localScreen()
     localButtons()
+    localFight()
     localOptions()
     elsewhere()
     travel()
