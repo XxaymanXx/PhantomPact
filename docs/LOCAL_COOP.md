@@ -93,16 +93,19 @@ for those and performs the action with player 2's own body:
 | Pad 2 | Does |
 |---|---|
 | Left stick, right stick, attacks, dodge, block | The game's own handling, as for player 1 |
-| Cross (A) | Jump; inside a climb spot: ladder, wall run, side run, rope swing, rappel, pole or slide; looking at a gap blocker within its range: the hook shot across |
-| Circle (B) | Use: chest, rubbish pile, door, lever, bell, loot card confirm |
+| Cross (A) | Jump; where the game offers a climb (a ladder, wall run, side run, rope swing, rappel, pole or slide, by its own rule for player 2's body as it stands): the climb, at once and with no jump first; looking at a gap blocker within its range: the hook shot across |
+| Circle (B) | Use: chest, rubbish pile, door, lever, bell, loot card confirm; with nothing to use offered, the game's execution |
 | L2 | The weapon's combat art, spending their own Ultimate charge, as for player 1 |
 | D-pad down | Drink the gourd: heals player 2 and uses player 2's own charges |
 | Options | Player 2's own menu: the game's pause menu with a PLAYER 2 badge, where what's put on is player 2's (both pads drive it) |
 | Select / touchpad | Quest-direction sense; it reports on both screens |
 
 Player 2's prompts are the game's own: the same widget and animations as player 1's, set down on the thing itself in their half
-of the screen, with the button of their own pad. They follow the game's rules: in reach and faced, on the ground. With the thing
-out of their half, a plain button stands in at the bottom of it.
+of the screen, with the button of their own pad. They follow the game's rules: in reach and faced (by player 2's own view), on the
+ground. With the thing out of their half, a plain button stands in at the bottom of it. As for player 1, one thing is offered at a
+time (the nearer of a thing to use and a climb), and while it is, the game's own button set for it is on player 2's pad: Cross
+climbs instead of jumping, Circle uses instead of executing. A chapter's title or a tip the game plays on under doesn't stop
+player 2: their pad stays theirs.
 
 Player 2 has the game's own HUD in their half too: health and ShaChi bars, gourd, weapons, buffs, a boss's bar, arrows to enemies
 out of view, and execution points on the enemies they can finish, all their own. The gourd on it shows their own charges. Going

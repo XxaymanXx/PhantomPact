@@ -84,6 +84,22 @@ return function(api)
         WB_BlackScreen_Flow_C = true, WBP_FlowSequencer_C = true,
         W_PlayerDead_C = true,          -- the game's death screen: player 2 going down shows it, player 1 plays on
     }
+    -- A screen the game plays on under: its input is the game's (InputConfig 2, Game: a chapter's title, subtitles) and it doesn't
+    -- pause, or it's the tutorial tip, which takes a press as well (1, GameAndMenu) and doesn't pause. Player 1 plays on under these,
+    -- so player 2 does too, with their own pad. As a menu they gave player 2's pad to player 1: on the bench (11-12) pad 2's stick
+    -- walked player 1 11 m during a chapter's title and 2 m during a tip. Not a load (a world not there yet holds them both).
+    V.GAME_INPUT, V.GAME_AND_MENU_INPUT = 2, 1
+    V.PLAY_ON_TIPS = { WB_hud_tutorial_C = true }
+    function V.playsOn(w, name)
+        if name:find("Loading", 1, true) then
+            return false
+        end
+        local ok, input, pauses = pcall(function() return w.InputConfig, w.bPauseGameWhenOpen end)
+        if not ok or pauses == true or pauses == 1 then
+            return false
+        end
+        return input == V.GAME_INPUT or (input == V.GAME_AND_MENU_INPUT and V.PLAY_ON_TIPS[name] == true)
+    end
     V.screenNow, V.screenClass, V.nextScreenCheck = false, nil, 0
     local function screenUp()
         if os.clock() < V.nextScreenCheck then
@@ -100,7 +116,11 @@ return function(api)
                 local name = w:GetClass():GetFName():ToString()
                 V.onBoat = V.onBoat or name == "W_ShipHudLayout_C"
                 -- Tutorial hint bars (W_TutorialBar_Hint_*) are passive overlays, not pages: they hold nobody.
-                return (not ALWAYS_ON_SCREENS[name] and not name:find("^W_TutorialBar_")) and name or nil
+                if ALWAYS_ON_SCREENS[name] or name:find("^W_TutorialBar_") then
+                    return nil
+                end
+                -- Nor is a screen the game itself plays on under (V.playsOn): a chapter's title, a tip.
+                return not V.playsOn(w, name) and name or nil
             end)
             if ok and hit then
                 up, cls = true, hit
@@ -1915,12 +1935,18 @@ return function(api)
         local _, p1 = getPlayer1()
         local ic1 = valid(p1) and p1:GetComponentByClass(StaticFindObject("/Script/ProjectPBZ.PBZInteractComponent")) or nil
         local offered = valid(ic1) and valid(ic1:GetInteractActor())
+        -- (Not player 2's prompt sets, V.promptSets: those are theirs alone, and on player 1 Circle would only ever use.)
+        local promptSet = {}
+        for _, name in pairs(V.PROMPT_SETS) do
+            promptSet[name] = true
+        end
         for _, c in ipairs(FindAllOf("InputMappingContext") or {}) do
             local found = {}
-            if s2:HasMappingContext(c, found) and not s1:HasMappingContext(c, {}) then
+            local name = c:GetFName():ToString()
+            if not promptSet[name] and s2:HasMappingContext(c, found) and not s1:HasMappingContext(c, {}) then
                 s1:AddMappingContext(c, found.OutFoundPriority or 0, {})
                 given = given + 1
-            elseif offered and c:GetFName():ToString() == "IMC_Interaction" and not s1:HasMappingContext(c, {}) then
+            elseif offered and name == "IMC_Interaction" and not s1:HasMappingContext(c, {}) then
                 s1:AddMappingContext(c, 1000, {})
                 given = given + 1
             end
@@ -2133,7 +2159,6 @@ return function(api)
     -- findTarget is the same look-around, used for the prompt on player 2's screen as well.
     local INTERACT_CM = 500          -- the game's own interaction distance (PBZInteractComponent.DistanceB)
     local VOLUME_CM = 500            -- climb spots are big; the interaction itself still decides if it's really in reach
-    V.CLOSE_CM = 150              -- right against a climb spot counts as inside it
     local PROMPT_SIZE = 60
     local PROMPT_Y = 0.6             -- down the view, where the game shows player 1's own prompts
 
@@ -2163,10 +2188,12 @@ return function(api)
     -- A look around for player 2's prompt took six looks through the game's whole object list, in one frame, a few times a second. How
     -- far the nearest of each kind is gets remembered instead, as plain numbers (an actor kept for later may be gone by then, and calling
     -- into one kills the game). Until they've walked that far, or a moment has passed for what's newly streamed in, it isn't looked for.
+    -- A button press always looks (`fresh`): a spot measured as far from where they last stood (a wall run's foot seen from the
+    -- ledge above it) was otherwise out of reach for two seconds, and Cross there was a plain jump.
     V.looked, V.LOOK_AGAIN_S, V.LOOK_MOVED_CM = {}, 2.0, 1500
-    function V.around(class, need, at)
+    function V.around(class, need, at, fresh)
         local now, last = os.clock(), V.looked[class]
-        if last and now < last.till and distance(at, last.at) < last.free then
+        if not fresh and last and now < last.till and distance(at, last.at) < last.free then
             return {}
         end
         local list, nearest = FindAllOf(class) or {}, 1e9
@@ -2218,24 +2245,55 @@ return function(api)
     V.GAP_CM = 3000             -- a gap blocker is used from afar (its DisplayPointDistance)
     V.RING_CM = 2000            -- the game's ring shows on a thing from about here
 
-    -- The game's own rule for this Soul and this thing: in its reach and faced, as player 1 must. Player 2's own interact component
-    -- answers it as player 1's does. Without it, a button that's also an execution rang the bell behind them in a fight, and a fog
-    -- door or a music trigger counted as something to use.
+    -- The game's own rule for this Soul and this thing: in its reach (V.gameOffers) and faced, as player 1 must. Without it, a button
+    -- that's also an execution rang the bell behind them in a fight, and a fog door or a music trigger counted as something to use.
+    -- Faced is player 2's own view (V.FACE_DOT, about 60 degrees either side): the game's IsPlayerFaceToActor answers for player 1's
+    -- screen whichever Soul it's given (bench, 11-12: player 2 at a rubbish pile, looking at it or away, always "no"; player 1
+    -- there, either way, "yes"), so player 2 could open things only where player 1 happened to be.
+    V.FACE_DOT = 0.5
     function V.gameAllows(pawn, thing)
-        local ok, can = pcall(function()
-            V.interactClass = V.interactClass or StaticFindObject("/Script/ProjectPBZ.PBZInteractComponent")
-            local ic = pawn:GetComponentByClass(V.interactClass)
-            return valid(ic) and ic:CanTriggerInteract(thing) and ic:IsPlayerFaceToActor(pawn, thing)
-        end)
-        if ok and can == true and #game.bossActors() > 0 then
+        local okL, loc = pcall(function() return thing:K2_GetActorLocation() end)
+        if not (okL and loc.X and facing(pawn, loc, V.FACE_DOT) and V.gameOffers(pawn, thing)) then
+            return false
+        end
+        if #game.bossActors() > 0 then
             -- (A bell in a boss fight: the game turns player 1's prompt red and won't have it.)
             local okB, bell = pcall(function() return thing:IsA(StaticFindObject("/Script/ProjectPBZ.PBZCheckPoint")) end)
             return not (okB and bell)
         end
-        return ok and can == true
+        return true
     end
 
-    local function findTarget(pawn, want)
+    -- The game's rule for a climb spot, as its search offers player 1 one: valid for the Soul as it stands (on the ground or in
+    -- the air, in the middle of a swing or not, facing it the right way) and in reach to be used. Player 2's own component
+    -- answers it for player 2. (Bench, 11-12: at a ladder's foot facing away, on the platform above a wall run, at a ledge from
+    -- below, both players got "no" and player 1 was offered nothing; at the wall run, a side run, a ladder from the front,
+    -- both "yes" and player 1 offered it. Before, the nearest spot within 1.5 m of its box was taken: X on top of a waterfall
+    -- ran player 2 up the wall at its foot, turned round.)
+    function V.gameOffers(pawn, thing)
+        local ok, yes = pcall(function()
+            V.interactClass = V.interactClass or StaticFindObject("/Script/ProjectPBZ.PBZInteractComponent")
+            local ic = pawn:GetComponentByClass(V.interactClass)
+            local asc = StaticFindObject("/Script/GameplayAbilities.Default__AbilitySystemBlueprintLibrary"):GetAbilitySystemComponent(pawn)
+            if not (valid(ic) and valid(asc)) then
+                return false
+            end
+            local function has(tag)
+                local okT, n = pcall(function() return asc:GetGameplayTagCount({ TagName = tag.TagName }) end)
+                return okT and type(n) == "number" and n > 0
+            end
+            local blocked = false
+            pcall(function()
+                ic.BlockTag.GameplayTags:ForEach(function(_, t)
+                    blocked = blocked or has(t:get())
+                end)
+            end)
+            return ic:IsValidInteract(thing, blocked, has(ic.SprintTag), has(ic.InAirTag)) and ic:CanTriggerInteract(thing)
+        end)
+        return ok and yes == true
+    end
+
+    local function findTarget(pawn, want, fresh)
         local bp = backpackOf(pawn)
         if want ~= "climb" and bp and bp.bShowPickItemWidget then
             local okW, card = pcall(function() return bp.ActivePickupWidget:Get() end)
@@ -2254,7 +2312,7 @@ return function(api)
         -- Two families of climb spots: the SpecialMove volumes (ladders, wall and side runs, rappels) and the ASM
         -- ones (poles, slides, rope swings, holes, temporary ladders). Both are the game's own interactables.
         for _, family in ipairs(volume == false and {} or { { "SpecialMoveVolumeBase", VOLUME_CM }, { "BP_ASM_SpVolumeBase_C", V.GAP_CM } }) do
-            for _, v in ipairs(V.around(family[1], family[2], at)) do
+            for _, v in ipairs(V.around(family[1], family[2], at, fresh)) do
                 -- To the spot's box, not its origin: a ladder's origin is at its foot, and player 2 may be at the top.
                 local d
                 -- A gap blocker (the ShaChi hook shot across a gap) is used from a distance, looking at it: the
@@ -2271,14 +2329,10 @@ return function(api)
                 else
                     d = reach(at, v, 2500)      -- climb spots are legitimately big (a ladder is 19 m tall)
                 end
-                if d and d <= VOLUME_CM and (bestD == nil or d < bestD) then
-                    -- The game starts a move only for a Soul inside the spot: a press near a wall run from the
-                    -- platform above it must stay the plain jump it is for player 1, not a wall run begun from
-                    -- the wrong place. Right up against the spot counts too (a ladder's top edge).
-                    local okO, inside = pcall(function() return v:IsOverlappingActor(pawn) end)
-                    if (okO and inside) or d <= V.CLOSE_CM then
-                        volume, bestD = v, d
-                    end
+                -- The game starts a move only where it would offer it to player 1 (V.gameOffers): a press near a wall
+                -- run from the platform above it stays the plain jump it is for player 1.
+                if d and d <= VOLUME_CM and (bestD == nil or d < bestD) and V.gameOffers(pawn, v) then
+                    volume, bestD = v, d
                 end
             end
         end
@@ -2286,7 +2340,7 @@ return function(api)
         if sm and valid(sm.CurrentSpecialMoveVolume) then
             local okL, loc = pcall(function() return sm.CurrentSpecialMoveVolume:K2_GetActorLocation() end)
             local okO, inside = pcall(function() return sm.CurrentSpecialMoveVolume:IsOverlappingActor(pawn) end)
-            if okL and loc.X and distance(at, loc) <= VOLUME_CM and okO and inside then
+            if okL and loc.X and distance(at, loc) <= VOLUME_CM and okO and inside and V.gameOffers(pawn, sm.CurrentSpecialMoveVolume) then
                 volume = sm.CurrentSpecialMoveVolume
             end
         end
@@ -2298,7 +2352,7 @@ return function(api)
         end
         local best = nil
         bestD = nil
-        for _, s in ipairs(V.around("PBZSwitchBase", V.RING_CM, at)) do
+        for _, s in ipairs(V.around("PBZSwitchBase", V.RING_CM, at, fresh)) do
             local d = reach(at, s)
             if d then
                 if d <= INTERACT_CM and (bestD == nil or d < bestD) then
@@ -2315,7 +2369,7 @@ return function(api)
         -- A person close by. The game only offers one to player 2 now and then, and not at all with player 1 far away, so
         -- its offer isn't waited for: a talk starts from anywhere (see kind "talk").
         local person, personD = nil, V.TALK_CM
-        for _, n in ipairs(V.around("BP_NPC_Narrative_C", V.TALK_CM, at)) do
+        for _, n in ipairs(V.around("BP_NPC_Narrative_C", V.TALK_CM, at, fresh)) do
             local okL, loc = pcall(function() return n:K2_GetActorLocation() end)
             if okL and loc.X and distance(at, loc) < personD and facing(pawn, loc, 0.5) then
                 person, personD = n, distance(at, loc)
@@ -2327,7 +2381,7 @@ return function(api)
         -- A Memory Flower, a thing to look at or to read: what the game calls a flow actor. Each runs a little story, and those only start
         -- from player 1's side, as a talk does.
         local flow, flowD = nil, INTERACT_CM
-        for _, f in ipairs(V.around("PBZFlowInteractActorBase", INTERACT_CM, at)) do
+        for _, f in ipairs(V.around("PBZFlowInteractActorBase", INTERACT_CM, at, fresh)) do
             local okL, loc = pcall(function() return f:K2_GetActorLocation() end)
             if okL and loc.X and distance(at, loc) < flowD and V.gameAllows(pawn, f) then
                 flow, flowD = f, distance(at, loc)
@@ -2336,7 +2390,7 @@ return function(api)
         if flow then
             return "talk", flow, bp
         end
-        for _, p in ipairs(V.around("PBZPickupActor", INTERACT_CM, at)) do
+        for _, p in ipairs(V.around("PBZPickupActor", INTERACT_CM, at, fresh)) do
             local okL, loc = pcall(function() return p:K2_GetActorLocation() end)
             local okP, pickable = pcall(function() return p.bIsPickable end)
             if okL and loc.X and distance(at, loc) <= INTERACT_CM and (not okP or pickable ~= false) then
@@ -2562,11 +2616,15 @@ return function(api)
         end
         local kind, target, bp
         local fresh = os.clock() - promptTargetAt < 0.4 and valid(promptTarget)
-        if fresh and ((want == "climb" and (promptTargetKind == "volume" or promptTargetKind == "gap"))
-                or (want == "use" and promptTargetKind ~= "volume" and promptTargetKind ~= "gap")) then
+        if fresh then
+            -- What the prompt offers is what the buttons do, as for player 1: with a thing to use offered, Cross stays a jump,
+            -- and with a climb offered, Circle stays the execution button.
+            if (want == "climb") ~= (promptTargetKind == "volume" or promptTargetKind == "gap") then
+                return
+            end
             kind, target, bp = promptTargetKind, promptTarget, backpackOf(pawn)
         else
-            kind, target, bp = findTarget(pawn, want)
+            kind, target, bp = findTarget(pawn, want, true)
         end
         if kind == nil then
             return
@@ -2603,16 +2661,17 @@ return function(api)
                 return not valid(pawn) or pawn.CharacterMovement.MovementMode == 5
                     or distance(pawn:K2_GetActorLocation(), before) > 60
             end
+            -- (Each again only while the game still offers it: a press as they walk off a ledge isn't followed by a climb.)
             for _, delay in ipairs({ 0.2, 0.4, 0.65 }) do
                 game.after(delay, function()
-                    if not started() and valid(volume) and valid(ic) then
+                    if not started() and valid(volume) and valid(ic) and V.gameOffers(pawn, volume) then
                         pcall(function() ic:CheckAndForceEndInteract() end)
                         pcall(function() ic:DoInteract(volume) end)
                     end
                 end)
             end
             game.after(1.5, function()
-                if started() then
+                if started() or not (valid(volume) and V.gameOffers(pawn, volume)) then
                     return
                 end
                 local s, action = inputSubsystemOf(state.p2Controller), nil
@@ -2982,30 +3041,86 @@ return function(api)
         pcall(function() promptWidget:SetRenderOpacity(ease) end)
     end
 
+    -- While its prompt is up the game changes what a button does, with a set of its own over player 1's others (priority
+    -- 1000): Cross climbs instead of jumping (IMC_InteractionSpecialMove), Circle uses instead of executing (IMC_Interaction).
+    -- Player 2 has the same sets while their own prompt is up. (Bench, 11-12: at a wall run player 1's Cross started the run
+    -- 0.20 s in; player 2's jumped first, and their run began 0.8 s in, after the landing. With the set: 0.12 s, no jump.)
+    V.PROMPT_SETS = { climb = "IMC_InteractionSpecialMove", use = "IMC_Interaction" }
+    V.promptSetObjects = {}
+
+    -- The game offers player 1 one thing at a time: the loot card while it's up, else the nearer of a thing to use and a climb spot
+    -- (bench, 11-12: at the foot of a wall run with rubbish 3.6 m off, player 1 was offered the run). Player 2's prompt is the same.
+    function V.pickPrompt(pawn)
+        local okU, kindU, targetU = pcall(findTarget, pawn, "use")
+        if not (okU and kindU) then
+            kindU, targetU = nil, nil
+        end
+        if kindU == "card" then
+            return kindU, targetU
+        end
+        local okC, kindC, targetC = pcall(findTarget, pawn, "climb")
+        if not (okC and kindC) then
+            return kindU, targetU
+        end
+        if kindU then
+            local at = pawn:K2_GetActorLocation()
+            if (reach(at, targetC, 2500) or 1e9) >= (reach(at, targetU, 2500) or 1e9) then
+                return kindU, targetU
+            end
+        end
+        return kindC, targetC
+    end
+    function V.promptSets(kind)
+        local s = inputSubsystemOf(state.p2Controller)
+        if not s then
+            return
+        end
+        local want = kind and ((kind == "volume" or kind == "gap") and "climb" or "use") or nil
+        for key, name in pairs(V.PROMPT_SETS) do
+            local c = V.promptSetObjects[name]
+            if not valid(c) then
+                c = nil
+                for _, x in ipairs(FindAllOf("InputMappingContext") or {}) do
+                    if x:GetFName():ToString() == name then
+                        c = x
+                    end
+                end
+                V.promptSetObjects[name] = c
+            end
+            if c then
+                local has = s:HasMappingContext(c, {})
+                if key == want and not has then
+                    s:AddMappingContext(c, 1000, {})
+                elseif key ~= want and has then
+                    s:RemoveMappingContext(c, {})
+                end
+            end
+        end
+    end
+
     local function updatePrompt()
         local pc = getPlayer1()
         local pawn = state.p2Pawn
         if paused or inScene or menuOpen or api.panel.open or not (valid(pc) and valid(pawn))
             or game.isDead(pawn) or p2DownSince then
             hidePrompt(true)
+            pcall(V.promptSets, nil)
             return
         end
         -- (On a rope or a ladder, or in the air, there's nothing to press: the game shows player 1 nothing either.)
         local okM, mode = pcall(function() return pawn.CharacterMovement.MovementMode end)
         if V.opening or V.closeUp or (okM and mode ~= 1 and mode ~= 2) then
             hidePrompt()
+            pcall(V.promptSets, nil)
             return
         end
         local now = os.clock()
         if now >= nextPrompt then
             nextPrompt = now + PROMPT_EVERY_S
-            local ok, kind, target = pcall(findTarget, pawn, "use")
-            promptKind = ok and kind or nil
-            if promptKind == nil then
-                ok, kind, target = pcall(findTarget, pawn, "climb")
-                promptKind = ok and kind or nil
-            end
-            promptTarget, promptTargetKind, promptTargetAt = ok and target or nil, promptKind, now
+            local okP, kind, target = pcall(V.pickPrompt, pawn)
+            promptKind = okP and kind or nil
+            promptTarget, promptTargetKind, promptTargetAt = okP and target or nil, promptKind, now
+            pcall(V.promptSets, promptKind)
         end
         if promptKind == nil then
             -- Something near, not yet in reach: the game's ring on it, as player 1 has.

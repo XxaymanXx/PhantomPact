@@ -247,6 +247,10 @@ function Fake.character(pc, class, x, y, z, hp, posture)
             return { X = l.X, Y = l.Y, Z = l.Z }
         end,
         K2_GetActorRotation = function(self) return { Pitch = 0.0, Yaw = rawget(self, "__fields").yaw, Roll = 0.0 } end,
+        GetActorForwardVector = function(self)
+            local yaw = math.rad(rawget(self, "__fields").yaw or 0)
+            return { X = math.cos(yaw), Y = math.sin(yaw), Z = 0.0 }
+        end,
         Respawn = function(self) put(self, "respawned", (rawget(self, "__fields").respawned or 0) + 1) end,     -- (to the bell)
         -- (Swept, it stops on the floor: flat at 100 everywhere, unless pc.noFloor says there's none at a spot.)
         K2_SetActorLocation = function(self, l, sweep)
@@ -1007,6 +1011,24 @@ function Fake.given(soul)
     return rawget(soul, "__given") or {}
 end
 
+-- A climb spot, one of the game's SpecialMove volumes (a wall run, a ladder): the game offers it unless __invalid is set.
+function Fake.volume(pc, class, x, y, z)
+    local v = object(pc, class)
+    rawset(v, "__name", class)
+    defs(pc, v, {
+        K2_GetActorLocation = function() return { X = x, Y = y, Z = z } end,
+        GetActorBounds = function(_, _, o, e)
+            o.X, o.Y, o.Z = x, y, z
+            e.X, e.Y, e.Z = 50, 50, 100
+        end,
+        IsOverlappingActor = function() return true end,
+        GetComponentByClass = function() return nil end,
+    })
+    pc.volumes = pc.volumes or {}
+    pc.volumes[#pc.volumes + 1] = v
+    return v
+end
+
 -- A flow actor: a switch to the eye, but it isn't one of the game's switches.
 function Fake.flow(pc, class, x, y, z)
     local f = Fake.switch(pc, class, x, y, z)
@@ -1268,6 +1290,12 @@ function Fake.new(id, scripts, ini, link)
         })
         put(ic, "CanTriggerInteract", function(_, thing) return rawget(thing, "__forbidden") == nil end)
         put(ic, "IsPlayerFaceToActor", function(_, _, thing) return rawget(thing, "__behind") == nil end)
+        put(ic, "IsValidInteract", function(_, thing, blocked, _, inAir)
+            return rawget(thing, "__invalid") == nil and not blocked and not (inAir and rawget(thing, "__groundOnly"))
+        end)
+        put(ic, "BlockTag", { GameplayTags = list({ { TagName = name("CharacterState.Action.Phase.Act") } }) })
+        put(ic, "SprintTag", { TagName = name("None") })
+        put(ic, "InAirTag", { TagName = name("CharacterState.Space.Air") })
         put(ic, "PauseTimer", function(self) put(self, "paused", true) end)
         put(ic, "GetInteractActor", function() return nil end)
         put(ic, "GetInteractingActor", function(self) return rawget(self, "__fields").InteractingActor end)
@@ -1358,6 +1386,14 @@ function Fake.new(id, scripts, ini, link)
     for _, c in ipairs(pc.inputContexts) do
         pc.inputSets[0][c], pc.inputSets[1][c] = 1, 1
     end
+    -- (The sets a prompt puts over the rest, none at the start: Cross climbs, Circle uses.)
+    pc.promptSets = {}
+    for _, n in ipairs({ "IMC_InteractionSpecialMove", "IMC_Interaction" }) do
+        local c = object(pc, "InputMappingContext")
+        rawset(c, "__name", n)
+        pc.inputContexts[#pc.inputContexts + 1] = c
+        pc.promptSets[n] = c
+    end
     for id = 0, 1 do
         local s = object(pc, "InputSubsystem", {}, true)
         put(s, "GetOuter", function() return { ControllerId = id } end)
@@ -1366,6 +1402,7 @@ function Fake.new(id, scripts, ini, link)
             return pc.inputSets[id][c] ~= nil
         end)
         put(s, "AddMappingContext", function(_, c, priority) pc.inputSets[id][c] = priority end)
+        put(s, "RemoveMappingContext", function(_, c) pc.inputSets[id][c] = nil end)
         put(s, "InjectInputVectorForAction", function(_, action)
             pc.injected[#pc.injected + 1] = action:GetFName():ToString()
         end)
@@ -1390,13 +1427,24 @@ function Fake.new(id, scripts, ini, link)
             ClientStopForceFeedback = function(self, effect) put(self, "rumbleStopped", effect) end,
             IsActorTickEnabled = function(self) return rawget(self, "__fields").ticking end,
             SetActorTickEnabled = function(self, on) put(self, "ticking", on) end,
-            Possess = function(self, b) put(self, "Pawn", b) end,
-            UnPossess = function(self) put(self, "Pawn", nil) end,
+            Possess = function(self, b)
+                put(self, "Pawn", b)
+                if b then
+                    put(b, "Controller", self)
+                end
+            end,
+            UnPossess = function(self)
+                local b = rawget(self, "__fields").Pawn
+                if b and rawget(b, "__fields") and rawget(b, "__fields").Controller == self then
+                    put(b, "Controller", nil)
+                end
+                put(self, "Pawn", nil)
+            end,
             SetIgnoreMoveInput = function(self, on) put(self, "ignored", on) end,
             SetIgnoreLookInput = false,
             ResetIgnoreInputFlags = function(self) put(self, "ignored", false) end,
             IsMoveInputIgnored = function(self) return rawget(self, "__fields").ignored end,
-            GetControlRotation = function() return { Pitch = 0.0, Yaw = 0.0, Roll = 0.0 } end,
+            GetControlRotation = function(self) return rawget(self, "__fields").controlRot or { Pitch = 0.0, Yaw = 0.0, Roll = 0.0 } end,
             FlushPressedKeys = false,
             ProjectWorldLocationToScreen = function(_, _, out)          -- (revive.lua's ring over a body)
                 local at = pc.projected or { X = 960, Y = 540 }
@@ -1407,6 +1455,9 @@ function Fake.new(id, scripts, ini, link)
     end
     local controller = playerController(pc.keys, 0, pawn)
     pc.controller = controller
+    if pawn then
+        put(pawn, "Controller", controller)
+    end
     local mode = object(pc, "GameMode")
     put(mode, "Refresh Monster", function()
         record(pc, "GameMode", "Refresh Monster")
@@ -1754,6 +1805,11 @@ function Fake.new(id, scripts, ini, link)
                     end
                 end)
             end
+            -- (Its tags, as the game counts them: __tags on the actor, name -> count, none by default.)
+            put(asc, "GetGameplayTagCount", function(_, tag)
+                local tags = rawget(actor, "__tags") or {}
+                return tags[tag.TagName:ToString()] or 0
+            end)
             put(actor, "asc", asc)
         end
         return asc
@@ -2053,6 +2109,8 @@ function Fake.new(id, scripts, ini, link)
             return pc.proxies
         elseif class == "PBZFlowInteractActorBase" then
             return pc.flows
+        elseif class == "SpecialMoveVolumeBase" then
+            return pc.volumes or {}
         elseif class == "PBZAbilityNodesComponent" then
             return pc.tree and { pc.tree } or {}
         end
