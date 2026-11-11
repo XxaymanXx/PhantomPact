@@ -16,8 +16,27 @@ played through all ten regions of the story with player 2's presses injected, an
 5. MULTIPLAYER in that panel goes back to online co-op, from the next start of the game: it sets `Role = Off`, and F5 works again.
    Local co-op can't be turned off live, since taking player 2 away at the wrong moment has killed the game's menus.
 
-Player 2 shares player 1's save, backpack, dust and gourd count, and rests at the same bells. Player 2 cannot die for
-good: at zero health they are down for a while and come back beside player 1.
+Player 2 shares player 1's save, backpack, dust and gourd count, and rests at the same bells, but wears and holds their
+own: see "Player 2's own gear" below. Player 2 cannot die for good: at zero health they are down for a while and come back
+beside player 1.
+
+## Player 2's own gear
+
+Options on pad 2 opens the game's own menu as player 2's, with a PLAYER 2 badge in its top left corner. The backpack in it is
+the shared one, as on a couch; what player 2 puts on there is theirs alone:
+
+- **Outfit** (CHARACTER, Appearance), with the headwear shown or hidden.
+- **Main weapons and Phantom Edges**, and the one in hand. Their moves are that weapon's, and their hits land as it does, at
+  the shared backpack's level of that weapon.
+- **Talismans.** One talisman has one wearer: one player 2 puts on that player 1 was wearing becomes player 2's, and the
+  other way round.
+
+Medicines stay the shared slots (player 2's gourd has charges of their own). Until player 2 first opens their menu, they wear and
+hold what player 1 does, as before. What they chose is kept in `localcoop_gear.txt` in the mod's folder and comes back at the
+next start; a weapon, outfit or talisman the loaded save doesn't have is left out. While player 2's menu is open the game
+doesn't save, so player 2's set never reaches the save; saving goes on as usual once it closes. A story moment that sets the
+weapons itself (the prologue's bare hands) sets them for both players. The menu opens on player 1's screen (or monitor), as
+the game's menus do.
 
 ## Two monitors
 
@@ -78,7 +97,7 @@ for those and performs the action with player 2's own body:
 | Circle (B) | Use: chest, rubbish pile, door, lever, bell, loot card confirm |
 | L2 | The weapon's combat art, spending their own Ultimate charge, as for player 1 |
 | D-pad down | Drink the gourd: heals player 2 and uses player 2's own charges |
-| Options | Pause menu (the one menu is shared; whichever pad opened it drives it) |
+| Options | Player 2's own menu: the game's pause menu with a PLAYER 2 badge, where what's put on is player 2's (both pads drive it) |
 | Select / touchpad | Quest-direction sense; it reports on both screens |
 
 Player 2's prompts are the game's own: the same widget and animations as player 1's, set down on the thing itself in their half
@@ -108,6 +127,12 @@ down, the game's death card plays in their half alone, and they get back up off 
   dry still drinks their own charge.
 - **The bell menu and pause menu** listen on player 1's screen. The mod makes them full screen, routes both pads to
   them, and hands the pads back when they close.
+- **The backpack's equipment is one set**, and the game sends every change of it to every Soul: player 2 used to copy player 1's
+  gear because of that. Player 2's own (loadout.lua) is put back on their body after each change, and on each new body. Their
+  menu is the game's, with their set put in the backpack the game's own way (as a PvP match does) and player 1's controller
+  pointed at their body while it's open, so the menu's outfit page and talismans are theirs; saving waits meanwhile, and
+  player 1's set goes back as it closes. A talisman's effects land on that body as it's put on, and are put on it by hand
+  after. Their weapon switch also set the backpack's weapon in hand, which the save keeps: player 1's goes back there.
 - **Enemy optimization** (the NPC optimizer) measures distance from player 1. Enemies far from player 1 are set
   flying, ticked slowly and hidden. The mod switches optimization off within 80 m of player 2 and puts those enemies
   back on their feet, visible and ticking normally.

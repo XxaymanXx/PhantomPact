@@ -1477,6 +1477,7 @@ return function(api)
 
     -- Back to one player: full screen, the normal camera, and the game's own controls for player 1.
     local function goSolo()
+        pcall(api.loadout.leave, 2, "single player")        -- (their own menu ends, player 1's set back in the bag)
         local pc, p1 = getPlayer1()
         paused = true
         -- Player 2 stays as a local player, with no Soul and no screen: really removing them makes the game delete the UI
@@ -1779,6 +1780,12 @@ return function(api)
             menuOpen = menu             -- (single player: there's no split screen to put back, nor pads to share out)
         elseif menu ~= menuOpen then
             menuOpen = menu
+            -- (Player 2's own menu: up now, so its close ends it; closed, their choices are kept and player 1's set goes back.)
+            if menu then
+                pcall(api.loadout.opened)
+            else
+                pcall(api.loadout.finish, "closed")
+            end
             api.gs():SetForceDisableSplitscreen(pc, V.fullWidth())      -- (over two monitors, on player 1's monitor)
             holdForScreen(menu)
             if menu then
@@ -3241,11 +3248,18 @@ return function(api)
         end
         local pressed = p2pc:IsInputKeyDown({ KeyName = FName("Gamepad_Special_Right") })
         if pressed and not optionsHeld then
+            -- (Player 2's own menu: their set in the bag and their body the menu's, loadout.lua, else it opens shared.)
+            local own = select(2, pcall(api.loadout.begin, 2)) == true
+            local asked = false
             local action = StaticFindObject(MENU_ACTION)
             for _, s in ipairs(FindAllOf("EnhancedInputLocalPlayerSubsystem") or {}) do
                 if valid(action) and s:GetOuter().ControllerId == pc.Player.ControllerId then
                     s:InjectInputVectorForAction(action, { X = 1, Y = 0, Z = 0 }, {}, {})
+                    asked = true
                 end
+            end
+            if own and not asked then
+                pcall(api.loadout.finish, "no menu to ask for")
             end
         end
         optionsHeld = pressed
@@ -3294,6 +3308,8 @@ return function(api)
         pcall(function()
             RegisterLoadMapPreHook(function()
                 local ok, err = pcall(function()
+                    -- (Player 2's own menu ends first: player 1's set back in the bag, their controller back on their body.)
+                    pcall(api.loadout.leave, 2, "a map load")
                     local had = valid(state.p2Controller)
                     if valid(state.p2Pawn) then
                         local _, p1 = getPlayer1()
@@ -3352,6 +3368,13 @@ return function(api)
         LoopInGameThreadWithDelay(BAR_MS, function()
             local ok, err = pcall(function()
                 pcall(giveControlsBack)
+                -- Player 2's own gear back on them after the bag dressed everyone (loadout.lua). Held while their body is
+                -- out of play (a scene, a menu, the boat, down, single player).
+                local okG, errG = pcall(api.loadout.keep, 2, paused or inScene or menuOpen or V.sailing or p2DownSince ~= nil)
+                if not okG and errG ~= V.lastGearError then
+                    V.lastGearError = errG
+                    log("Player 2's gear: " .. tostring(errG))
+                end
                 updateBar()
                 updateBossBar(getPlayer1())
                 updatePrompt()
