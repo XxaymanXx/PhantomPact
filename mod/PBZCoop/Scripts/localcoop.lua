@@ -860,16 +860,21 @@ return function(api)
             ai:OnActorEnterDomain(p1)
             return
         end
-        local told = 0
-        ai.SpawnedAIScripts:ForEach(function(_, s)
-            local script = s:get()
-            if valid(script) then
-                local who = V.AWARE_OF_P2[script:GetClass():GetFName():ToString()] and p2 or p1
-                if pcall(function() script:OnActorEnterDomain(who) end) then
-                    told = told + 1
+        local scripts, told = {}, 0
+        pcall(function()
+            ai.SpawnedAIScripts:ForEach(function(_, s)
+                local script = s:get()
+                if valid(script) then
+                    scripts[#scripts + 1] = script
                 end
-            end
+            end)
         end)
+        for _, script in ipairs(scripts) do      -- (gathered first: a script told may add to the list)
+            local who = V.AWARE_OF_P2[script:GetClass():GetFName():ToString()] and p2 or p1
+            if pcall(function() script:OnActorEnterDomain(who) end) then
+                told = told + 1
+            end
+        end
         if told == 0 then
             ai:OnActorEnterDomain(p1)       -- (no scripts to tell: the component, as before)
         end
@@ -1086,25 +1091,29 @@ return function(api)
     -- game kept putting "the player" on its list, every few seconds (bench, 11-12, a spear thug and its rock thrower fighting
     -- player 2: player 1, 77 m off at the bell, on the list 3 s in, then again and again, and in a fight they never saw). For that
     -- enemy player 1 is neither side (FactionComponent's override, its own side only) while it fights player 2 and player 1 is far,
-    -- the game's again as soon as player 1 comes near or the fight's over. Off its list too, and if it was after player 1 it looks
-    -- again, with player 2 on its list. (Nothing is kept: the enemy's own answer says whether it's set.)
+    -- the game's again as soon as player 1 comes near or the fight's over; and off its list, looked at every pass. If it was after
+    -- player 1 it looks again, with player 2 on its list. The enemies set so are known by address (V.p1Out), so that only those
+    -- are put back: one neither side to player 1 of itself is the game's to leave.
     V.FAR_P1_CM = 4000
-    V.NEUTRAL = 1
+    V.NEUTRAL = 1               -- (ETeamAttitude: 0 friendly, 1 neutral, 2 hostile; read back as 1 after the override, bench)
+    V.p1Out = {}                -- enemy address -> true while it's left player 1 out of it
     function V.farPlayer1(e, p1, d, withP2)
-        local side = e:GetComponentByClass(StaticFindObject("/Script/SGameCombatSystem.FactionComponent"))
-        if not valid(side) then
-            return
-        end
-        local set = side:GetFactionRelation(p1) == V.NEUTRAL
+        local addr = e:GetAddress()
         local want = withP2 and d ~= nil and d > V.FAR_P1_CM
-        if want == set then
-            return
-        end
+        local side = e:GetComponentByClass(StaticFindObject("/Script/SGameCombatSystem.FactionComponent"))
         if not want then
-            side:ClearFactionRelationOverride(p1)
+            if V.p1Out[addr] then
+                V.p1Out[addr] = nil
+                if valid(side) then
+                    side:ClearFactionRelationOverride(p1)
+                end
+            end
             return
         end
-        side:SetFactionRelationOverride(p1, V.NEUTRAL, false)
+        if not V.p1Out[addr] and valid(side) then
+            side:SetFactionRelationOverride(p1, V.NEUTRAL, false)
+            V.p1Out[addr] = true
+        end
         local hm, listed = e.BP_PBZHatredManagerComponent, false
         hm.HatredList:ForEach(function(_, el)
             local a = el:get()
@@ -1117,25 +1126,32 @@ return function(api)
         local out = {}
         pcall(function() StaticFindObject("/Script/SGameAI.Default__SGameAIFunctionLibrary"):GetTargetActor(e.Controller, out) end)
         if valid(out.Target) and out.Target:GetAddress() == p1:GetAddress() then
-            e.Controller.SGameAIComponent.SpawnedAIScripts:ForEach(function(_, s)
-                local script = s:get()
+            local picker = nil
+            e.Controller.SGameAIComponent.SpawnedAIScripts:ForEach(function(_, sc)
+                local script = sc:get()
                 if valid(script) and script:GetClass():GetFName():ToString() == "AIScript_TargetSelector_C" then
-                    script.LastSwitchTime = 0
-                    script:TrySwitchTarget()
+                    picker = script
                 end
             end)
+            if picker then
+                picker.LastSwitchTime = 0
+                picker:TrySwitchTarget()
+            end
         end
-        log(string.format("%s leaves player 1 out of it (%.0f m off).", e:GetClass():GetFName():ToString():gsub("^BP_Monster_", ""):gsub("_C$", ""), d / 100))
+        if os.clock() - (V.p1OutSaid or -1e9) > 30 then       -- (said once in a while: the game may put them back each pass)
+            V.p1OutSaid = os.clock()
+            log(string.format("%s leaves player 1 out of it (%.0f m off).", e:GetClass():GetFName():ToString():gsub("^BP_Monster_", ""):gsub("_C$", ""), d / 100))
+        end
     end
-    -- Player 2 leaving play: every enemy as the game had it towards player 1 again.
+    -- Player 2 out of play, down, or on the boat (noticePlayer2's pass doesn't run then): every enemy set so as the game had it.
     function V.player1Back()
         local _, p1 = getPlayer1()
-        if not valid(p1) then
-            return
+        if valid(p1) and next(V.p1Out) ~= nil then
+            for _, e in ipairs(game.listEnemies(true)) do
+                pcall(V.farPlayer1, e, p1, nil, false)
+            end
         end
-        for _, e in ipairs(game.listEnemies(true)) do
-            pcall(V.farPlayer1, e, p1, nil, false)
-        end
+        V.p1Out = {}
     end
 
     -- Player 2 in or out of a fight (want), as their Soul is now: down, dead or out of play, out.
@@ -1148,7 +1164,7 @@ return function(api)
         if V.inCombatBody ~= p2:GetAddress() then
             V.inCombatOn, V.inCombatBody = false, p2:GetAddress()      -- (a new Soul starts out of it)
         end
-        want = want and not (paused or p2DownSince or game.isDead(p2))
+        want = want and not (paused or p2DownSince or V.sailing or game.isDead(p2))
         if want == V.inCombatOn then
             return
         end
@@ -3246,15 +3262,23 @@ return function(api)
         end
         return kindC, targetC
     end
+    -- (Looked at as the wanted set changes, and once a second besides: a controller taking a body can clear them. A set not
+    -- found is looked for again in 10 s, not every tick.)
+    V.PROMPT_SETS_EVERY_S, V.promptWant, V.promptAt, V.promptMissAt = 1.0, false, 0, {}
     function V.promptSets(kind)
+        local want = kind and ((kind == "volume" or kind == "gap") and "climb" or "use") or nil
+        local now = os.clock()
+        if want == V.promptWant and now < V.promptAt then
+            return
+        end
+        V.promptWant, V.promptAt = want, now + V.PROMPT_SETS_EVERY_S
         local s = inputSubsystemOf(state.p2Controller)
         if not s then
             return
         end
-        local want = kind and ((kind == "volume" or kind == "gap") and "climb" or "use") or nil
         for key, name in pairs(V.PROMPT_SETS) do
             local c = V.promptSetObjects[name]
-            if not valid(c) then
+            if not valid(c) and now >= (V.promptMissAt[name] or 0) then
                 c = nil
                 for _, x in ipairs(FindAllOf("InputMappingContext") or {}) do
                     if x:GetFName():ToString() == name then
@@ -3262,7 +3286,9 @@ return function(api)
                     end
                 end
                 V.promptSetObjects[name] = c
+                V.promptMissAt[name] = c == nil and now + 10 or nil
             end
+            c = valid(c) and c or nil
             if c then
                 local has = s:HasMappingContext(c, {})
                 if key == want and not has then
@@ -3552,7 +3578,12 @@ return function(api)
     V.SENSE_SET, V.SENSE_PRIORITY, V.MAP_ACTION = "/Game/PBZContent/Input/IMC_OnlySense.IMC_OnlySense", 100,
         "/Game/PBZContent/Input/InputActions/IA_Map.IA_Map"
     V.TAP_S = 0.4               -- the game's own: longer is the sense (PBZInputTriggerHoldNonTouchpadGamepad 0.40)
+    V.senseAt = 0
     function V.mapAsTheirs()
+        if os.clock() < V.senseAt then          -- (once a second: a controller taking a body can clear it)
+            return
+        end
+        V.senseAt = os.clock() + 1.0
         local s = inputSubsystemOf(state.p2Controller)
         local set = StaticFindObject(V.SENSE_SET)
         if s and valid(set) and not s:HasMappingContext(set, {}) then
@@ -3560,7 +3591,14 @@ return function(api)
         end
     end
     function V.openMapAsTheirs(pc)
+        -- (Theirs or none: shared, its tabs would put what's chosen on player 1. Not while down either.)
+        if p2DownSince then
+            return
+        end
         local own = select(2, pcall(api.loadout.begin, 2)) == true
+        if not own then
+            return
+        end
         local action, asked = StaticFindObject(V.MAP_ACTION), false
         for _, s in ipairs(FindAllOf("EnhancedInputLocalPlayerSubsystem") or {}) do
             if valid(action) and s:GetOuter().ControllerId == pc.Player.ControllerId then
@@ -3568,7 +3606,7 @@ return function(api)
                 asked = true
             end
         end
-        if own and not asked then
+        if not asked then
             pcall(api.loadout.finish, "no map to ask for")
         end
     end
@@ -3600,7 +3638,8 @@ return function(api)
                 climbHeld = p2pc:IsInputKeyDown({ KeyName = FName("Gamepad_FaceButton_Bottom") })
                 useHeld = p2pc:IsInputKeyDown({ KeyName = FName("Gamepad_FaceButton_Right") })
             end
-            V.selectDownAt = nil        -- (a Select pressed in a menu is the menu's)
+            -- (A Select pressed in a menu is the menu's, and still held as it closes, no tap: -1, released as it is.)
+            V.selectDownAt = valid(p2pc) and p2pc:IsInputKeyDown({ KeyName = FName("Gamepad_Special_Left") }) and -1 or nil
             return
         end
         local _, p1 = getPlayer1()
@@ -3632,8 +3671,9 @@ return function(api)
             V.selectDownAt = os.clock()
         elseif not sel and V.selectDownAt then
             local held = os.clock() - V.selectDownAt
+            local fromMenu = V.selectDownAt < 0
             V.selectDownAt = nil
-            if held < V.TAP_S then
+            if held < V.TAP_S and not fromMenu then
                 pcall(V.openMapAsTheirs, pc)
             end
         end
@@ -3752,9 +3792,15 @@ return function(api)
                 updateBar()
                 updateBossBar(getPlayer1())
                 updatePrompt()
-                -- (Out of a fight at once when down or out of play; in it again from noticePlayer2's next pass.)
-                if V.inCombatOn and (paused or p2DownSince) then
-                    pcall(V.setInCombat, false)
+                -- (Out of a fight at once when down, out of play or on the boat, where noticePlayer2's pass doesn't run; in it
+                -- again from its next pass. And player 1 back to every enemy left without them.)
+                if paused or p2DownSince or V.sailing then
+                    if V.inCombatOn then
+                        pcall(V.setInCombat, false)
+                    end
+                    if next(V.p1Out) ~= nil then
+                        pcall(V.player1Back)
+                    end
                 end
                 if not paused then
                     pcall(V.mapAsTheirs)

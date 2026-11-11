@@ -6458,8 +6458,16 @@ local function localButtons()
     m:run(1.5)
     check(mpc.inputSets[1][mpc.senseSet] == 100 and mpc.inputSets[0][mpc.senseSet] == nil, "the sense-only set on player 2's pad, not player 1's")
     local n0 = #mpc.injected
+    -- (Player 2's own menu as loadout.lua starts it, which the fake game's bag doesn't go as far as.)
+    local loadout = mpc.env.PBZ.loadout
+    local begin = loadout.begin
+    loadout.begin = function() return false end
     Session.press2(m, "Gamepad_Special_Left")
-    check(#mpc.injected == n0 + 1 and mpc.injected[#mpc.injected] == "IA_Map", "a tap of Select asks for the map")
+    check(#mpc.injected == n0, "a tap when their own menu can't start: no map, as a shared one would put their choices on player 1")
+    loadout.begin = function() return true end
+    Session.press2(m, "Gamepad_Special_Left")
+    check(#mpc.injected == n0 + 1 and mpc.injected[#mpc.injected] == "IA_Map", "a tap of Select asks for the map, their own menu started")
+    loadout.begin = begin
     mpc.keys2["Gamepad_Special_Left"] = true
     m:run(0.6)
     mpc.keys2["Gamepad_Special_Left"] = false
@@ -6568,6 +6576,9 @@ local function localFight()
     local rel = function() return field(thug, "faction"):GetFactionRelation(p1f) end
     check(rel() == 1 and not on(p1f) and on(p2f), "a thug fighting player 2 with player 1 60 m off: player 1 neither side to it, and off its list")
     check(inFight(p1f) == 0, "player 1 isn't in a fight they never saw")
+    thm:AddActorToHatredList(p1f, {})
+    f:run(1.2)
+    check(not on(p1f) and rel() == 1, "the game putting them back on its list: off again at the next look")
     Fake.put(p1f, "loc", { X = 5000.0, Y = 0.0, Z = 100.0 })
     f:run(1.2)
     check(rel() == 2, "player 1 near: the game's own again")
