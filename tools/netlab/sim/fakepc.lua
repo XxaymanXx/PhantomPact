@@ -609,6 +609,15 @@ function Fake.enemy(pc, id, class, x, y, z, hp, posture, boss)
     local controller = object(pc, "AIController", { BrainComponent = brain,
         SGameAIComponent = { SpawnedAIScripts = list({ picker }) }, Blackboard = object(pc, "Blackboard") })
     put(e, "Controller", controller)
+    -- Its side: hostile to players (2) unless overridden for one of them.
+    local side = object(pc, "FactionComponent", { overrides = {} })
+    defs(pc, side, {
+        GetFactionRelation = function(self, other) return rawget(self, "__fields").overrides[other] or 2 end,
+        SetFactionRelationOverride = function(self, other, relation) rawget(self, "__fields").overrides[other] = relation end,
+        ClearFactionRelationOverride = function(self, other) rawget(self, "__fields").overrides[other] = nil end,
+    })
+    put(e, "faction", side)
+    put(e, "GetComponentByClass", function(_, class) return (class == pc.factionClass and side) or nil end)
     defs(pc, e, {
         GetController = function() return controller end,
         Kill = function(self, reason)
@@ -1325,8 +1334,13 @@ function Fake.new(id, scripts, ini, link)
         put(p, "look", look)
         -- (Its camera: the combat mode wants the body in a fight, the one tag.)
         local cam = object(pc, "NBCameraComponent", { CombatModeTag = { RequireTags = { GameplayTags = list({ { TagName = name("CharacterState.InCombat") } }) } } })
+        -- (And its side in the game's factions, a player's.)
+        local side = object(pc, "FactionComponent", { faction = "Faction.Player" })
+        put(side, "SetFaction", function(self, tag) put(self, "faction", tag.TagName:ToString()) end)
+        put(p, "faction", side)
         put(p, "GetComponentByClass", function(_, class)
-            return (class == pc.interactClass and ic) or (class == pc.appearanceClass and look) or (class == pc.cameraClass and cam) or nil
+            return (class == pc.interactClass and ic) or (class == pc.appearanceClass and look) or (class == pc.cameraClass and cam)
+                or (class == pc.factionClass and side) or nil
         end)
         local points = {}
         local pointPairs = {}
@@ -1905,6 +1919,8 @@ function Fake.new(id, scripts, ini, link)
     found["/Script/ProjectPBZ.PBZAppearanceComponent"] = pc.appearanceClass
     pc.cameraClass = pc.cameraClass or object(pc, "Class")
     found["/Script/NBCamera.NBCameraComponent"] = pc.cameraClass
+    pc.factionClass = pc.factionClass or object(pc, "Class")
+    found["/Script/SGameCombatSystem.FactionComponent"] = pc.factionClass
     -- Effects: spawned on a body (the ghost's), and what was spawned where.
     for _, k in ipairs({ "/Script/Niagara.NiagaraComponent", "/Script/Niagara.NiagaraSystem", "/Script/Engine.Character" }) do
         found[k] = object(pc, "Class")

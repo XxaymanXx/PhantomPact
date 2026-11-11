@@ -109,7 +109,8 @@ player 2: their pad stays theirs.
 
 In a fight player 2 is counted in it as player 1 is (the game's own in-combat state, while an enemy fighting them has them on its
 list): their camera goes to the game's combat view with its soft focus on the enemy, their body to its fighting stance. Down, they're
-out of the fight: enemies turn to player 1 until they're back.
+out of the fight: enemies turn to player 1 until they're back, and their body lying there is nobody's target. A fight of player 2's
+far from player 1 (over 40 m) is theirs alone: the enemies in it leave player 1 out of it, as they would a player they never saw.
 
 Player 2 has the game's own HUD in their half too: health and ShaChi bars, gourd, weapons, buffs, a boss's bar, arrows to enemies
 out of view, and execution points on the enemies they can finish, all their own. The gourd on it shows their own charges. Going

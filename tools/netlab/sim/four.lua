@@ -6529,7 +6529,40 @@ local function localFight()
     check(field(field(body, "BP_PBZHatredManagerComponent"), "CanBeHatredNow") == false, "and can't be put back on it while down")
     check(listed[dpc.pawn] == true, "player 1 is on it, so it has someone to turn to")
     check(inFight(body) == 0, "and they're out of the fight")
+    check(field(field(body, "faction"), "faction") == "Faction.Environment", "their body on the ground is the scenery's side: no enemy's eyes put it back")
     allErrors(d)
+
+    -- A thug fighting player 2 far from player 1 leaves player 1 out of it; with player 1 near, or the fight over, as the game has it.
+    local f, fpc, fstate = localGame()
+    f:run(1.5)
+    local p2f, p1f = fstate.p2Pawn, fpc.pawn
+    local thug = Session.enemyOn(fpc, "thug1")
+    Fake.put(thug, "loc", { X = 6000.0, Y = 0.0, Z = 100.0 })
+    Fake.put(p2f, "loc", { X = 5900.0, Y = 0.0, Z = 100.0 })
+    local thm = field(thug, "BP_PBZHatredManagerComponent")
+    thm:AddActorToHatredList(p2f, {})
+    thm:AddActorToHatredList(p1f, {})
+    rawset(thug, "__tags", { ["AI.State.Combat"] = 1 })
+    f:run(1.2)
+    local on = function(who)
+        for _, a in ipairs(rawget(thm, "__fields").HatredList.items) do
+            if a == who then return true end
+        end
+        return false
+    end
+    local rel = function() return field(thug, "faction"):GetFactionRelation(p1f) end
+    check(rel() == 1 and not on(p1f) and on(p2f), "a thug fighting player 2 with player 1 60 m off: player 1 neither side to it, and off its list")
+    check(inFight(p1f) == 0, "player 1 isn't in a fight they never saw")
+    Fake.put(p1f, "loc", { X = 5000.0, Y = 0.0, Z = 100.0 })
+    f:run(1.2)
+    check(rel() == 2, "player 1 near: the game's own again")
+    Fake.put(p1f, "loc", { X = 0.0, Y = 0.0, Z = 100.0 })
+    f:run(1.2)
+    check(rel() == 1, "far again: out of it again")
+    rawset(thug, "__tags", nil)
+    f:run(1.2)
+    check(rel() == 2, "and the fight over, the game's own")
+    allErrors(f)
 end
 
 local function localOptions()

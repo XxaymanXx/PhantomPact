@@ -559,6 +559,8 @@ return function(api)
         if valid(state.p2Pawn) then
             passDust(p1, state.p2Pawn)
             pcall(V.keepGauge, state.p2Pawn)
+            -- (Off every enemy's list before it goes: a list kept a body gone for good, whatever was after it left with no one.)
+            pcall(game.ghostInFight, state.p2Pawn, false, game.listEnemies(true))
             state.p2Pawn:K2_DestroyActor()
         end
         state.p2Pawn = nil
@@ -848,11 +850,42 @@ return function(api)
     -- ones that spawn later get it too. From then on their own eyes and hatred work on player 2 as on player 1.
     V.ARM_EVERY_S = 10.0
     V.armed = {}                -- enemy address -> os.clock() of the last enter event
+    -- Script by script, unless player 1 is in the area too (p1Here: then the component tells them all of player 1, the game's own
+    -- way). AIScript_UpdateAwareness, which keeps who's in the area to be seen and heard (InMobDomainEnemyActorsCache), is told of
+    -- player 2; the rest (AIScript_PBZMisc's invulnerability until a fight, for one) of player 1, whom they wait for. (Told of player
+    -- 1 and then put right, awareness had already shared a fight on player 1 with the enemy beside it.)
+    V.AWARE_OF_P2 = { AIScript_UpdateAwareness_C = true }
+    function V.armScripts(ai, p1, p2, p1Here)
+        if p1Here then
+            ai:OnActorEnterDomain(p1)
+            return
+        end
+        local told = 0
+        ai.SpawnedAIScripts:ForEach(function(_, s)
+            local script = s:get()
+            if valid(script) then
+                local who = V.AWARE_OF_P2[script:GetClass():GetFName():ToString()] and p2 or p1
+                if pcall(function() script:OnActorEnterDomain(who) end) then
+                    told = told + 1
+                end
+            end
+        end)
+        if told == 0 then
+            ai:OnActorEnterDomain(p1)       -- (no scripts to tell: the component, as before)
+        end
+    end
     local function armCombatAI(d, p1, p2)
         if not valid(p1) then
             return
         end
         local now = os.clock()
+        local p1Here = false
+        pcall(function()
+            d.ActorsInMobDomain:ForEach(function(_, el)
+                local a = el:get()
+                p1Here = p1Here or (valid(a) and a:GetAddress() == p1:GetAddress())
+            end)
+        end)
         pcall(function()
             d.ActorsInMobDomain:ForEach(function(_, el)
                 local a = el:get()
@@ -863,7 +896,10 @@ return function(api)
                         V.armed[addr] = now
                         local ai = valid(a.Controller) and componentOf(a.Controller, "BP_SGameAIComponent_C") or nil
                         if ai then
-                            pcall(function() ai:OnActorEnterDomain(p1) end)
+                            -- Awareness hears of player 2, who did come (V.armScripts). Told of player 1, as the whole component
+                            -- told every script, it put player 1 on the enemy's list from 70 m off, in a fight of player 2's
+                            -- alone (bench, 11-12): player 1 was in a fight at the bell, and the enemy turned to them for 2 s.
+                            pcall(V.armScripts, ai, p1, p2, p1Here)
                         end
                     end
                 end
@@ -950,8 +986,10 @@ return function(api)
                 if not q.X or (q.X == 0 and q.Y == 0) then
                     return
                 end
-                -- (In a fight with player 2, however far: V.setInCombat.)
-                fights = fights or select(2, pcall(V.fightsPlayer2, e, p2)) == true
+                -- (In a fight with player 2, however far: V.setInCombat. And player 1 left out of it from afar: V.farPlayer1.)
+                local withP2 = select(2, pcall(V.fightsPlayer2, e, p2)) == true
+                fights = fights or withP2
+                pcall(V.farPlayer1, e, p1, distance(q, p1:K2_GetActorLocation()), withP2)
                 local d = distance(q, here)
                 if d > V.NOTICE_FRONT_CM then
                     V.inFace[addr] = nil
@@ -1044,6 +1082,62 @@ return function(api)
         end)
         return hates
     end
+    -- An enemy fighting player 2 with player 1 far off (beyond its eyes and ears, V.FAR_P1_CM) leaves player 1 out of it: the
+    -- game kept putting "the player" on its list, every few seconds (bench, 11-12, a spear thug and its rock thrower fighting
+    -- player 2: player 1, 77 m off at the bell, on the list 3 s in, then again and again, and in a fight they never saw). For that
+    -- enemy player 1 is neither side (FactionComponent's override, its own side only) while it fights player 2 and player 1 is far,
+    -- the game's again as soon as player 1 comes near or the fight's over. Off its list too, and if it was after player 1 it looks
+    -- again, with player 2 on its list. (Nothing is kept: the enemy's own answer says whether it's set.)
+    V.FAR_P1_CM = 4000
+    V.NEUTRAL = 1
+    function V.farPlayer1(e, p1, d, withP2)
+        local side = e:GetComponentByClass(StaticFindObject("/Script/SGameCombatSystem.FactionComponent"))
+        if not valid(side) then
+            return
+        end
+        local set = side:GetFactionRelation(p1) == V.NEUTRAL
+        local want = withP2 and d ~= nil and d > V.FAR_P1_CM
+        if want == set then
+            return
+        end
+        if not want then
+            side:ClearFactionRelationOverride(p1)
+            return
+        end
+        side:SetFactionRelationOverride(p1, V.NEUTRAL, false)
+        local hm, listed = e.BP_PBZHatredManagerComponent, false
+        hm.HatredList:ForEach(function(_, el)
+            local a = el:get()
+            listed = listed or (valid(a) and a:GetAddress() == p1:GetAddress())
+        end)
+        if not listed then
+            return
+        end
+        hm:RemoveActorFromHatredList(p1)
+        local out = {}
+        pcall(function() StaticFindObject("/Script/SGameAI.Default__SGameAIFunctionLibrary"):GetTargetActor(e.Controller, out) end)
+        if valid(out.Target) and out.Target:GetAddress() == p1:GetAddress() then
+            e.Controller.SGameAIComponent.SpawnedAIScripts:ForEach(function(_, s)
+                local script = s:get()
+                if valid(script) and script:GetClass():GetFName():ToString() == "AIScript_TargetSelector_C" then
+                    script.LastSwitchTime = 0
+                    script:TrySwitchTarget()
+                end
+            end)
+        end
+        log(string.format("%s leaves player 1 out of it (%.0f m off).", e:GetClass():GetFName():ToString():gsub("^BP_Monster_", ""):gsub("_C$", ""), d / 100))
+    end
+    -- Player 2 leaving play: every enemy as the game had it towards player 1 again.
+    function V.player1Back()
+        local _, p1 = getPlayer1()
+        if not valid(p1) then
+            return
+        end
+        for _, e in ipairs(game.listEnemies(true)) do
+            pcall(V.farPlayer1, e, p1, nil, false)
+        end
+    end
+
     -- Player 2 in or out of a fight (want), as their Soul is now: down, dead or out of play, out.
     function V.setInCombat(want)
         local p2 = state.p2Pawn
@@ -1416,6 +1510,14 @@ return function(api)
                 -- that was after them turns to player 1. (Bench, 11-12: a spear thug spent the whole 6 s on the body on the ground,
                 -- three special attacks it couldn't die of, and turned only when the body went.)
                 pcall(game.ghostInFight, p2, false, game.listEnemies(true))
+                -- And no enemy's eyes put them back on: the body lying there is the scenery's side (Faction.Environment, neutral to
+                -- all, player 1 too), as a partner down online is hidden. (Bench, 11-12: a thug's own sight had it back on its list 2 s
+                -- after it was taken off.) The body goes when they're back, and the new one is a player's.
+                pcall(function()
+                    p2:GetComponentByClass(StaticFindObject("/Script/SGameCombatSystem.FactionComponent"))
+                        :SetFaction({ TagName = FName("Faction.Environment") })
+                end)
+                pcall(V.player1Back)        -- (out of the fight, nobody's fighting them: player 1 is everyone's again)
                 pcall(function() p2:DisableInput(state.p2Controller) end)
                 pcall(function() p2.Mesh:SetSimulatePhysics(true) end)      -- no real death, so no death animation
                 V.showDeathCard(pc)
@@ -1599,6 +1701,7 @@ return function(api)
         menuOpen, V.screenHeld, V.sceneHeld = false, nil, nil
         -- (Enemies switched to full detail for player 2 went back to the game's own: they stayed at full cost all solo.)
         V.giveBackOptimizations()
+        pcall(V.player1Back)          -- (and none of them left blind to player 1)
         api.setGamepadOffset(false)
         routePads(nil)
         if valid(pc) then
