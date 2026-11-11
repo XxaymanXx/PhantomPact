@@ -6343,6 +6343,20 @@ local function localScreen()
     check(field(hpc.playerHud, "visibility") == 1, "away over a menu")
     hpc.paused = false
     h:run(0.5)
+    -- Its health reading asks for player 1's (the game's Get Health Percentage): theirs is written in by hand.
+    local _, max2 = hpc.env.PBZ.game.getHealth(hstate.p2Pawn)
+    check(field(hpc.playerHud, "hpShown") == 1, "their bar holds their own health")
+    local shows = field(hpc.playerHud, "shows") or 0
+    Fake.setHealth(hstate.p2Pawn, max2 / 2)
+    h:run(0.2)
+    check(field(hpc.playerHud, "hpShown") == 0.5 and (field(hpc.playerHud, "shows") or 0) == shows + 1, "a hit of theirs takes it down, and shows it")
+    hpc.playerHud:ForSeq_UpdatePlayerHP(1.0)       -- (the game writing player 1's there as player 1 is hit)
+    Fake.setHealth(hpc.pawn, 700)
+    h:run(0.2)
+    check(field(hpc.playerHud, "hpShown") == 0.5, "player 1's hit leaves theirs as it is")
+    Fake.setHealth(hstate.p2Pawn, max2)
+    h:run(0.2)
+    check(field(hpc.playerHud, "hpShown") == 1, "and it fills again")
     local boss = Fake.enemy(hpc, "boss", "BP_Boss_C", 100.0, 0.0, 100.0, 5000, 100, true)
     hpc.env.PBZ.game.bossActors = function() return { boss } end
     h:run(1.5)
@@ -6372,6 +6386,48 @@ local function localScreen()
     h:run(1.5)
     check(field(bar, "removed") == true, "and the bar goes with the fight")
     allErrors(h)
+end
+
+-- Player 2's Options (BUGHUNT 235): the game's menu layer takes every joystick's as player 1's, so main.dll keeps pad 2's
+-- from it while the mod asks, every frame in play, and the mod opens player 2's menu for each press kept.
+local function localOptions()
+    part("player 2's Options, kept by main.dll")
+    local s, pc = localGame()
+    local asks, kept = {}, 0
+    pc.env.PBZ.link.pad_grab = function(device, name)
+        asks[#asks + 1] = { device = device, name = name }
+        return kept, device, name, 0, 0
+    end
+    s:run(0.5)
+    local pad
+    for _, line in ipairs(pc.logs) do
+        pad = line:match("player 2 joy(%d)") or pad
+    end
+    local last = asks[#asks]
+    check(#asks >= 20, "asked every frame")
+    check(last ~= nil and pad ~= nil and last.device == tonumber(pad), "for player 2's own pad")
+    check(last ~= nil and last.name == pc.env.FName("Gamepad_Special_Right"):GetComparisonIndex(), "and its Options")
+    local before = #pc.injected
+    s:run(0.5)
+    check(#pc.injected == before, "nothing asked for while none is kept")
+    kept = kept + 1
+    s:run(0.05)
+    check(#pc.injected == before + 1 and pc.injected[#pc.injected] == "IA_PushGameSystemMenu", "a press kept asks for the menu")
+    s:run(0.5)
+    check(#pc.injected == before + 1, "once")
+    pc.paused = true
+    s:run(0.5)
+    check(asks[#asks].device == -1, "not asked while a menu is up: pad 2's Options is the game's own there")
+    kept = kept + 1
+    s:run(0.2)
+    pc.paused = false
+    s:run(0.5)
+    check(#pc.injected == before + 1, "a press kept as the menu came up opens nothing after it")
+    check(asks[#asks].device == tonumber(pad), "and it's asked for again after the menu")
+    pc.env.PBZ.link.pad_grab = nil
+    Session.press2(s, "Gamepad_Special_Right")
+    check(#pc.injected == before + 2, "an older main.dll: player 2's controller's own Options opens it as before")
+    allErrors(s)
 end
 
 local function localPlay()
@@ -9091,6 +9147,7 @@ return function(print_, scripts)
     localPlay()
     padHold()
     localScreen()
+    localOptions()
     elsewhere()
     travel()
     hatred()

@@ -5,8 +5,14 @@
 // game's code changes.
 //   vp.txt         written by the mod: the GameViewportClient's address, then the setting's. Removed once taken
 //   pad_stay.txt   written by the mod: the input device on player 1 (absent: no routing, the setting is left alone)
+//
+// Player 2's Options. The game's menu layer (CommonUI) answers a joystick's Options before the viewport hands the event
+// on, and as player 1's whichever joystick it came from, so pad 2's opened player 1's menu. While the mod asks for it
+// (pp_pad_grab, every frame), an Options press from player 2's joystick is kept from the game and counted, and the mod
+// opens player 2's own menu (loadout.lua). A kept press's release is kept too, so the game never sees half a press.
 #pragma once
 #include "relay.hpp"
+#include "lua_link.hpp"
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -17,6 +23,10 @@ namespace route {
 constexpr int TABLE_OFFSET = 0x28;                  // FViewportClient inside UGameViewportClient
 constexpr int INPUT_KEY_SLOT = 8, INPUT_AXIS_SLOT = 9;   // found by counting calls on this build
 constexpr int DEVICE_AT = 0x0C;                     // in FInputKeyEventArgs
+constexpr int KEY_AT = 0x10;                        // the same: FKey's name, its index then its number
+constexpr int EVENT_AT = 0x28;                      // the same: EInputEvent
+constexpr int PRESSED = 0, RELEASED = 1;
+constexpr ULONGLONG GRAB_LEASE_MS = 1000;           // a mod that stops asking gives Options back to the game
 constexpr int MAX_TABLE = 256;
 constexpr int MIN_TABLE = INPUT_AXIS_SLOT + 1;
 constexpr DWORD POLL_MS = 40;                       // a menu closing hands the pads back within a frame or two
@@ -29,6 +39,38 @@ volatile LONG xinput_pads = 0;                      // set by pads_thread
 Input real_key = nullptr, real_axis = nullptr;
 volatile LONG stay = -1;
 volatile BYTE* offset_setting = nullptr;
+
+volatile LONG grab_device = -1, grab_name = 0;      // player 2's joystick (-1: none) and the Options key's name index
+volatile LONGLONG grab_asked = 0;                   // GetTickCount64 at the mod's last ask
+volatile LONG kept = 0, holding = -1;               // presses kept so far; the joystick whose press is held back
+volatile LONG last_device = -1, last_name = 0, last_number = 0, last_event = -1;   // the last key event, for the bench
+
+// True if the game mustn't see this event: player 2's Options press while the mod asks for it, or the rest of one.
+bool keep_options(const BYTE* args) {
+    __try {
+        const int device = *reinterpret_cast<const int*>(args + DEVICE_AT);
+        const int name = *reinterpret_cast<const int*>(args + KEY_AT);
+        const int number = *reinterpret_cast<const int*>(args + KEY_AT + 4);
+        const int event = *reinterpret_cast<const int*>(args + EVENT_AT);
+        last_device = device;
+        last_name = name;
+        last_number = number;
+        last_event = event;
+        if (grab_name == 0 || name != grab_name || number != 0 || device < 0) return false;
+        if (event == PRESSED) {
+            if (holding == device) holding = -1;    // (its release was lost, with the pad unplugged)
+            if (device != grab_device || GetTickCount64() - static_cast<ULONGLONG>(grab_asked) > GRAB_LEASE_MS) return false;
+            holding = device;
+            InterlockedIncrement(&kept);
+            return true;
+        }
+        if (holding != device) return false;
+        if (event == RELEASED) holding = -1;
+        return true;                                // (its repeats, then its release)
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
 
 bool is_mover(const BYTE* args) {
     const LONG keep = stay;
@@ -49,6 +91,7 @@ ULONG_PTR call(Input real, void* self, BYTE* args, void* a3, void* a4) {
 }
 
 ULONG_PTR input_key(void* self, BYTE* args, void* a3, void* a4) {
+    if (keep_options(args)) return 1;               // (handled: nothing else sees it)
     return call(real_key, self, args, a3, a4);
 }
 
@@ -133,3 +176,21 @@ DWORD WINAPI watch(void* dir_) {
 }
 
 }  // namespace route
+
+// pp_pad_grab(device, name index): player 2's joystick (-1: none) and the Options key's name, asked every frame while
+// their Options is theirs. Returns the presses kept so far, then the last key event's device, name index, number and kind.
+extern "C" __declspec(dllexport) int pp_pad_grab(void* lua) {
+    using namespace lua_link;
+    const Api* a = api();
+    if (!a) return 0;
+    const State s{lua};
+    if (a->top(&s) >= 2) {
+        const auto device = static_cast<LONG>(a->get_number(&s, 1));
+        route::grab_name = static_cast<LONG>(a->get_number(&s, 1));
+        route::grab_device = device;
+        route::grab_asked = static_cast<LONGLONG>(GetTickCount64());
+    }
+    for (LONG v : {route::kept, route::last_device, route::last_name, route::last_number, route::last_event})
+        a->set_number(&s, static_cast<double>(v));
+    return 5;
+}

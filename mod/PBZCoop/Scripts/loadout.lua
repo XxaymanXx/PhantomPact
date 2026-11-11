@@ -27,6 +27,7 @@ return function(api)
     local OPEN_WAIT_S = 2.0         -- the menu asked for and not up after this: the game said no, and the bag goes back
     local RETRY_S = 10.0            -- a menu's end with no bag to put back is tried again this long, saves held meanwhile
     local WRITE_AFTER_S = 5.0       -- their weapon switch is written to the file this long after
+    local VIEW_S = 2.0              -- player 1's camera is watched this long after their menu closes (viewBack)
     -- GameplayFlow (the quiet autosave) and ModeGate (bells and trips), as a PvP match holds them.
     local HOLD_SAVES = { { "PhantomPactPlayerMenu", 0 }, { "PhantomPactPlayerMenu2", 2 } }
     local FILE = "localcoop_gear.txt"
@@ -42,6 +43,7 @@ return function(api)
     local bodies = {}               -- player number -> { addr, at, effects = the handles of what was put on that body }
     local session = nil             -- a player's own menu while it's up: { n, at, opened, p1 = player 1's set, pushed }
     local nextKeep = 0
+    local viewUntil, viewOf = 0, 0  -- player 1's camera watched till then, against the body their menu pointed at (viewBack)
     local loaded = false
     local badgeWidget, badgeFitted = nil, false
     local menuTipped = false
@@ -194,6 +196,22 @@ return function(api)
         pc.Pawn = body
         pc.Character = body
         state.pointedMenu = on or nil
+    end
+
+    -- The Appearance page moves player 1's camera to its preview point and, leaving, hands it to the body the controller
+    -- points at: player 2's, and then both halves of the screen showed player 2 (the user's pads, 11-11). Back on player 1's
+    -- own from there; any other camera (a scene's) is left alone. addr: the body the menu pointed at.
+    local function viewBack(pc, p1, addr)
+        pcall(function()
+            local view = pc:GetViewTarget()
+            if not valid(view) or view:GetAddress() == p1:GetAddress() then
+                return
+            end
+            if view:GetAddress() == addr or view:GetClass():GetFName():ToString():find("AppearancePreviewPoint", 1, true) then
+                pc:SetViewTargetWithBlend(p1, 0, 0, 0, false)
+                log("Player 1's camera back on them after player 2's menu.")
+            end
+        end)
     end
 
     local function config(path)
@@ -516,6 +534,9 @@ return function(api)
             end
         end
         point(pc, p1, false)
+        viewOf = valid(body) and body:GetAddress() or 0
+        viewUntil = os.clock() + VIEW_S
+        viewBack(pc, p1, viewOf)
         if s.pushed then
             pcall(function() bp:PopEquippedWeapons() end)
         end
@@ -744,6 +765,13 @@ return function(api)
             loadout.read()
         end
         local now = os.clock()
+        if now < viewUntil and not session and not held then
+            -- (The game may hand the camera over a moment after the menu's close: looked at again for a while.)
+            local pc, p1 = api.getPlayer1()
+            if valid(pc) and valid(p1) then
+                viewBack(pc, p1, viewOf)
+            end
+        end
         if session then
             fitBadge()
             if session.ending then

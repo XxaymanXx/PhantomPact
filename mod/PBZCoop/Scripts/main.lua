@@ -472,7 +472,7 @@ local function openLink()
         end
         link[name] = fn
     end
-    for _, name in ipairs({ "layout", "read", "pointer", "paste", "party", "player", "send_to" }) do      -- only ever faster: without them, reads go through UE4SS
+    for _, name in ipairs({ "layout", "read", "pointer", "paste", "party", "player", "send_to", "pad_grab" }) do      -- only ever faster: without them, reads go through UE4SS (pad_grab: pad 2's Options, localcoop.lua)
         link[name] = package.loadlib(dll, "pp_" .. name)
     end
     if not link.now() then

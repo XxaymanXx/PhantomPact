@@ -1959,6 +1959,7 @@ return function(api)
             end
         end
         V.hud, V.hudFor, V.hudUp, V.hudBosses, V.pointers = nil, nil, nil, {}, {}
+        V.hudHp1, V.hudHp2, V.hudShownAt = nil, nil, nil       -- (a new HUD gets their health written in at once)
     end
 
     function V.keepHud(pc, p2)
@@ -1990,6 +1991,7 @@ return function(api)
         local up = not (paused or inScene or menuOpen or p2DownSince or api.panel.open)
         if up ~= V.hudUp then
             V.hudUp = up
+            V.hudUpAt = up and os.clock() or V.hudUpAt      -- (back up: their health written in again, V.hudOwnHealth)
             pcall(function() V.hud:SetVisibility(up and 3 or 1) end)
             for _, bar in pairs(V.hudBosses) do
                 pcall(function() bar:SetVisibility(up and 3 or 1) end)
@@ -1999,6 +2001,28 @@ return function(api)
         if up and p2Charges then
             pcall(function() V.hud.WB_quickslot.BottomMedicineNum:SetText(FText(tostring(p2Charges))) end)
         end
+        if up then
+            V.hudOwnHealth()
+        end
+    end
+
+    -- The HUD's health reading (its Get Health Percentage) asks for "the local player", player 1, whichever HUD asks: player
+    -- 2's bar showed player 1's health, and their hits took nothing off it (the user's pads, 11-11). Theirs goes in by hand at
+    -- each change of theirs, shown as a real change is, and again at each of player 1's (the game may write player 1's there
+    -- too) and as it comes back up.
+    function V.hudOwnHealth()
+        local _, p1 = getPlayer1()
+        local h2, max2 = game.getHealth(state.p2Pawn)
+        local h1 = valid(p1) and game.getHealth(p1) or nil
+        if not (h2 and max2 and max2 > 0) then
+            return
+        end
+        if V.hudHp2 ~= nil and h2 ~= V.hudHp2 then
+            V.hudHealth(state.p2Pawn)
+        elseif V.hudHp2 == nil or h1 ~= V.hudHp1 or V.hudShownAt ~= V.hudUpAt then
+            pcall(function() V.hud:ForSeq_UpdatePlayerHP(h2 / max2) end)
+        end
+        V.hudHp1, V.hudHp2, V.hudShownAt = h1, h2, V.hudUpAt
     end
 
     -- Health written by hand tells nobody, so the bar is told, and comes up as it does for a real change.
@@ -3229,12 +3253,28 @@ return function(api)
         end
     end
 
+    -- Player 2's Options: the game's menu layer takes every joystick's as player 1's, so main.dll keeps pad 2's from it
+    -- (pad_route.hpp) while it's theirs to press, asked again every frame (nil: not now, the game's own). True once for
+    -- each press kept since the last look. Without that call (an older main.dll), the press reaches the game as before.
+    function V.keptOptions(pad)
+        local grab = api.link and api.link.pad_grab
+        if not grab then
+            return false
+        end
+        V.optionsName = V.optionsName or FName("Gamepad_Special_Right"):GetComparisonIndex()
+        local kept = grab(tonumber(tostring(pad or ""):match("^joy(%d)$")) or -1, V.optionsName)
+        local seen = V.optionsKept
+        V.optionsKept = kept
+        return seen ~= nil and kept ~= nil and kept > seen
+    end
+
     local function relayButtons()
         local pc = getPlayer1()
         local p2pc = state.p2Controller
         drawPrompt(pc)
         V.drawDeathCard()
         if paused or inScene or menuOpen or api.panel.open or not (valid(pc) and valid(p2pc) and valid(pc.Player)) then
+            pcall(V.keptOptions, nil)       -- (the game's own Options meanwhile; a press kept just before goes unanswered)
             if valid(p2pc) then
                 optionsHeld = p2pc:IsInputKeyDown({ KeyName = FName("Gamepad_Special_Right") })
                 climbHeld = p2pc:IsInputKeyDown({ KeyName = FName("Gamepad_FaceButton_Bottom") })
@@ -3247,7 +3287,9 @@ return function(api)
             watchHeal(pc, p2pc, p1, state.p2Pawn)
         end
         local pressed = p2pc:IsInputKeyDown({ KeyName = FName("Gamepad_Special_Right") })
-        if pressed and not optionsHeld then
+        -- (Pad 2's press, kept from the game by main.dll; not while their menu is on its way.)
+        local kept = select(2, pcall(V.keptOptions, not api.loadout.inMenu() and config.p2 or nil)) == true
+        if (pressed and not optionsHeld) or kept then
             -- (Player 2's own menu: their set in the bag and their body the menu's, loadout.lua, else it opens shared.)
             local own = select(2, pcall(api.loadout.begin, 2)) == true
             local asked = false

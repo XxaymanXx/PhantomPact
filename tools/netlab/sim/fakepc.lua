@@ -1345,7 +1345,7 @@ function Fake.new(id, scripts, ini, link)
     pc.interactComps, pc.switches, pc.bellMenus, pc.screens, pc.keys2, pc.loadedAt = {}, {}, {}, {}, {}, 0
     pc.afterHooks = {}
     pc.inputActions = {}
-    for _, action in ipairs({ "IA_UseBottomItem" }) do
+    for _, action in ipairs({ "IA_UseBottomItem", "IA_PushGameSystemMenu" }) do
         local a = object(pc, "InputAction")
         rawset(a, "__name", action)
         pc.inputActions[#pc.inputActions + 1] = a
@@ -1659,6 +1659,9 @@ function Fake.new(id, scripts, ini, link)
             put(w, "ShowEnemyIndicator", function(self, e) rawget(self, "__fields").pointers[e] = true end)
             put(w, "RemoveEnemyIndicator", function(self, e) rawget(self, "__fields").pointers[e] = nil end)
             put(w, "pointers", {})
+            -- (Its health bar: the last share it was told, and how often it was told to show.)
+            put(w, "ForSeq_UpdatePlayerHP", function(self, share) put(self, "hpShown", share) end)
+            put(w, "Need To Show", function(self) put(self, "shows", (rawget(self, "__fields").shows or 0) + 1) end)
             pc.playerHud = w
             return w
         end
@@ -1878,6 +1881,12 @@ function Fake.new(id, scripts, ini, link)
         found[path] = object(pc, "AnimSequence", { Skeleton = pc.chestSkeleton })
         rawset(found[path], "__path", path)
     end
+    -- The pause menu's input action, which local co-op asks for on player 1's input for player 2's Options.
+    for _, a in ipairs(pc.inputActions) do
+        if rawget(a, "__name") == "IA_PushGameSystemMenu" then
+            found["/Game/PBZContent/Input/InputActions/IA_PushGameSystemMenu.IA_PushGameSystemMenu"] = a
+        end
+    end
     local statics = object(pc, "StaticObject", {}, true)
     pc.found = found
     pc.montages, pc.weaponConfigs = {}, {}
@@ -2060,8 +2069,15 @@ function Fake.new(id, scripts, ini, link)
         end
         return #out > 0 and out or nil
     end
+    local nameIndex, names = {}, 0      -- (the engine's name table: one number per name, as GetComparisonIndex gives)
     env.FName = function(text)
-        return setmetatable({ TagName = nil }, { __index = { ToString = function() return text end } })
+        if not nameIndex[text] then
+            names = names + 1
+            nameIndex[text] = 7000 + names
+        end
+        local index = nameIndex[text]
+        return setmetatable({ TagName = nil }, { __index = { ToString = function() return text end,
+            GetComparisonIndex = function() return index end } })
     end
     env.FText = function(text) return text end
     env.LoadAsset = function() end
