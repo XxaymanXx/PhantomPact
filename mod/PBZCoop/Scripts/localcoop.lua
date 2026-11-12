@@ -995,6 +995,7 @@ return function(api)
                 local withP2 = select(2, pcall(V.fightsPlayer2, e, p2)) == true
                 fights = fights or withP2
                 pcall(V.farPlayer1, e, p1, distance(q, p1:K2_GetActorLocation()), withP2)
+                pcall(V.barTo, e, p1)        -- (its health bar in the half of whoever it's after)
                 local d = distance(q, here)
                 if d > V.NOTICE_FRONT_CM then
                     V.inFace[addr] = nil
@@ -1152,6 +1153,63 @@ return function(api)
             end
         end
         V.p1Out = {}
+    end
+
+    -- An enemy's health bar over its head (its hpbar WidgetComponent) is drawn in one player's half, its owner's, and the game
+    -- makes every one player 1's: player 2 fought a twin-hoe woman with no bar over her in their half, while player 1's, 9 m off,
+    -- showed it (bench, 11-12). The bar goes to whoever the enemy is after: player 2's half while it's after player 2, player 1's
+    -- otherwise; and every bar back to player 1 with player 2 down, on the boat or out of play (V.barsBack).
+    V.barsOut = false
+    function V.barTo(e, p1)
+        local bar = e.hpbar
+        if not valid(bar) then
+            return
+        end
+        local out = {}
+        pcall(function() StaticFindObject("/Script/SGameAI.Default__SGameAIFunctionLibrary"):GetTargetActor(e.Controller, out) end)
+        local p2 = state.p2Pawn
+        local toP2 = valid(out.Target) and valid(p2) and out.Target:GetAddress() == p2:GetAddress()
+        local pc1 = getPlayer1()
+        local player = toP2 and state.p2Controller.Player or (valid(pc1) and pc1.Player or nil)
+        if not valid(player) then
+            return
+        end
+        local now = bar:GetOwnerPlayer()
+        if not (valid(now) and now:GetAddress() == player:GetAddress()) then
+            bar:SetOwnerPlayer(player)
+        end
+        V.barsOut = V.barsOut or toP2
+        -- (And shown: the game shows it as player 1's blows land, and player 2's never did: a twin-hoe woman at 1540 of 1700
+        -- from player 2's had none, at 1280 from player 1's hers was up. It hides it hidden-in-game (bHiddenInGame), not by
+        -- visibility. Hurt and after player 2, it's up for them; ours goes again when it's after them no more.)
+        local addr = e:GetAddress()
+        local h, m = game.getHealth(e)
+        if toP2 and h and m and h > 0 and h < m and bar.bHiddenInGame then
+            bar:SetHiddenInGame(false, false)
+            V.barUnhid[addr] = true
+        elseif not toP2 and V.barUnhid[addr] then
+            V.barUnhid[addr] = nil
+            bar:SetHiddenInGame(true, false)
+        end
+    end
+    V.barUnhid = {}             -- enemy address -> true while its bar is up by us
+    function V.barsBack()
+        local pc1 = getPlayer1()
+        if valid(pc1) and valid(pc1.Player) and V.barsOut then
+            for _, e in ipairs(game.listEnemies(true)) do
+                pcall(function()
+                    local bar = e.hpbar
+                    local now = valid(bar) and bar:GetOwnerPlayer() or nil
+                    if valid(bar) and not (valid(now) and now:GetAddress() == pc1.Player:GetAddress()) then
+                        bar:SetOwnerPlayer(pc1.Player)
+                    end
+                    if valid(bar) and V.barUnhid[e:GetAddress()] then
+                        bar:SetHiddenInGame(true, false)
+                    end
+                end)
+            end
+        end
+        V.barsOut, V.barUnhid = false, {}
     end
 
     -- Player 2 in or out of a fight (want), as their Soul is now: down, dead or out of play, out.
@@ -3800,6 +3858,9 @@ return function(api)
                     end
                     if next(V.p1Out) ~= nil then
                         pcall(V.player1Back)
+                    end
+                    if V.barsOut then
+                        pcall(V.barsBack)
                     end
                 end
                 if not paused then

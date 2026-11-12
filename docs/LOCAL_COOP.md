@@ -113,7 +113,8 @@ out of the fight: enemies turn to player 1 until they're back, and their body ly
 far from player 1 (over 40 m) is theirs alone: the enemies in it leave player 1 out of it, as they would a player they never saw.
 
 Player 2 has the game's own HUD in their half too: health and ShaChi bars, gourd, weapons, buffs, a boss's bar, arrows to enemies
-out of view, and execution points on the enemies they can finish, all their own. The gourd on it shows their own charges. Going
+out of view, and execution points on the enemies they can finish, all their own. An enemy's health bar over its head is in the
+half of whoever it's after, up once it's hurt. The gourd on it shows their own charges. Going
 down, the game's death card plays in their half alone, and they get back up off the ground beside player 1.
 
 ## What the game hardwires to player 1, and how 1.5.0 bridges it

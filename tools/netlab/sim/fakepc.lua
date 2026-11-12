@@ -584,8 +584,13 @@ end
 function Fake.enemy(pc, id, class, x, y, z, hp, posture, boss)
     local e = Fake.character(pc, class, x, y, z, hp, posture)
     rawset(e, "__name", id .. "_actor")
-    local bar = object(pc, "WidgetComponent", { shown = true })
-    defs(pc, bar, { SetVisibility = function(self, on) put(self, "shown", on) end, GetUserWidgetObject = function() return nil end })
+    local bar = object(pc, "WidgetComponent", { shown = true, ownerPlayer = nil })
+    defs(pc, bar, { SetVisibility = function(self, on) put(self, "shown", on) end, GetUserWidgetObject = function() return nil end,
+        GetOwnerPlayer = function(self) return rawget(self, "__fields").ownerPlayer end,
+        SetOwnerPlayer = function(self, player) put(self, "ownerPlayer", player) end,
+        IsVisible = function(self) return rawget(self, "__fields").shown end,
+        SetHiddenInGame = function(self, hidden) put(self, "bHiddenInGame", hidden) end })
+    put(bar, "bHiddenInGame", true)        -- (as the game has it until player 1's blows land)
     put(e, "hpbar", bar)
     local f = rawget(e, "__fields")
     put(e, "BIsMonster", true)
