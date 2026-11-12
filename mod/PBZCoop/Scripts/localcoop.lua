@@ -995,7 +995,7 @@ return function(api)
                 local withP2 = select(2, pcall(V.fightsPlayer2, e, p2)) == true
                 fights = fights or withP2
                 pcall(V.farPlayer1, e, p1, distance(q, p1:K2_GetActorLocation()), withP2)
-                pcall(V.barTo, e, p1)        -- (its health bar in the half of whoever it's after)
+                pcall(V.barTo, e, p1, distance(q, here))        -- (its health bar in the half of whoever it's after)
                 local d = distance(q, here)
                 if d > V.NOTICE_FRONT_CM then
                     V.inFace[addr] = nil
@@ -1101,6 +1101,9 @@ return function(api)
     function V.farPlayer1(e, p1, d, withP2)
         local addr = e:GetAddress()
         local want = withP2 and d ~= nil and d > V.FAR_P1_CM
+        if not want and not V.p1Out[addr] then
+            return              -- (nothing to do, and nothing asked of the game: this runs for every enemy)
+        end
         local side = e:GetComponentByClass(StaticFindObject("/Script/SGameCombatSystem.FactionComponent"))
         if not want then
             if V.p1Out[addr] then
@@ -1160,7 +1163,12 @@ return function(api)
     -- showed it (bench, 11-12). The bar goes to whoever the enemy is after: player 2's half while it's after player 2, player 1's
     -- otherwise; and every bar back to player 1 with player 2 down, on the boat or out of play (V.barsBack).
     V.barsOut = false
-    function V.barTo(e, p1)
+    V.BAR_NEAR_CM = 5000        -- (an enemy further from player 2 than this, its bar given them by none of ours, is left alone)
+    V.barToP2 = {}              -- enemy address -> true while its bar is in player 2's half
+    function V.barTo(e, p1, d2)
+        if d2 and d2 > V.BAR_NEAR_CM and not V.barToP2[e:GetAddress()] then
+            return
+        end
         local bar = e.hpbar
         if not valid(bar) then
             return
@@ -1179,6 +1187,7 @@ return function(api)
             bar:SetOwnerPlayer(player)
         end
         V.barsOut = V.barsOut or toP2
+        V.barToP2[e:GetAddress()] = toP2 or nil
         -- (And shown: the game shows it as player 1's blows land, and player 2's never did: a twin-hoe woman at 1540 of 1700
         -- from player 2's had none, at 1280 from player 1's hers was up. It hides it hidden-in-game (bHiddenInGame), not by
         -- visibility. Hurt and after player 2, it's up for them; ours goes again when it's after them no more.)
@@ -1209,7 +1218,7 @@ return function(api)
                 end)
             end
         end
-        V.barsOut, V.barUnhid = false, {}
+        V.barsOut, V.barUnhid, V.barToP2 = false, {}, {}
     end
 
     -- Player 2 in or out of a fight (want), as their Soul is now: down, dead or out of play, out.
