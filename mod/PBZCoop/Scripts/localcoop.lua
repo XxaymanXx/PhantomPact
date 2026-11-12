@@ -947,10 +947,13 @@ return function(api)
     -- The enemies' eyes work for player 1: a Soul walking up to an idle enemy is V.noticed, hated and fought. Player 2
     -- walking up alone mostly isn't (one in three enemies reacted in testing, the rest stood idle with player 2 in
     -- their face). So player 2 is pointed out to an idle enemy the way the game's own area trigger does it: in its
-    -- face within V.NOTICE_FRONT_CM for a moment, or right behind it within V.NOTICE_BACK_CM. The enemy's own check
-    -- decides whether it may hate player 2 at all (a resetting or scripted enemy says no, as it does for player 1).
+    -- face within V.NOTICE_FRONT_CM for a moment, or at once within V.NOTICE_NEAR_CM. Only in its face: beside and
+    -- behind it, its own senses decide, as they do for player 1 (both players are on its awareness list, V.armScripts),
+    -- so player 2 may walk up to an idle enemy's back and take it unseen as player 1 may (the game's sneak kill, never
+    -- offered from in front, reaches about 3 m; the user, 11-12: "it should be able to sneak kill"). The enemy's own
+    -- check decides whether it may hate player 2 at all (a resetting or scripted enemy says no, as it does for player 1).
     V.NOTICE_FRONT_CM = 1000
-    V.NOTICE_BACK_CM = 300
+    V.NOTICE_NEAR_CM = 300
     V.NOTICE_HOLD_S = 1.0
     V.noticed = {}              -- enemy address -> os.clock() of the last notice
     V.inFace = {}               -- enemy address -> os.clock() since player 2 has been in its face
@@ -1029,7 +1032,7 @@ return function(api)
                 else
                     V.inFace[addr] = nil
                 end
-                local due = (front and now - V.inFace[addr] >= V.NOTICE_HOLD_S) or d <= V.NOTICE_BACK_CM
+                local due = front and (now - V.inFace[addr] >= V.NOTICE_HOLD_S or d <= V.NOTICE_NEAR_CM)
                 if not due or (V.noticed[addr] and now - V.noticed[addr] < 5.0) then
                     return
                 end

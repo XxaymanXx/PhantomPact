@@ -149,6 +149,9 @@ down, the game's death card plays in their half alone, and they get back up off 
   player 2 into the area and fires each enemy's enter event with player 1 named as the one who came in. From then on
   the enemies' own eyes and hatred work on player 2 as on player 1: in testing, enemies 300 m from player 1 noticed a
   lone player 2 in about 2 s and were hitting within 7 s.
+- **Noticing player 2.** On top of that, the mod points player 2 out to an idle enemy only in its face: within 3 m at
+  once, within 10 m after a second. Beside and behind it, the enemy's own senses decide, as they do for player 1, so
+  player 2 can walk up to an enemy's back and take it unseen (the game's sneak kill, never from in front, about 3 m).
 - **Enemies around a lone player 2** are woken from their spawners when player 2 is more than 20 m from player 1.
 - **Story scenes** play on player 1's camera. Both players watch full screen; player 2's Soul and weapons are
   hidden and pad 2 is ignored for the scene, and both come back when it ends. If the scene moved player 1, player 2
