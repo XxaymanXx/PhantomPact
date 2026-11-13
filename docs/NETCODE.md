@@ -323,7 +323,155 @@ of the host's own 21) before, and 0 in 129 now. `GAIT` and `ST` are bits of the 
 that very case). `G` only goes with `Revive = On` while a player is down, and then that player has few other events of their
 own to hold up. A lane for it would have meant protocol 5, a path through the party's hub and another call from Lua.
 
+## What a lost packet costs (after 1.7.3)
+
+Measured with `tools/netlab/netsim.ps1`: the real relay, both ends, in simulated time, so an hour of play takes seconds and
+the old and new code meet the same connection, made from the same seed. The traffic is the mod's as the Lua sim and
+recordings count it: a place every frame at 60 FPS, two sure and four quick events a second from each player, eight enemies
+that move 15% of the time and change health every two seconds each. What was found on 1.7.3, two players, an hour each:
+
+| | no loss | 2% loss |
+|---|---|---|
+| A sure event (a kill, a hit, a pickup), typical / slowest 1%, ping 80 | 54 / 72 ms | 54 / 206 ms |
+| ... ping 150 | 89 / 106 ms | 89 / 347 ms |
+| ... ping 250 | 149 / 170 ms | 150 / 580 ms |
+| A move (quick), slowest 5%, ping 80 | 64 ms | 65 ms |
+| The partner's figure behind, ping 80 | 64 ms | 64 ms |
+| An enemy's health on the guest, typical / slowest 1%, ping 80 | 79 / 134 ms | 80 / 337 ms |
+| An enemy copy's run past a stop, typical / worst 1%, ping 80 | 3 / 29 cm | 3 / 70 cm |
+
+The typical numbers are the trip and the wait for the next frame, and nothing is left to take off them. What loss costs is in
+the last column: the place and the moves shrug it off (the next place, three copies), a sure event and an enemy's line don't.
+
+**A sure event goes again before any loss is known.** In a fight a player's sure events come one at a time, a second or more
+apart (141 in 40 s from four players), so nothing sent after a lost one shows the gap, and it waited out `retry_s`: a round
+trip and a half and 15 ms, with the guest's copy of a dying enemy standing at 1 health meanwhile. Now, while eight or fewer
+wait, an unconfirmed event goes again 14, 42 and 98 ms after it was sent (`SURE_COPY_GAP`, `SURE_COPIES`): the first under a
+frame at 60 FPS, so it rides in the next frame's packet, the last far enough out to outlast a burst of Wi-Fi loss. A copy
+rides in a packet that goes anyway (alone it waits 20 ms more), and the acknowledgement for an event that came before waits
+for the next frame's packet too (`ACK_WAIT_AGAIN`), so the copies add no packets, only their 47 bytes. They are on top of
+what was there and change none of it: when an event is taken for lost still counts from when it was sent, so nothing comes
+later than it did. A long queue (a join, a re-tell) goes once each as before: its gaps show in the acknowledgements at once.
+An older version drops a copy as it drops any event it has had, so the two mix, and there's no new protocol.
+
+Two players, an hour of simulated play on each connection, 1.7.3 against this (sure events, host to guest):
+
+| ping, jitter, loss | slowest 1% | slowest 0.1% | worst | over 30 ms late | bytes a second, host / guest |
+|---|---|---|---|---|---|
+| 30 ms, 3 ms, none | 40 -> 39 ms | 122 -> 122 | 137 -> 137 | 0.7 -> 0.7% | 11.9 -> 12.0 / 7.3 -> 7.4 KB |
+| 30 ms, 3 ms, 2% | 95 -> 49 ms | 125 -> 122 | 158 -> 137 | 2.8 -> 0.7% | 11.9 -> 12.0 / 7.3 -> 7.4 KB |
+| 80 ms, 10 ms, 1% | 162 -> 80 ms | 219 -> 137 | 324 -> 172 | 1.8 -> 0.6% | 11.9 -> 12.1 / 7.3 -> 7.5 KB |
+| 80 ms, 10 ms, 2% | 206 -> 82 ms | 219 -> 137 | 375 -> 172 | 2.7 -> 0.6% | 11.9 -> 12.1 / 7.3 -> 7.5 KB |
+| 80 ms, 10 ms, 5% | 214 -> 94 ms | 363 -> 141 | 512 -> 188 | 6.7 -> 0.8% | 11.9 -> 12.1 / 7.3 -> 7.5 KB |
+| 150 ms, 10 ms, 2% | 347 -> 114 ms | 360 -> 188 | 617 -> 213 | 3.9 -> 0.6% | 11.9 -> 12.2 / 7.3 -> 7.6 KB |
+| 150 ms, 30 ms, 5% | 400 -> 134 ms | 681 -> 192 | 953 -> 213 | 7.6 -> 0.6% | 11.9 -> 12.2 / 7.3 -> 7.6 KB |
+| 250 ms, 30 ms, 2% | 580 -> 175 ms | 612 -> 243 | 1349 -> 273 | 4.0 -> 0.4% | 11.9 -> 12.2 / 7.3 -> 7.6 KB |
+| 80 ms, bursts of 60 ms 3% of the time | 211 -> 137 ms | 222 -> 179 | 368 -> 231 | 4.5 -> 2.7% | 11.9 -> 12.1 / 7.3 -> 7.5 KB |
+| 150 ms, bursts of 100 ms 2% of the time | 347 -> 196 ms | 363 -> 342 | 612 -> 360 | 3.5 -> 2.2% | 11.9 -> 12.2 / 7.3 -> 7.6 KB |
+| 80 ms, 20 ms, 2%, a 250 ms stall every 7 s | 256 -> 243 ms | 313 -> 298 | 462 -> 329 | 5.4 -> 3.6% | 11.9 -> 12.1 / 7.3 -> 7.5 KB |
+
+("Over 30 ms late": read more than 30 ms after the slowest trip and a frame's wait.) With 5% loss the slowest twentieth
+moves too: 195 -> 67 ms at ping 80, 305 -> 117 at ping 150. The typical event, the quick lane and the partner's figure don't
+move, nor does the number of packets (103 a second from the host, 74 from the guest). With events one at a time, two hours each (`-Set lone`): 208 -> 82 ms at ping 80 with 2% loss,
+350 -> 113 at 150, 585 -> 177 at 250. A stall is the one thing copies can't help: everything sent in it waits for its end.
+
+Through real sockets and netem, the 1.7.3 relay and this one side by side, an event every half second for five minutes
+(`bench.ps1 -EventEvery 0.5`): ping 160 with 2% loss, the slowest 1% 342 -> 112 ms and the worst 609 -> 145; ping 92 with 5%
+loss, the slowest 5% 195 -> 62, the slowest 1% 213 -> 78 and the worst 362 -> 111. Packets sent: 20,180 and 19,985.
+
+The status line has `copied=`: copies sent, which `resent=` doesn't count.
+
+**An enemy's line goes again after it said something new.** A line goes once, and a lost one isn't sent again. While an
+enemy moves, the next turn's line makes a lost one good. But the last line of a change (it stopped; it was hit as it stood)
+had only the line every quarter second after it (`net.enemySameS`): with 2% loss, one stop in a hundred ran on 70 cm on the
+guest's screen and came back, and one change of health in a hundred showed a third of a second late. Now a line that says
+the same as the last goes again the turn after it first went, and once more two turns after that (`net.enemyAgain`), and
+only then is left to the quarter second. It's three lines for a change where there was one, so more lines only where
+something happened: 55 -> 61 a second in netsim's fight of eight enemies, 12.1 -> 12.5 KB/s from the host. The guest reads
+a line that says the same as it reads any other: nothing changes there, and an older version takes them as it is.
+
+netsim, an hour each, eight enemies that move 15% of the time and change health every two seconds; the rule in `netsim.cpp`
+is the Lua's (`--enemy-rule 0` and `1`), and the Lua itself is in `luasim four`'s part. 1.7.3's rule -> this:
+
+| ping, jitter, loss | a copy past its stop, worst 1% | ... worst | a change of health shows, slowest 1% | ... slowest |
+|---|---|---|---|---|
+| 30 ms, 3 ms, none | 27 -> 25 cm | 75 -> 75 cm | 102 -> 101 ms | 230 -> 230 ms |
+| 30 ms, 3 ms, 2% | 74 -> 30 cm | 141 -> 97 cm | 302 -> 116 ms | 605 -> 230 ms |
+| 80 ms, 10 ms, 1% | 62 -> 29 cm | 137 -> 113 cm | 180 -> 140 ms | 436 -> 237 ms |
+| 80 ms, 10 ms, 2% | 76 -> 31 cm | 151 -> 87 cm | 344 -> 145 ms | 602 -> 246 ms |
+| 80 ms, 10 ms, 5% | 81 -> 40 cm | 150 -> 96 cm | 368 -> 155 ms | 927 -> 263 ms |
+| 150 ms, 10 ms, 2% | 76 -> 31 cm | 151 -> 109 cm | 372 -> 180 ms | 671 -> 284 ms |
+| 150 ms, 30 ms, 5% | 93 -> 44 cm | 149 -> 117 cm | 412 -> 201 ms | 713 -> 512 ms |
+| 250 ms, 30 ms, 2% | 72 -> 37 cm | 152 -> 72 cm | 440 -> 244 ms | 752 -> 347 ms |
+| 80 ms, bursts of 60 ms 3% of the time | 76 -> 46 cm | 147 -> 87 cm | 352 -> 176 ms | 904 -> 463 ms |
+| 150 ms, bursts of 100 ms 2% of the time | 68 -> 53 cm | 151 -> 149 cm | 378 -> 220 ms | 690 -> 594 ms |
+| 80 ms, 20 ms, 2%, a 250 ms stall every 7 s | 75 -> 55 cm | 146 -> 138 cm | 347 -> 252 ms | 684 -> 361 ms |
+
+The typical stop (3 cm past) and the typical change of health (the trip, a turn and a frame: 80 ms at ping 80) don't move,
+nor how far behind a copy is played (57 ms at ping 80). One repeat instead of two gave the same worst 1% but not the
+worst: at ping 80 with 2% loss a change of health 410 ms late at worst against 246, a stop 139 cm past against 87.
+Found on the way: a turn comes every 1/30 s only when two frames add up to it, which at a steady 60 FPS they do half
+the time, so a moving enemy's lines are nearer 24 a second than 30 (20 in the Lua sim, whose frames are exact). Left as
+it is: the turn's cost on the host was measured at that rate.
+
+**Where the other guests are rides in the host's own packets.** A party's host passes each guest's place on to the others
+"at most 60 times a second: it mostly rides along", but it only went once `PLAYERS_EVERY` had passed since the last, riding
+or not, and so mostly in a packet of its own: 59 bytes of headers, 60 times a second, to every guest. Now it goes in any
+packet that goes anyway (the host's own place each frame, an enemy line, an event), and by itself only when nothing has for
+`PLAYERS_EVERY`, as with the host's game standing in a load. A place waits less for its ride than it waited for its turn, so
+a guest sees another guest sooner, and no place is overwritten by the next before it went. netsim, ten minutes each, ping 80
+with 10 ms jitter and 1% loss, 8 enemies (30 in the last two rows), before -> now:
+
+| players | packets a second from the host | the host's upload | a guest's figure on another guest's screen, behind |
+|---|---|---|---|
+| 3 | 295 -> 272 | 35.4 -> 34.6 KB/s | 122 -> 115 ms |
+| 4 | 473 -> 399 | 63.3 -> 60.7 KB/s | 124 -> 118 ms |
+| 5 | 677 -> 563 | 98.7 -> 95.5 KB/s | 124 -> 118 ms |
+| 6 | 904 -> 753 | 141.8 -> 138.5 KB/s | 123 -> 118 ms |
+| 4, 30 enemies | 499 -> 426 | 89.2 -> 86.8 KB/s | 124 -> 118 ms |
+| 6, 30 enemies | 946 -> 799 | 184.8 -> 182.1 KB/s | 123 -> 117 ms |
+
+The figure's speed is as steady as it was (off by 99 cm/s at the 95th percentile, 99 before), the host's figure on a guest's
+screen and a guest's on the host's are where they were (64 ms), and two players send what they sent. A guest's upload
+doesn't change (7.5-7.7 KB/s at any size). The host's upload is still what a big party costs: each guest gets every other
+guest's place, 42 bytes, 60 times a second, 10 KB/s a guest with six players. A shorter place would take a new protocol.
+
+**In the real game** (two copies on the bench, 11-13, 1.7.3's scripts and main.dll against these, the guest through
+`relay_cli netem` at 75 ms each way, 10 ms jitter, 5% loss; both copies on one PC's clock). The host's game sent 600 sure
+events about 0.3 s apart through the mod's own `sendEvent`, and took the nearest enemy's health down a little 400 times about
+half a second apart, a hit on an enemy that stands; the guest's game timed each as it read it:
+
+| | 1.7.3 | now |
+|---|---|---|
+| A sure event, typical / slowest 5% / slowest 1% / worst | 84 / 113 / 351 / 616 ms | 84 / 100 / 106 / 132 ms |
+| ... over 60 ms later than the typical one | 29 of 600 (4.8%) | none |
+| ... sent again by the relay for a loss, and copies | 31, none | 1, 1,890 |
+| A change of an enemy's health, typical / slowest 5% / slowest 1% / worst | 123 / 153 / 400 / 433 ms | 121 / 154 / 184 / 274 ms |
+| ... over a quarter second late | 15 of 400 (3.8%) | 1 (0.2%) |
+| Enemy lines in a minute: saying something new / the same; of those within 150 ms of the one before | 121 / 586; 0 | 118 / 776; 231 |
+| The mod's net loop on the game thread, host / guest (`PERF.stages`, a minute of walking and swinging) | 80.0 / 89.8 ms/s | 80.3 / 88.7 ms/s |
+| Frames, typical / 95th / 99th percentile, host; guest | 17 / 21 / 24; 17 / 20 / 25 ms | 17 / 21 / 25; 17 / 21 / 25 ms |
+
+On a clean link (loopback, 1 ms): a kill by the host reached the guest's copy in 19 ms (18 in 1.5.0's table), the ghost kept
+within 2-3 cm of its path typically (12-14 at worst), and no copy was sent at all in the session (`copied=0`): the
+confirmation is back before the first is due. No error from the mod in any run. A party of four (the host's copy with
+`PartySize = 4`, the guest's, and two `relay_cli bot client` players walking beside them, loopback): the host sent a guest
+114 packets a second before and 101 now, and 31 KB/s in all both times. Loopback has no jitter, so two guests' places kept
+their moments in the host's frame and half still went by themselves; through netem's jitter (40 ms each way, 10 ms jitter,
+1% loss, bots, `party-bench.ps1`) it was 163 -> 141 a second with three guests and 205 -> 179 with five.
+
+What the copies cost shows where sure events are many: those bots say ten a second each, far over a fight's, and there
+the host's upload rose by a tenth (145 -> 160 KB/s with five guests). At netsim's two a second from each player a party of
+six sends 141.8 KB/s where 1.7.3 sent 136.9 (and 138.5 with the places riding).
+
+**What the frames cost, measured on the way** (`PERF.stages`, 1.7.3, three thugs near, both players walking and swinging):
+80 ms of game thread a second on the host and 90 on the guest, 1.3-1.5 ms a frame at 60 FPS. The enemies' turns take 20 and
+17 ms/s, the slow watch 15 and 16 (1.7 ms nine times a second, 37-45 ms at worst: the pickup and chest searches), steering
+the partner's figure 15 and 15 (a quarter millisecond a frame for three calls into the game), the move watch 6 and 7, the
+guest's copies 7. None of that changed here: it's the next thing to take up, a stage at a time, on the bench.
+
 ## Testing
 
-See `tools/netlab/README.md`. `relay_cli test` is the logic, `tools/netlab/bench.ps1` is two relays through a bad connection,
-and `tools/netlab/bench\` drives real game copies from a separate install.
+See `tools/netlab/README.md`. `relay_cli test` is the logic, `tools/netlab/netsim.ps1` is the relay over bad connections in
+simulated time, an old version beside a new one, `tools/netlab/bench.ps1` is two relays through a bad connection in real
+time, and `tools/netlab/bench\` drives real game copies from a separate install.

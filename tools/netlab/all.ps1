@@ -75,6 +75,19 @@ Step 'relay_cli test' {
     if ($code -ne 0) { [void]$failed.Add('relay_cli test') }
 }
 
+Step 'netsim' {
+    # The relay over a lossy connection in simulated time (netsim.ps1): what a lost packet costs a sure event. The slowest
+    # 1% took 347 ms at ping 150 with 2% loss before each went again a frame later, and 114 since (docs/NETCODE.md).
+    $out = & (Join-Path $PSScriptRoot 'netsim.ps1') -Run '--rtt 150 --jitter 10 --loss 2' -Seconds 900 -Work (Join-Path $private 'netsim')
+    $sure = $out | Where-Object { $_ -match '^new sure\.host_to_guest' } | Select-Object -First 1
+    $quick = $out | Where-Object { $_ -match '^new quick\.lost' } | Select-Object -First 1
+    $p99 = if ($sure -match ' p99=([\d.]+)') { [double]$Matches[1] } else { -1 }
+    $wrong = if ($quick -match 'wrong_order=(\d+)') { [int]$Matches[1] } else { -1 }
+    $good = $p99 -ge 0 -and $p99 -lt 160 -and $wrong -eq 0
+    "  $(if ($good) { 'ok  ' } else { 'FAIL' }) ping 150 with 2% loss, 15 minutes: the slowest 1% of sure events $p99 ms after they were sent (limit 160), $wrong out of order"
+    if (-not $good) { [void]$failed.Add('netsim') }
+}
+
 if (-not $NoRestart) { Step 'restart-test' {
     $out = & (Join-Path $PSScriptRoot 'restart-test.ps1') -Cli $cli -Port $Port
     $code = $LASTEXITCODE

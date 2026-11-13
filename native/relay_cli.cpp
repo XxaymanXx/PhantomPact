@@ -351,6 +351,53 @@ void test_lanes() {
     const bool held_back = wire_gap.size() == 1;
     send_gap(last, 0.24);
     check(held_back && wire_gap.size() == 2, "sure: the last one lost, with nothing after it, goes again at retry_s");
+
+    // Copies: an event alone, as in a fight, goes again 14, 42 and 98 ms after it was sent, with no loss known. Round trip
+    // 150 ms: retry_s 240, lost_after_s 170.
+    const auto run_copies = [](relay::SureSender& s, double from, double to, std::vector<double>& sent_at) {
+        for (double now = from; now < to; now += 0.001)
+            s.for_each_due(now, 0.24, [&](const relay::SureSender::Item&) { sent_at.push_back(now); return true; }, 0.17, 0.014);
+    };
+    relay::SureSender copies;
+    std::vector<double> times;
+    copies.push("alone");
+    run_copies(copies, 0, 0.2, times);
+    check(times.size() == 4 && std::fabs(times[1] - 0.014) < 0.0015 && std::fabs(times[2] - 0.042) < 0.0015 && std::fabs(times[3] - 0.098) < 0.0015 &&
+              copies.copied == 3 && copies.resent == 0,
+          "sure: an event alone goes again at 14, 42 and 98 ms before any loss is known, and that's no resend");
+    run_copies(copies, 0.2, 0.25, times);
+    check(times.size() == 5 && std::fabs(times[4] - 0.24) < 0.0015 && copies.resent == 1,
+          "sure: its copies change nothing about when it's taken for lost: sent again at retry_s from the first send, as before");
+    run_copies(copies, 0.25, 0.4, times);
+    check(times.size() == 8 && std::fabs(times[5] - 0.254) < 0.0015, "sure: and the one sent again has copies of its own");
+    relay::SureSender confirmed;
+    times.clear();
+    confirmed.push("quick answer");
+    run_copies(confirmed, 0, 0.03, times);       // sent, and its first copy
+    confirmed.on_ack(2, 0);
+    run_copies(confirmed, 0.03, 0.3, times);
+    check(times.size() == 2 && confirmed.pending() == 0, "sure: once it's confirmed no more copies go");
+    relay::SureSender many;
+    times.clear();
+    for (int i = 0; i < 9; i++) many.push("one of many");
+    run_copies(many, 0, 0.2, times);
+    check(times.size() == 9 && many.copied == 0, "sure: a long queue goes once each: its gaps show in the acknowledgements, and copies would double it");
+    relay::SureSender plain;
+    times.clear();
+    plain.push("no copies asked");
+    for (double now = 0; now < 0.2; now += 0.001)
+        plain.for_each_due(now, 0.24, [&](const relay::SureSender::Item&) { times.push_back(now); return true; }, 0.17);
+    check(times.size() == 1, "sure: and with no copy gap given there are none");
+    // A copy that would need a packet of its own waits a little longer for one to ride in.
+    relay::SureSender rider;
+    times.clear();
+    rider.push("waits for a ride");
+    for (double now = 0; now < 0.03; now += 0.001)
+        rider.for_each_due(now, 0.24, [&](const relay::SureSender::Item&) { times.push_back(now); return true; }, 0.17, 0.014, 0.02);
+    const bool waited_for_ride = times.size() == 1;
+    for (double now = 0.03; now < 0.04; now += 0.001)
+        rider.for_each_due(now, 0.24, [&](const relay::SureSender::Item&) { times.push_back(now); return true; }, 0.17, 0.014, 0.02);
+    check(waited_for_ride && times.size() == 2 && std::fabs(times[1] - 0.034) < 0.0015, "sure: a copy with no packet to ride in waits 20 ms more, then goes alone");
 }
 
 void test_packets() {
@@ -1994,6 +2041,54 @@ void test_sockets(int port) {
     check(status.find(" filtered=1 ") != std::string::npos && status.find(" received=0 ") != std::string::npos, "a stranger's packet to a guest's real socket is filtered");
 }
 
+// Where the other guests are goes to a guest in a packet that goes anyway, the host's own place: by itself only when
+// nothing has gone for PLAYERS_EVERY. The host's game here sends its place every 15 ms, the guests theirs every 5.
+void test_party_riding() {
+    std::puts("four players, what the host sends:");
+    FakeNet net;
+    Hosting host(net, 1);
+    End a(net, "client", 2, at(1)), b(net, "client", 3, at(1)), c(net, "client", 4, at(1));
+    run(net, host, {&a, &b, &c}, 0.5);
+    const long long before = net.carried;
+    const uint32_t base_ms = static_cast<uint32_t>(relay::clock_ms()) + 1000;
+    int steps = 0, host_posts = 0;
+    const auto place = [&](float x) {
+        relay::Sample s = at_x(x + static_cast<float>(steps));
+        s.ms = base_ms + static_cast<uint32_t>(steps) * 5;
+        return s;
+    };
+    for (; steps < 200; steps++) {
+        net.now += 0.005;
+        a.box.post_sample(place(1000));
+        b.box.post_sample(place(2000));
+        c.box.post_sample(place(3000));
+        if (steps % 3 == 0) {
+            host.box.post_sample(place(500));
+            host_posts++;
+        }
+        host.step();
+        for (End* e : {&a, &b, &c}) e->step();
+    }
+    const long long from_host = net.carried - before - 3LL * steps, own = 3LL * host_posts;
+    relay::Sample out;
+    check(sees(a.box, 3, out) && out.x >= 2000 && out.x < 2200 && sees(c.box, 2, out) && out.x >= 1000 && out.x < 1200,
+          "each guest's place reaches the others while the host's own goes too");
+    char what[160];
+    std::snprintf(what, sizeof what, "and rides in the host's own packets: %lld packets from the host for %lld places of its own", from_host, own);
+    check(from_host <= own + 20, what);
+    // With nothing of the host's own to ride in (its game in a load), they go by themselves, PLAYERS_EVERY apart.
+    const long long quiet = net.carried;
+    for (int i = 0; i < 100; i++, steps++) {
+        net.now += 0.005;
+        a.box.post_sample(place(1000));
+        host.step();
+        for (End* e : {&a, &b, &c}) e->step();
+    }
+    const float last = 1000 + static_cast<float>(steps - 1);
+    check(sees(b.box, 2, out) && out.x > last - 60 && net.carried - quiet - 100 >= 2 * 20,
+          "with the host's game standing still a guest's place is still passed on, in packets of its own");
+}
+
 int run_tests(int argc, wchar_t** argv) {
     test_timeline();
     test_timeline_odd();
@@ -2010,6 +2105,7 @@ int run_tests(int argc, wchar_t** argv) {
     test_silence();
     test_hostile();
     test_party();
+    test_party_riding();
     test_six();
     test_party_edges();
     if (opt_number(argc, argv, L"--sockets", 1) != 0) {

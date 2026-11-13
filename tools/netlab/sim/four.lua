@@ -9730,6 +9730,63 @@ local function cost()
     check(h4 < h2 * 3.2 and g4 < g2 * 3.2, "four players cost no more than three times two, per PC")
 end
 
+-- An enemy's line that says something new and then stands (it stopped, or was hit as it stood): sent once, a loss left the
+-- other side wrong until the line every quarter second. It goes again the turn after, and once more two turns on.
+local function enemyLinesAgain()
+    part("an enemy's line, after it said something new")
+    local s, h = pair()
+    s:run(2)
+    local near = Session.enemyOn(h, "near")
+    -- The lines of the one that stands at this health, sent since n.
+    local function lines(n, health)
+        local c, last = 0, nil
+        for k = n + 1, #h.sent do
+            if h.sent[k]:find("^N %d+ %S+ %S+ %S+ %S+ %S+ %S+ " .. health .. "%.0 ") then
+                c, last = c + 1, h.sent[k]
+            end
+        end
+        return c, last
+    end
+    local n = #h.sent
+    Fake.setHealth(near, 555)
+    s:run(0.2)
+    local soon = lines(n, 555)
+    check(soon == 3, "a hit on an enemy that stands: its new health goes three times in the first fifth of a second, should one be lost (" .. soon .. ")")
+    s:run(1.0)
+    local later = lines(n, 555) - soon
+    check(later >= 3 and later <= 5, "and from then on every quarter second, as before (" .. later .. " in the next second)")
+    -- One that moves says something new every turn: each of its lines goes once.
+    n = #h.sent
+    local t, seen, twice, moving = 0, {}, 0, 0
+    s:run(1.0, function()
+        t = t + 1 / 60
+        Fake.put(near, "loc", { X = 300.0 + t * 400, Y = 300.0, Z = 100.0 })
+    end)
+    for k = n + 1, #h.sent do
+        local x = h.sent[k]:match("^N %d+ (%S+) %S+ %S+ %S+ %S+ %S+ 555%.0 ")
+        if x then
+            moving = moving + 1
+            twice = twice + (seen[x] and 1 or 0)
+            seen[x] = true
+        end
+    end
+    check(moving >= 20 and twice == 0, "an enemy that moves says something new each turn, and each line goes once (" .. moving .. " lines, " .. twice .. " twice)")
+    -- It stops: where it stopped goes three times, then every quarter second.
+    n = #h.sent
+    s:run(0.2)
+    local _, stopped = lines(n, 555)
+    local same = 0
+    for k = n + 1, #h.sent do
+        same = same + (h.sent[k] == stopped and 1 or 0)
+    end
+    check(same == 3, "and where it stopped goes three times in a fifth of a second (" .. same .. ")")
+    n = #h.sent
+    s:run(4)
+    local standing = lines(n, 555)
+    check(standing >= 12 and standing <= 17, "standing, it's back to a line every quarter second or so (" .. standing .. " in 4 s)")
+    allErrors(s)
+end
+
 -- Six players (PartySize = 6): health and posture stop at four players' numbers, and every enemy near a player has a ghost
 -- twin (twins.lua), on the host and on each guest under the same id.
 local function sixPlayers()
@@ -11216,6 +11273,7 @@ return function(print_, scripts)
     lateJoiner()
     lateJoinerGuestFight()
     toldOnChange()
+    enemyLinesAgain()
     reviving()
     scaling()
     stuckQte()
