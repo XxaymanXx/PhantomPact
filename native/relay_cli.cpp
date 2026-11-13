@@ -2041,6 +2041,54 @@ void test_sockets(int port) {
     check(status.find(" filtered=1 ") != std::string::npos && status.find(" received=0 ") != std::string::npos, "a stranger's packet to a guest's real socket is filtered");
 }
 
+// Where the other guests are goes to a guest in a packet that goes anyway, the host's own place: by itself only when
+// nothing has gone for PLAYERS_EVERY. The host's game here sends its place every 15 ms, the guests theirs every 5.
+void test_party_riding() {
+    std::puts("four players, what the host sends:");
+    FakeNet net;
+    Hosting host(net, 1);
+    End a(net, "client", 2, at(1)), b(net, "client", 3, at(1)), c(net, "client", 4, at(1));
+    run(net, host, {&a, &b, &c}, 0.5);
+    const long long before = net.carried;
+    const uint32_t base_ms = static_cast<uint32_t>(relay::clock_ms()) + 1000;
+    int steps = 0, host_posts = 0;
+    const auto place = [&](float x) {
+        relay::Sample s = at_x(x + static_cast<float>(steps));
+        s.ms = base_ms + static_cast<uint32_t>(steps) * 5;
+        return s;
+    };
+    for (; steps < 200; steps++) {
+        net.now += 0.005;
+        a.box.post_sample(place(1000));
+        b.box.post_sample(place(2000));
+        c.box.post_sample(place(3000));
+        if (steps % 3 == 0) {
+            host.box.post_sample(place(500));
+            host_posts++;
+        }
+        host.step();
+        for (End* e : {&a, &b, &c}) e->step();
+    }
+    const long long from_host = net.carried - before - 3LL * steps, own = 3LL * host_posts;
+    relay::Sample out;
+    check(sees(a.box, 3, out) && out.x >= 2000 && out.x < 2200 && sees(c.box, 2, out) && out.x >= 1000 && out.x < 1200,
+          "each guest's place reaches the others while the host's own goes too");
+    char what[160];
+    std::snprintf(what, sizeof what, "and rides in the host's own packets: %lld packets from the host for %lld places of its own", from_host, own);
+    check(from_host <= own + 20, what);
+    // With nothing of the host's own to ride in (its game in a load), they go by themselves, PLAYERS_EVERY apart.
+    const long long quiet = net.carried;
+    for (int i = 0; i < 100; i++, steps++) {
+        net.now += 0.005;
+        a.box.post_sample(place(1000));
+        host.step();
+        for (End* e : {&a, &b, &c}) e->step();
+    }
+    const float last = 1000 + static_cast<float>(steps - 1);
+    check(sees(b.box, 2, out) && out.x > last - 60 && net.carried - quiet - 100 >= 2 * 20,
+          "with the host's game standing still a guest's place is still passed on, in packets of its own");
+}
+
 int run_tests(int argc, wchar_t** argv) {
     test_timeline();
     test_timeline_odd();
@@ -2057,6 +2105,7 @@ int run_tests(int argc, wchar_t** argv) {
     test_silence();
     test_hostile();
     test_party();
+    test_party_riding();
     test_six();
     test_party_edges();
     if (opt_number(argc, argv, L"--sockets", 1) != 0) {

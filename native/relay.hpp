@@ -1307,7 +1307,9 @@ private:
             w.text(enemy_out_.front());
             enemy_out_.pop_front();
         }
-        if (players_waiting_ && partner_here && now - last_players_ >= PLAYERS_EVERY) {
+        // Where the others are rides in a packet that goes anyway, the host's own place each frame: by itself, as it went
+        // before, it's a packet of 59 bytes of headers for each of them, 60 times a second to every guest.
+        if (players_waiting_ && partner_here && (p.size() > header_bytes_ || now - last_players_ >= PLAYERS_EVERY)) {
             last_players_ = now;
             players_waiting_ = false;
             for (size_t i = 0; i < players_out_.size(); i++) {

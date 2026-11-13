@@ -381,6 +381,28 @@ loss, the slowest 5% 195 -> 62, the slowest 1% 213 -> 78 and the worst 362 -> 11
 
 The status line has `copied=`: copies sent, which `resent=` doesn't count.
 
+**Where the other guests are rides in the host's own packets.** A party's host passes each guest's place on to the others
+"at most 60 times a second: it mostly rides along", but it only went once `PLAYERS_EVERY` had passed since the last, riding
+or not, and so mostly in a packet of its own: 59 bytes of headers, 60 times a second, to every guest. Now it goes in any
+packet that goes anyway (the host's own place each frame, an enemy line, an event), and by itself only when nothing has for
+`PLAYERS_EVERY`, as with the host's game standing in a load. A place waits less for its ride than it waited for its turn, so
+a guest sees another guest sooner, and no place is overwritten by the next before it went. netsim, ten minutes each, ping 80
+with 10 ms jitter and 1% loss, 8 enemies (30 in the last two rows), before -> now:
+
+| players | packets a second from the host | the host's upload | a guest's figure on another guest's screen, behind |
+|---|---|---|---|
+| 3 | 295 -> 272 | 35.4 -> 34.6 KB/s | 122 -> 115 ms |
+| 4 | 473 -> 399 | 63.3 -> 60.7 KB/s | 124 -> 118 ms |
+| 5 | 677 -> 563 | 98.7 -> 95.5 KB/s | 124 -> 118 ms |
+| 6 | 904 -> 753 | 141.8 -> 138.5 KB/s | 123 -> 118 ms |
+| 4, 30 enemies | 499 -> 426 | 89.2 -> 86.8 KB/s | 124 -> 118 ms |
+| 6, 30 enemies | 946 -> 799 | 184.8 -> 182.1 KB/s | 123 -> 117 ms |
+
+The figure's speed is as steady as it was (off by 99 cm/s at the 95th percentile, 99 before), the host's figure on a guest's
+screen and a guest's on the host's are where they were (64 ms), and two players send what they sent. A guest's upload
+doesn't change (7.5-7.7 KB/s at any size). The host's upload is still what a big party costs: each guest gets every other
+guest's place, 42 bytes, 60 times a second, 10 KB/s a guest with six players. A shorter place would take a new protocol.
+
 ## Testing
 
 See `tools/netlab/README.md`. `relay_cli test` is the logic, `tools/netlab/netsim.ps1` is the relay over bad connections in
