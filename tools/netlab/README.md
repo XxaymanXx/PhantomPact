@@ -15,6 +15,17 @@ runs two bots through a bad connection and prints true delays, since both share 
 processes: restarts, Secrets, an old partner, garbage, the sure lane at 5% and 30% loss. Bots bind to loopback only, so
 Windows' firewall doesn't ask anything.
 
+    .\tools\netlab\netsim.ps1 -Old <old native> -Set links|party|lone [-Seconds 3600]
+
+`netsim.ps1` is the whole relay in simulated time, an hour of play in seconds, an old `native` folder beside this one on the
+same connections, seed for seed (`netsim.cpp`, built against each): every player a game thread and a relay thread, the mod's
+traffic as recordings and the Lua sim count it, and between each guest and the host a connection with delay, jitter, loss,
+bursts and stalls. It prints how late sure and quick events are read, how far behind each player's figure shows on the
+others' PCs, where a guest's enemy copies are steered against where the host's enemies are, and what each player sends.
+`-Set links` is eleven connections for two players, `party` two to six players, `lone` events one at a time; `-Run` takes
+netsim's own options; `-OldArgs`/`-NewArgs` set two rules against each other on one build. What the mod's Lua does to enemy
+lines is modelled there (`--enemy-rule`), so the Lua sim is the proof of the Lua itself.
+
 `relay_cli latency` is the partner end to end in simulated time (`native/latency.hpp`), a grid of connections in seconds: the
 sender's frames with the real game's frame noise and the mod's tick a few ms into each, coop.lua's send rule, delay, jitter and
 loss, the Timeline, the receiver's frames, and the ghost walking the way steerGhost drives it. Per connection, for the Timeline's
