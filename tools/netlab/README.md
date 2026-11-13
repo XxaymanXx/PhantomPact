@@ -5,6 +5,8 @@ Everything here tests the relay and the sync on one PC.
 ## No game needed
 
     .\tools\netlab\all.ps1                                    (all of the below; the last line says PASS or FAIL)
+    .\tools\netlab\all.ps1 -Port 47400                        (its ports from there: by default they go by the process id, and
+                                                               one may be another program's, as Windows' own UDP 49478 was once)
     native\build\relay_cli.exe test
     .\tools\netlab\bench.ps1 -Delay 40 -Jitter 20 -Loss 2 -StallEvery 6 -StallMs 250
     .\tools\netlab\restart-test.ps1
