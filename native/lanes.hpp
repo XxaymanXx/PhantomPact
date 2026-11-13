@@ -21,7 +21,7 @@ namespace relay {
 constexpr size_t MAX_SURE_PENDING = 8192;     // events waiting for a partner who isn't there: the oldest go first
 constexpr int SURE_COPIES = 3;                // a sure event goes again this many times before any loss is known...
 constexpr size_t SURE_COPIES_UP_TO = 8;       // ...while this few wait: a long queue (a join, a re-tell) shows its gaps in the
-                                              // acknowledgements at once, and copies would only double it
+                                              // acknowledgements at once, and copies would only make it four times as long
 
 // In order or not at all: a lost event would hold back everything behind it forever. So once the queue has really dropped
 // one, overflowed stays set, and the relay starts both sides over when the partner is back (Relay::flush).

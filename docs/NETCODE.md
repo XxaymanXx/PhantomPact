@@ -436,6 +436,40 @@ screen and a guest's on the host's are where they were (64 ms), and two players 
 doesn't change (7.5-7.7 KB/s at any size). The host's upload is still what a big party costs: each guest gets every other
 guest's place, 42 bytes, 60 times a second, 10 KB/s a guest with six players. A shorter place would take a new protocol.
 
+**In the real game** (two copies on the bench, 11-13, 1.7.3's scripts and main.dll against these, the guest through
+`relay_cli netem` at 75 ms each way, 10 ms jitter, 5% loss; both copies on one PC's clock). The host's game sent 600 sure
+events about 0.3 s apart through the mod's own `sendEvent`, and took the nearest enemy's health down a little 400 times about
+half a second apart, a hit on an enemy that stands; the guest's game timed each as it read it:
+
+| | 1.7.3 | now |
+|---|---|---|
+| A sure event, typical / slowest 5% / slowest 1% / worst | 84 / 113 / 351 / 616 ms | 84 / 100 / 106 / 132 ms |
+| ... over 60 ms later than the typical one | 29 of 600 (4.8%) | none |
+| ... sent again by the relay for a loss, and copies | 31, none | 1, 1,890 |
+| A change of an enemy's health, typical / slowest 5% / slowest 1% / worst | 123 / 153 / 400 / 433 ms | 121 / 154 / 184 / 274 ms |
+| ... over a quarter second late | 15 of 400 (3.8%) | 1 (0.2%) |
+| Enemy lines in a minute: saying something new / the same; of those within 150 ms of the one before | 121 / 586; 0 | 118 / 776; 231 |
+| The mod's net loop on the game thread, host / guest (`PERF.stages`, a minute of walking and swinging) | 80.0 / 89.8 ms/s | 80.3 / 88.7 ms/s |
+| Frames, typical / 95th / 99th percentile, host; guest | 17 / 21 / 24; 17 / 20 / 25 ms | 17 / 21 / 25; 17 / 21 / 25 ms |
+
+On a clean link (loopback, 1 ms): a kill by the host reached the guest's copy in 19 ms (18 in 1.5.0's table), the ghost kept
+within 2-3 cm of its path typically (12-14 at worst), and no copy was sent at all in the session (`copied=0`): the
+confirmation is back before the first is due. No error from the mod in any run. A party of four (the host's copy with
+`PartySize = 4`, the guest's, and two `relay_cli bot client` players walking beside them, loopback): the host sent a guest
+114 packets a second before and 101 now, and 31 KB/s in all both times. Loopback has no jitter, so two guests' places kept
+their moments in the host's frame and half still went by themselves; through netem's jitter (40 ms each way, 10 ms jitter,
+1% loss, bots, `party-bench.ps1`) it was 163 -> 141 a second with three guests and 205 -> 179 with five.
+
+What the copies cost shows where sure events are many: those bots say ten a second each, far over a fight's, and there
+the host's upload rose by a tenth (145 -> 160 KB/s with five guests). At netsim's two a second from each player a party of
+six sends 141.8 KB/s where 1.7.3 sent 136.9 (and 138.5 with the places riding).
+
+**What the frames cost, measured on the way** (`PERF.stages`, 1.7.3, three thugs near, both players walking and swinging):
+80 ms of game thread a second on the host and 90 on the guest, 1.3-1.5 ms a frame at 60 FPS. The enemies' turns take 20 and
+17 ms/s, the slow watch 15 and 16 (1.7 ms nine times a second, 37-45 ms at worst: the pickup and chest searches), steering
+the partner's figure 15 and 15 (a quarter millisecond a frame for three calls into the game), the move watch 6 and 7, the
+guest's copies 7. None of that changed here: it's the next thing to take up, a stage at a time, on the bench.
+
 ## Testing
 
 See `tools/netlab/README.md`. `relay_cli test` is the logic, `tools/netlab/netsim.ps1` is the relay over bad connections in
