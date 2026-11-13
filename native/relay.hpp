@@ -55,6 +55,13 @@ constexpr double ACK_WAIT = 0.004;         // a bare acknowledgement goes out if
 constexpr double QUICK_GAP = 0.040;        // a quick event's repeats go this long and then twice that after: at 0, 40, 120 ms.
                                            // A burst of Wi-Fi loss over two frames took all three a frame apart.
 constexpr double RETRY_MIN = 0.03, RETRY_MAX = 0.5;
+constexpr double SURE_COPY_GAP = 0.014;    // a sure event's copies (lanes.hpp) go this long after it, then twice and four times
+                                           // that after each: at 14, 42 and 98 ms. The first is under a frame at 60 FPS, so it
+                                           // rides in the next frame's packet; the last outlasts a burst of Wi-Fi loss
+constexpr double SURE_COPY_ALONE = 0.020;  // ...and a copy waits this much longer for a packet to ride in before it goes in one
+                                           // of its own (the game standing in a load, or under 50 FPS)
+constexpr double ACK_WAIT_AGAIN = 0.020;   // for an event that came before (a copy), the acknowledgement can wait for the next
+                                           // frame's packet: hurried, every copy cost a bare packet back
 constexpr size_t MAX_PACKET = 1100;        // with a signature, still under a VPN's 1280-byte limit
 constexpr size_t MAX_TEXT = 900;           // one event or enemy line
 constexpr int MAX_PACKETS_AT_ONCE = 6;
@@ -1049,7 +1056,9 @@ public:
                 std::string_view text = r.text();
                 if (!r.ok || text.size() > MAX_TEXT) return;
                 if (synced) {
-                    if (ack_wanted_at_ < 0) ack_wanted_at_ = now;
+                    const bool again = static_cast<int32_t>(id - sure_in_.next()) < 0;      // (in already: a copy, or sent again)
+                    const double by = now + (again ? ACK_WAIT_AGAIN : ACK_WAIT);
+                    if (ack_by_ < 0 || by < ack_by_) ack_by_ = by;
                     sure_in_.on_event(id, std::string(text), [this](const std::string& t) { return hub_ ? hub_->on_sure(my_slot_, t) : box_.on_event(t); });
                 }
             } else if (section == SEC_QUICK) {
@@ -1106,9 +1115,9 @@ public:
         lost_mark_ = lost_;
         double jitter = 0, delay = 0;
         box_.link_numbers(jitter, delay);
-        char quality[128];
-        std::snprintf(quality, sizeof quality, " jitter_ms=%.1f delay_ms=%.1f loss_pct=%.1f resent=%lld resent_early=%lld pending=%zu",
-                      jitter, delay, loss, sure_out_.resent, sure_out_.resent_early, sure_out_.pending());
+        char quality[160];
+        std::snprintf(quality, sizeof quality, " jitter_ms=%.1f delay_ms=%.1f loss_pct=%.1f resent=%lld resent_early=%lld copied=%lld pending=%zu",
+                      jitter, delay, loss, sure_out_.resent, sure_out_.resent_early, sure_out_.copied, sure_out_.pending());
         const Link::Route route = peer_ ? link_->route(*peer_) : Link::Route{};
         const std::string problem = link_->problem();
         // time= (wall clock) lets the mod tell a running relay from a stale status file before starting another.
@@ -1191,7 +1200,7 @@ private:
         sent_++;
         sequence_++;
         last_send_ = now;
-        ack_wanted_at_ = -1;
+        ack_by_ = -1;
     }
 
     double retry_s() const {
@@ -1274,13 +1283,15 @@ private:
         // Sure lane first: it's what must not wait behind anything. With nobody answering they wait here, not on the wire:
         // a long queue resent forever at an empty address is megabytes a second.
         if (peer_session_ != 0 && partner_here) {
+            // (A copy rides in a packet that goes anyway, this frame's place: alone it's 59 bytes of headers for 40 of event.)
+            const double alone = p.size() > header_bytes_ ? 0 : SURE_COPY_ALONE;
             sure_out_.for_each_due(now, retry_s(), [&](const SureSender::Item& item) {
                 if (!room(1 + 4 + 2 + item.text.size())) return false;
                 w.put<uint8_t>(SEC_SURE);
                 w.put<uint32_t>(item.id);
                 w.text(item.text);
                 return true;
-            }, lost_after_s());
+            }, lost_after_s(), SURE_COPY_GAP, alone);
         }
         if (partner_here) quick_out_.for_each(now, QUICK_GAP, [&](const QuickSender::Item& item, double age) {
             if (!room(1 + 4 + 2 + 2 + item.text.size())) return false;
@@ -1311,7 +1322,7 @@ private:
                 players_out_[i].reset();
             }
         }
-        const bool ack_late = ack_wanted_at_ >= 0 && now - ack_wanted_at_ >= ACK_WAIT;
+        const bool ack_late = ack_by_ >= 0 && now >= ack_by_;
         if (p.size() > header_bytes_ || ack_late || now - last_send_ >= KEEPALIVE_EVERY) send_packet(p, now);
     }
 
@@ -1403,7 +1414,8 @@ private:
     double echo_arrived_ms_ = 0, rtt_ms_ = -1;
     RecentLow fastest_trip_, shortest_rtt_;     // the partner's packets, for how old a quick event is
     size_t header_bytes_ = 0;
-    double last_send_ = 0, last_heard_ = 0, last_hello_ = 0, last_probe_ = -1e9, ack_wanted_at_ = -1;
+    double last_send_ = 0, last_heard_ = 0, last_hello_ = 0, last_probe_ = -1e9;
+    double ack_by_ = -1;            // a sure event came: a packet with its acknowledgement goes by then, bare if need be
     long long rejected_ = 0, received_ = 0, sent_ = 0, lost_ = 0, received_mark_ = 0, lost_mark_ = 0;
     // A party. As a host's relay for one guest:
     static constexpr size_t SAMPLE_BYTES = 40;

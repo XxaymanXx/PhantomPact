@@ -351,6 +351,53 @@ void test_lanes() {
     const bool held_back = wire_gap.size() == 1;
     send_gap(last, 0.24);
     check(held_back && wire_gap.size() == 2, "sure: the last one lost, with nothing after it, goes again at retry_s");
+
+    // Copies: an event alone, as in a fight, goes again 14, 42 and 98 ms after it was sent, with no loss known. Round trip
+    // 150 ms: retry_s 240, lost_after_s 170.
+    const auto run_copies = [](relay::SureSender& s, double from, double to, std::vector<double>& sent_at) {
+        for (double now = from; now < to; now += 0.001)
+            s.for_each_due(now, 0.24, [&](const relay::SureSender::Item&) { sent_at.push_back(now); return true; }, 0.17, 0.014);
+    };
+    relay::SureSender copies;
+    std::vector<double> times;
+    copies.push("alone");
+    run_copies(copies, 0, 0.2, times);
+    check(times.size() == 4 && std::fabs(times[1] - 0.014) < 0.0015 && std::fabs(times[2] - 0.042) < 0.0015 && std::fabs(times[3] - 0.098) < 0.0015 &&
+              copies.copied == 3 && copies.resent == 0,
+          "sure: an event alone goes again at 14, 42 and 98 ms before any loss is known, and that's no resend");
+    run_copies(copies, 0.2, 0.25, times);
+    check(times.size() == 5 && std::fabs(times[4] - 0.24) < 0.0015 && copies.resent == 1,
+          "sure: its copies change nothing about when it's taken for lost: sent again at retry_s from the first send, as before");
+    run_copies(copies, 0.25, 0.4, times);
+    check(times.size() == 8 && std::fabs(times[5] - 0.254) < 0.0015, "sure: and the one sent again has copies of its own");
+    relay::SureSender confirmed;
+    times.clear();
+    confirmed.push("quick answer");
+    run_copies(confirmed, 0, 0.03, times);       // sent, and its first copy
+    confirmed.on_ack(2, 0);
+    run_copies(confirmed, 0.03, 0.3, times);
+    check(times.size() == 2 && confirmed.pending() == 0, "sure: once it's confirmed no more copies go");
+    relay::SureSender many;
+    times.clear();
+    for (int i = 0; i < 9; i++) many.push("one of many");
+    run_copies(many, 0, 0.2, times);
+    check(times.size() == 9 && many.copied == 0, "sure: a long queue goes once each: its gaps show in the acknowledgements, and copies would double it");
+    relay::SureSender plain;
+    times.clear();
+    plain.push("no copies asked");
+    for (double now = 0; now < 0.2; now += 0.001)
+        plain.for_each_due(now, 0.24, [&](const relay::SureSender::Item&) { times.push_back(now); return true; }, 0.17);
+    check(times.size() == 1, "sure: and with no copy gap given there are none");
+    // A copy that would need a packet of its own waits a little longer for one to ride in.
+    relay::SureSender rider;
+    times.clear();
+    rider.push("waits for a ride");
+    for (double now = 0; now < 0.03; now += 0.001)
+        rider.for_each_due(now, 0.24, [&](const relay::SureSender::Item&) { times.push_back(now); return true; }, 0.17, 0.014, 0.02);
+    const bool waited_for_ride = times.size() == 1;
+    for (double now = 0.03; now < 0.04; now += 0.001)
+        rider.for_each_due(now, 0.24, [&](const relay::SureSender::Item&) { times.push_back(now); return true; }, 0.17, 0.014, 0.02);
+    check(waited_for_ride && times.size() == 2 && std::fabs(times[1] - 0.034) < 0.0015, "sure: a copy with no packet to ride in waits 20 ms more, then goes alone");
 }
 
 void test_packets() {

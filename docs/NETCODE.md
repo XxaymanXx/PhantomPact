@@ -323,7 +323,66 @@ of the host's own 21) before, and 0 in 129 now. `GAIT` and `ST` are bits of the 
 that very case). `G` only goes with `Revive = On` while a player is down, and then that player has few other events of their
 own to hold up. A lane for it would have meant protocol 5, a path through the party's hub and another call from Lua.
 
+## What a lost packet costs (after 1.7.3)
+
+Measured with `tools/netlab/netsim.ps1`: the real relay, both ends, in simulated time, so an hour of play takes seconds and
+the old and new code meet the same connection, made from the same seed. The traffic is the mod's as the Lua sim and
+recordings count it: a place every frame at 60 FPS, two sure and four quick events a second from each player, eight enemies
+that move 15% of the time and change health every two seconds each. What was found on 1.7.3, two players, an hour each:
+
+| | no loss | 2% loss |
+|---|---|---|
+| A sure event (a kill, a hit, a pickup), typical / slowest 1%, ping 80 | 54 / 72 ms | 54 / 206 ms |
+| ... ping 150 | 89 / 106 ms | 89 / 347 ms |
+| ... ping 250 | 149 / 170 ms | 150 / 580 ms |
+| A move (quick), slowest 5%, ping 80 | 64 ms | 65 ms |
+| The partner's figure behind, ping 80 | 64 ms | 64 ms |
+| An enemy's health on the guest, typical / slowest 1%, ping 80 | 79 / 134 ms | 80 / 337 ms |
+| An enemy copy's run past a stop, typical / worst 1%, ping 80 | 3 / 29 cm | 3 / 70 cm |
+
+The typical numbers are the trip and the wait for the next frame, and nothing is left to take off them. What loss costs is in
+the last column: the place and the moves shrug it off (the next place, three copies), a sure event and an enemy's line don't.
+
+**A sure event goes again before any loss is known.** In a fight a player's sure events come one at a time, a second or more
+apart (141 in 40 s from four players), so nothing sent after a lost one shows the gap, and it waited out `retry_s`: a round
+trip and a half and 15 ms, with the guest's copy of a dying enemy standing at 1 health meanwhile. Now, while eight or fewer
+wait, an unconfirmed event goes again 14, 42 and 98 ms after it was sent (`SURE_COPY_GAP`, `SURE_COPIES`): the first under a
+frame at 60 FPS, so it rides in the next frame's packet, the last far enough out to outlast a burst of Wi-Fi loss. A copy
+rides in a packet that goes anyway (alone it waits 20 ms more), and the acknowledgement for an event that came before waits
+for the next frame's packet too (`ACK_WAIT_AGAIN`), so the copies add no packets, only their 47 bytes. They are on top of
+what was there and change none of it: when an event is taken for lost still counts from when it was sent, so nothing comes
+later than it did. A long queue (a join, a re-tell) goes once each as before: its gaps show in the acknowledgements at once.
+An older version drops a copy as it drops any event it has had, so the two mix, and there's no new protocol.
+
+Two players, an hour of simulated play on each connection, 1.7.3 against this (sure events, host to guest):
+
+| ping, jitter, loss | slowest 1% | slowest 0.1% | worst | over 30 ms late | bytes a second, host / guest |
+|---|---|---|---|---|---|
+| 30 ms, 3 ms, none | 40 -> 39 ms | 122 -> 122 | 137 -> 137 | 0.7 -> 0.7% | 11.9 -> 12.0 / 7.3 -> 7.4 KB |
+| 30 ms, 3 ms, 2% | 95 -> 49 ms | 125 -> 122 | 158 -> 137 | 2.8 -> 0.7% | 11.9 -> 12.0 / 7.3 -> 7.4 KB |
+| 80 ms, 10 ms, 1% | 162 -> 80 ms | 219 -> 137 | 324 -> 172 | 1.8 -> 0.6% | 11.9 -> 12.1 / 7.3 -> 7.5 KB |
+| 80 ms, 10 ms, 2% | 206 -> 82 ms | 219 -> 137 | 375 -> 172 | 2.7 -> 0.6% | 11.9 -> 12.1 / 7.3 -> 7.5 KB |
+| 80 ms, 10 ms, 5% | 214 -> 94 ms | 363 -> 141 | 512 -> 188 | 6.7 -> 0.8% | 11.9 -> 12.1 / 7.3 -> 7.5 KB |
+| 150 ms, 10 ms, 2% | 347 -> 114 ms | 360 -> 188 | 617 -> 213 | 3.9 -> 0.6% | 11.9 -> 12.2 / 7.3 -> 7.6 KB |
+| 150 ms, 30 ms, 5% | 400 -> 134 ms | 681 -> 192 | 953 -> 213 | 7.6 -> 0.6% | 11.9 -> 12.2 / 7.3 -> 7.6 KB |
+| 250 ms, 30 ms, 2% | 580 -> 175 ms | 612 -> 243 | 1349 -> 273 | 4.0 -> 0.4% | 11.9 -> 12.2 / 7.3 -> 7.6 KB |
+| 80 ms, bursts of 60 ms 3% of the time | 211 -> 137 ms | 222 -> 179 | 368 -> 231 | 4.5 -> 2.7% | 11.9 -> 12.1 / 7.3 -> 7.5 KB |
+| 150 ms, bursts of 100 ms 2% of the time | 347 -> 196 ms | 363 -> 342 | 612 -> 360 | 3.5 -> 2.2% | 11.9 -> 12.2 / 7.3 -> 7.6 KB |
+| 80 ms, 20 ms, 2%, a 250 ms stall every 7 s | 256 -> 243 ms | 313 -> 298 | 462 -> 329 | 5.4 -> 3.6% | 11.9 -> 12.1 / 7.3 -> 7.5 KB |
+
+("Over 30 ms late": read more than 30 ms after the slowest trip and a frame's wait.) With 5% loss the slowest twentieth
+moves too: 195 -> 67 ms at ping 80, 305 -> 117 at ping 150. The typical event, the quick lane and the partner's figure don't
+move, nor does the number of packets (103 a second from the host, 74 from the guest). With events one at a time, two hours each (`-Set lone`): 208 -> 82 ms at ping 80 with 2% loss,
+350 -> 113 at 150, 585 -> 177 at 250. A stall is the one thing copies can't help: everything sent in it waits for its end.
+
+Through real sockets and netem, the 1.7.3 relay and this one side by side, an event every half second for five minutes
+(`bench.ps1 -EventEvery 0.5`): ping 160 with 2% loss, the slowest 1% 342 -> 112 ms and the worst 609 -> 145; ping 92 with 5%
+loss, the slowest 5% 195 -> 62, the slowest 1% 213 -> 78 and the worst 362 -> 111. Packets sent: 20,180 and 19,985.
+
+The status line has `copied=`: copies sent, which `resent=` doesn't count.
+
 ## Testing
 
-See `tools/netlab/README.md`. `relay_cli test` is the logic, `tools/netlab/bench.ps1` is two relays through a bad connection,
-and `tools/netlab/bench\` drives real game copies from a separate install.
+See `tools/netlab/README.md`. `relay_cli test` is the logic, `tools/netlab/netsim.ps1` is the relay over bad connections in
+simulated time, an old version beside a new one, `tools/netlab/bench.ps1` is two relays through a bad connection in real
+time, and `tools/netlab/bench\` drives real game copies from a separate install.
