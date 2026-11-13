@@ -381,6 +381,39 @@ loss, the slowest 5% 195 -> 62, the slowest 1% 213 -> 78 and the worst 362 -> 11
 
 The status line has `copied=`: copies sent, which `resent=` doesn't count.
 
+**An enemy's line goes again after it said something new.** A line goes once, and a lost one isn't sent again. While an
+enemy moves, the next turn's line makes a lost one good. But the last line of a change (it stopped; it was hit as it stood)
+had only the line every quarter second after it (`net.enemySameS`): with 2% loss, one stop in a hundred ran on 70 cm on the
+guest's screen and came back, and one change of health in a hundred showed a third of a second late. Now a line that says
+the same as the last goes again the turn after it first went, and once more two turns after that (`net.enemyAgain`), and
+only then is left to the quarter second. It's three lines for a change where there was one, so more lines only where
+something happened: 55 -> 61 a second in netsim's fight of eight enemies, 12.1 -> 12.5 KB/s from the host. The guest reads
+a line that says the same as it reads any other: nothing changes there, and an older version takes them as it is.
+
+netsim, an hour each, eight enemies that move 15% of the time and change health every two seconds; the rule in `netsim.cpp`
+is the Lua's (`--enemy-rule 0` and `1`), and the Lua itself is in `luasim four`'s part. 1.7.3's rule -> this:
+
+| ping, jitter, loss | a copy past its stop, worst 1% | ... worst | a change of health shows, slowest 1% | ... slowest |
+|---|---|---|---|---|
+| 30 ms, 3 ms, none | 27 -> 25 cm | 75 -> 75 cm | 102 -> 101 ms | 230 -> 230 ms |
+| 30 ms, 3 ms, 2% | 74 -> 30 cm | 141 -> 97 cm | 302 -> 116 ms | 605 -> 230 ms |
+| 80 ms, 10 ms, 1% | 62 -> 29 cm | 137 -> 113 cm | 180 -> 140 ms | 436 -> 237 ms |
+| 80 ms, 10 ms, 2% | 76 -> 31 cm | 151 -> 87 cm | 344 -> 145 ms | 602 -> 246 ms |
+| 80 ms, 10 ms, 5% | 81 -> 40 cm | 150 -> 96 cm | 368 -> 155 ms | 927 -> 263 ms |
+| 150 ms, 10 ms, 2% | 76 -> 31 cm | 151 -> 109 cm | 372 -> 180 ms | 671 -> 284 ms |
+| 150 ms, 30 ms, 5% | 93 -> 44 cm | 149 -> 117 cm | 412 -> 201 ms | 713 -> 512 ms |
+| 250 ms, 30 ms, 2% | 72 -> 37 cm | 152 -> 72 cm | 440 -> 244 ms | 752 -> 347 ms |
+| 80 ms, bursts of 60 ms 3% of the time | 76 -> 46 cm | 147 -> 87 cm | 352 -> 176 ms | 904 -> 463 ms |
+| 150 ms, bursts of 100 ms 2% of the time | 68 -> 53 cm | 151 -> 149 cm | 378 -> 220 ms | 690 -> 594 ms |
+| 80 ms, 20 ms, 2%, a 250 ms stall every 7 s | 75 -> 55 cm | 146 -> 138 cm | 347 -> 252 ms | 684 -> 361 ms |
+
+The typical stop (3 cm past) and the typical change of health (the trip, a turn and a frame: 80 ms at ping 80) don't move,
+nor how far behind a copy is played (57 ms at ping 80). One repeat instead of two gave the same worst 1% but not the
+worst: at ping 80 with 2% loss a change of health 410 ms late at worst against 246, a stop 139 cm past against 87.
+Found on the way: a turn comes every 1/30 s only when two frames add up to it, which at a steady 60 FPS they do half
+the time, so a moving enemy's lines are nearer 24 a second than 30 (20 in the Lua sim, whose frames are exact). Left as
+it is: the turn's cost on the host was measured at that rate.
+
 **Where the other guests are rides in the host's own packets.** A party's host passes each guest's place on to the others
 "at most 60 times a second: it mostly rides along", but it only went once `PLAYERS_EVERY` had passed since the last, riding
 or not, and so mostly in a packet of its own: 59 bytes of headers, 60 times a second, to every guest. Now it goes in any

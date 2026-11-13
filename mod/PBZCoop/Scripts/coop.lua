@@ -935,18 +935,32 @@ return function(api)
     -- so the other side never takes it for gone. Most enemies stand most of the time: in recordings of real fights, 88-99%
     -- of their samples said what the one before did, and each went out 30 times a second all the same. (Fields of net, not
     -- locals: this function is at Lua's 200 locals.)
-    net.linesSent = {}            -- enemy number -> { text, at }
+    -- A line goes once and isn't sent again if it's lost. One that said something new is made good by the next that does,
+    -- a turn on; but the last of them (the enemy stopped, or was hit as it stood) had only the line every ENEMY_SAME_S
+    -- after it, and at 2% loss, one time in a hundred, a copy ran on 70 cm past its stop and its health showed a third of a
+    -- second late (netsim). So a line that says the same as the last goes again the turn after it first went, and once more
+    -- two turns after that (net.enemyAgain turns), before it's left to ENEMY_SAME_S.
+    net.linesSent = {}            -- enemy number -> { text, at, again }
     net.enemySameS = 0.25         -- a line that says nothing new goes again this often (ENEMY_STALE_S allows for two)
+    net.enemyAgain = { 0.9, 1.9 } -- and before that, this many turns after it went: the first time, then the second
     function net.sendEnemyLine(number, text)
         local last = net.linesSent[number]
-        if last and last.text == text and net.frameNow - last.at < net.enemySameS then
-            return
-        end
-        if last then
-            last.text, last.at = text, net.frameNow
+        local now = net.frameNow
+        if last and last.text == text then
+            local turns = net.enemyAgain[last.again + 1]
+            if now - last.at < (turns and turns * (net.enemyRoundS or ENEMY_ROUND_S) or net.enemySameS) then
+                return
+            end
+            if turns then
+                last.again = last.again + 1
+            end
+        elseif last then
+            last.text, last.again = text, 0
         else
-            net.linesSent[number] = { text = text, at = net.frameNow }
+            last = { text = text, again = 0 }
+            net.linesSent[number] = last
         end
+        last.at = now
         link.enemy(text)
     end
 
