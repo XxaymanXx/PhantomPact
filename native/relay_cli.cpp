@@ -353,10 +353,12 @@ void test_lanes() {
     check(held_back && wire_gap.size() == 2, "sure: the last one lost, with nothing after it, goes again at retry_s");
 
     // Copies: an event alone, as in a fight, goes again 14, 42 and 98 ms after it was sent, with no loss known. Round trip
-    // 150 ms: retry_s 240, lost_after_s 170.
-    const auto run_copies = [](relay::SureSender& s, double from, double to, std::vector<double>& sent_at) {
-        for (double now = from; now < to; now += 0.001)
-            s.for_each_due(now, 0.24, [&](const relay::SureSender::Item&) { sent_at.push_back(now); return true; }, 0.17, 0.014);
+    // 150 ms: retry_s 240, lost_after_s 170. Each step is the relay's: what's due, then the copies.
+    const auto run_copies = [](relay::SureSender& s, double from, double to, std::vector<double>& sent_at, double wait = 0) {
+        for (double now = from; now < to; now += 0.001) {
+            s.for_each_due(now, 0.24, [&](const relay::SureSender::Item&) { sent_at.push_back(now); return true; }, 0.17);
+            s.for_each_copy(now, 0.014, wait, [&](const relay::SureSender::Item&) { sent_at.push_back(now); return true; });
+        }
     };
     relay::SureSender copies;
     std::vector<double> times;
@@ -381,23 +383,36 @@ void test_lanes() {
     times.clear();
     for (int i = 0; i < 9; i++) many.push("one of many");
     run_copies(many, 0, 0.2, times);
-    check(times.size() == 9 && many.copied == 0, "sure: a long queue goes once each: its gaps show in the acknowledgements, and copies would double it");
+    check(times.size() == 9 && many.copied == 0, "sure: a long queue goes once each: its gaps show in the acknowledgements, and copies would only make it longer");
     relay::SureSender plain;
     times.clear();
     plain.push("no copies asked");
     for (double now = 0; now < 0.2; now += 0.001)
         plain.for_each_due(now, 0.24, [&](const relay::SureSender::Item&) { times.push_back(now); return true; }, 0.17);
-    check(times.size() == 1, "sure: and with no copy gap given there are none");
+    check(times.size() == 1, "sure: and what's due alone, as 1.7.3 asked, sends it once");
+    relay::SureSender list;
+    times.clear();
+    list.push(std::string(relay::SURE_COPY_BYTES + 1, 'b'));     // a bag's line, told at a join
+    run_copies(list, 0, 0.2, times);
+    check(times.size() == 1 && list.copied == 0, "sure: a long event has no copies: each would be a packet of its own");
     // A copy that would need a packet of its own waits a little longer for one to ride in.
     relay::SureSender rider;
     times.clear();
     rider.push("waits for a ride");
-    for (double now = 0; now < 0.03; now += 0.001)
-        rider.for_each_due(now, 0.24, [&](const relay::SureSender::Item&) { times.push_back(now); return true; }, 0.17, 0.014, 0.02);
+    run_copies(rider, 0, 0.03, times, 0.02);
     const bool waited_for_ride = times.size() == 1;
-    for (double now = 0.03; now < 0.04; now += 0.001)
-        rider.for_each_due(now, 0.24, [&](const relay::SureSender::Item&) { times.push_back(now); return true; }, 0.17, 0.014, 0.02);
+    run_copies(rider, 0.03, 0.04, times, 0.02);
     check(waited_for_ride && times.size() == 2 && std::fabs(times[1] - 0.034) < 0.0015, "sure: a copy with no packet to ride in waits 20 ms more, then goes alone");
+    // The refused copy stays for the next packet, and holds back nothing that's due.
+    relay::SureSender full;
+    full.push("first");
+    int due_sent = 0, copy_sent = 0;
+    full.for_each_due(0, 0.24, [&](const relay::SureSender::Item&) { due_sent++; return true; }, 0.17);
+    full.for_each_copy(0.02, 0.014, 0, [&](const relay::SureSender::Item&) { return false; });      // no room left in this packet
+    full.push("second");
+    full.for_each_due(0.021, 0.24, [&](const relay::SureSender::Item&) { due_sent++; return true; }, 0.17);
+    full.for_each_copy(0.021, 0.014, 0, [&](const relay::SureSender::Item&) { copy_sent++; return true; });
+    check(due_sent == 2 && copy_sent == 1 && full.copied == 1, "sure: a copy with no room left waits for the next packet, and a new event goes all the same");
 }
 
 void test_packets() {
@@ -649,12 +664,14 @@ struct FakeNet {
     std::mt19937 rng{2026};
     size_t biggest = 0;
     long long carried = 0, order = 0;
+    std::map<uint32_t, long long> bytes;      // by sender: what it put on the wire
 
     double unit() { return std::uniform_real_distribution<double>(0, 1)(rng); }
 
     void send(const relay::Addr& from, const relay::Addr& to, const std::string& data) {
         biggest = std::max(biggest, data.size());
         carried++;
+        bytes[from.ip] += static_cast<long long>(data.size());
         if (down || unit() < loss) return;
         Packet p{now + delay + unit() * jitter, order++, from, data};
         if (from.ip == hold_from) {
@@ -2041,17 +2058,19 @@ void test_sockets(int port) {
     check(status.find(" filtered=1 ") != std::string::npos && status.find(" received=0 ") != std::string::npos, "a stranger's packet to a guest's real socket is filtered");
 }
 
-// Where the other guests are goes to a guest in a packet that goes anyway, the host's own place: by itself only when
-// nothing has gone for PLAYERS_EVERY. The host's game here sends its place every 15 ms, the guests theirs every 5.
+// Where the other guests are goes to a guest in a packet that goes anyway, the host's own place: by itself only when none
+// of them has gone for PLAYERS_EVERY. And each guest's place goes on 60 times a second at most, however often it comes: a
+// guest above 60 FPS sends up to 125, and all of them passed on were a fifth more upload for a party's host (the review
+// of e82c253). Here the host's game and the guests' send their places every 5 ms, 200 a second.
 void test_party_riding() {
     std::puts("four players, what the host sends:");
     FakeNet net;
     Hosting host(net, 1);
     End a(net, "client", 2, at(1)), b(net, "client", 3, at(1)), c(net, "client", 4, at(1));
     run(net, host, {&a, &b, &c}, 0.5);
-    const long long before = net.carried;
+    const long long before = net.carried, bytes_before = net.bytes[1];
     const uint32_t base_ms = static_cast<uint32_t>(relay::clock_ms()) + 1000;
-    int steps = 0, host_posts = 0;
+    int steps = 0;
     const auto place = [&](float x) {
         relay::Sample s = at_x(x + static_cast<float>(steps));
         s.ms = base_ms + static_cast<uint32_t>(steps) * 5;
@@ -2062,20 +2081,22 @@ void test_party_riding() {
         a.box.post_sample(place(1000));
         b.box.post_sample(place(2000));
         c.box.post_sample(place(3000));
-        if (steps % 3 == 0) {
-            host.box.post_sample(place(500));
-            host_posts++;
-        }
+        host.box.post_sample(place(500));
         host.step();
         for (End* e : {&a, &b, &c}) e->step();
     }
-    const long long from_host = net.carried - before - 3LL * steps, own = 3LL * host_posts;
+    const long long from_host = net.carried - before - 3LL * steps, own = 3LL * steps;
     relay::Sample out;
     check(sees(a.box, 3, out) && out.x >= 2000 && out.x < 2200 && sees(c.box, 2, out) && out.x >= 1000 && out.x < 1200,
           "each guest's place reaches the others while the host's own goes too");
-    char what[160];
+    char what[200];
     std::snprintf(what, sizeof what, "and rides in the host's own packets: %lld packets from the host for %lld places of its own", from_host, own);
     check(from_host <= own + 20, what);
+    // What the host sent beyond its own places (72 bytes a packet) and a hello or two: the others' places, 42 bytes each, two
+    // to each of three guests. 60 a second each is 15 KB; all 200 would be 50.
+    const long long passed_on = net.bytes[1] - bytes_before - own * 72;
+    std::snprintf(what, sizeof what, "a guest's place goes on 60 times a second at most, though it came 200 times: %lld bytes of them in a second", passed_on);
+    check(passed_on > 3 * 2 * 42 * 50 && passed_on < 3 * 2 * 42 * 70, what);
     // With nothing of the host's own to ride in (its game in a load), they go by themselves, PLAYERS_EVERY apart.
     const long long quiet = net.carried;
     for (int i = 0; i < 100; i++, steps++) {
@@ -2085,8 +2106,9 @@ void test_party_riding() {
         for (End* e : {&a, &b, &c}) e->step();
     }
     const float last = 1000 + static_cast<float>(steps - 1);
-    check(sees(b.box, 2, out) && out.x > last - 60 && net.carried - quiet - 100 >= 2 * 20,
-          "with the host's game standing still a guest's place is still passed on, in packets of its own");
+    const long long alone = net.carried - quiet - 100;
+    std::snprintf(what, sizeof what, "with the host's game standing still a guest's place is still passed on, in packets of its own, 60 a second at most (%lld in half a second to two guests)", alone);
+    check(sees(b.box, 2, out) && out.x > last - 60 && alone >= 2 * 20 && alone <= 2 * 34, what);
 }
 
 int run_tests(int argc, wchar_t** argv) {

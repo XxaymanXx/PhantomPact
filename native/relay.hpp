@@ -70,7 +70,11 @@ constexpr size_t MAX_INBOX_BYTES = 1 << 20;
 constexpr size_t MAX_QUICK_WAITING = 256;
 constexpr int MAX_PACKETS_PER_RECEIVE = 256;
 constexpr int HOST_SLOT = 1, FIRST_GUEST_SLOT = 2, MAX_SLOT = 6;   // who's who with more than two players (party.hpp)
-constexpr double PLAYERS_EVERY = 1.0 / 60;  // where the others are goes to a guest this often at most: it mostly rides along
+constexpr double PLAYERS_EVERY = 1.0 / 60;  // where each of the others is goes to a guest this often at most, in a packet that
+                                            // goes anyway (by itself when none has for this long)
+constexpr double PLAYERS_SAVED = 2;         // ...but two of one player's close together still go: the trip bunches a 60 FPS
+                                            // guest's places, and over a second it's still 60 (a guest above 60 FPS sends up
+                                            // to 125: every one passed on was a fifth more upload for a party's host)
 
 inline std::wstring widen(const std::string& s) {
     if (s.empty()) return {};
@@ -1283,15 +1287,13 @@ private:
         // Sure lane first: it's what must not wait behind anything. With nobody answering they wait here, not on the wire:
         // a long queue resent forever at an empty address is megabytes a second.
         if (peer_session_ != 0 && partner_here) {
-            // (A copy rides in a packet that goes anyway, this frame's place: alone it's 59 bytes of headers for 40 of event.)
-            const double alone = p.size() > header_bytes_ ? 0 : SURE_COPY_ALONE;
             sure_out_.for_each_due(now, retry_s(), [&](const SureSender::Item& item) {
                 if (!room(1 + 4 + 2 + item.text.size())) return false;
                 w.put<uint8_t>(SEC_SURE);
                 w.put<uint32_t>(item.id);
                 w.text(item.text);
                 return true;
-            }, lost_after_s(), SURE_COPY_GAP, alone);
+            }, lost_after_s());
         }
         if (partner_here) quick_out_.for_each(now, QUICK_GAP, [&](const QuickSender::Item& item, double age) {
             if (!room(1 + 4 + 2 + 2 + item.text.size())) return false;
@@ -1308,21 +1310,43 @@ private:
             enemy_out_.pop_front();
         }
         // Where the others are rides in a packet that goes anyway, the host's own place each frame: by itself, as it went
-        // before, it's a packet of 59 bytes of headers for each of them, 60 times a second to every guest.
+        // before, it's a packet of 59 bytes of headers for each of them, 60 times a second to every guest. Each player's
+        // place has a budget of its own that fills 60 times a second (PLAYERS_EVERY) and holds PLAYERS_SAVED: one with
+        // none left waits here, the newest in its place, for the next packet once there is.
         if (players_waiting_ && partner_here && (p.size() > header_bytes_ || now - last_players_ >= PLAYERS_EVERY)) {
-            last_players_ = now;
             players_waiting_ = false;
             for (size_t i = 0; i < players_out_.size(); i++) {
                 if (!players_out_[i]) continue;
+                player_budget_[i] = std::min(PLAYERS_SAVED, player_budget_[i] + (now - player_at_[i]) / PLAYERS_EVERY);
+                player_at_[i] = now;
+                if (player_budget_[i] < 1) {
+                    players_waiting_ = true;
+                    continue;
+                }
                 if (!room(1 + 1 + SAMPLE_BYTES)) {
                     players_waiting_ = true;
                     break;
                 }
+                player_budget_[i] -= 1;
+                last_players_ = now;
                 w.put<uint8_t>(SEC_PLAYER);
                 w.put<uint8_t>(static_cast<uint8_t>(FIRST_GUEST_SLOT + i));
                 put_sample(w, *players_out_[i]);
                 players_out_[i].reset();
             }
+        }
+        // Copies of sure events (lanes.hpp), last: a copy rides in the room that's left of a packet that goes anyway, this
+        // frame's place, and never starts another, so it holds nothing up and adds no packet. With nothing going (the game
+        // standing in a load, or under 50 FPS) it waits SURE_COPY_ALONE more and then makes one: 59 bytes of headers.
+        if (peer_session_ != 0 && partner_here) {
+            const double alone = p.size() > header_bytes_ ? 0 : SURE_COPY_ALONE;
+            sure_out_.for_each_copy(now, SURE_COPY_GAP, alone, [&](const SureSender::Item& item) {
+                if (p.size() + 1 + 4 + 2 + item.text.size() > MAX_PACKET) return false;
+                w.put<uint8_t>(SEC_SURE);
+                w.put<uint32_t>(item.id);
+                w.text(item.text);
+                return true;
+            });
         }
         const bool ack_late = ack_by_ >= 0 && now >= ack_by_;
         if (p.size() > header_bytes_ || ack_late || now - last_send_ >= KEEPALIVE_EVERY) send_packet(p, now);
@@ -1427,6 +1451,9 @@ private:
     std::array<std::optional<Sample>, MAX_SLOT - HOST_SLOT> players_out_;
     bool players_waiting_ = false;
     double last_players_ = 0;
+    // By slot: what's left of that player's places' budget, and as of when.
+    std::array<double, MAX_SLOT - HOST_SLOT> player_budget_{PLAYERS_SAVED, PLAYERS_SAVED, PLAYERS_SAVED, PLAYERS_SAVED, PLAYERS_SAVED};
+    std::array<double, MAX_SLOT - HOST_SLOT> player_at_{};
     // As a guest: what the host's hello said.
     int party_players_ = 0, party_slot_ = 0;
 };

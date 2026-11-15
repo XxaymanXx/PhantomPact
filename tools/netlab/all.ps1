@@ -81,11 +81,27 @@ Step 'netsim' {
     $out = & (Join-Path $PSScriptRoot 'netsim.ps1') -Run '--rtt 150 --jitter 10 --loss 2' -Seconds 900 -Work (Join-Path $private 'netsim')
     $sure = $out | Where-Object { $_ -match '^new sure\.host_to_guest' } | Select-Object -First 1
     $quick = $out | Where-Object { $_ -match '^new quick\.lost' } | Select-Object -First 1
+    $bytes = $out | Where-Object { $_ -match '^new bytes ' } | Select-Object -First 1
     $p99 = if ($sure -match ' p99=([\d.]+)') { [double]$Matches[1] } else { -1 }
     $wrong = if ($quick -match 'wrong_order=(\d+)') { [int]$Matches[1] } else { -1 }
     $good = $p99 -ge 0 -and $p99 -lt 160 -and $wrong -eq 0
     "  $(if ($good) { 'ok  ' } else { 'FAIL' }) ping 150 with 2% loss, 15 minutes: the slowest 1% of sure events $p99 ms after they were sent (limit 160), $wrong out of order"
     if (-not $good) { [void]$failed.Add('netsim') }
+    # The copies add no packets: they ride in the frame's packet, and their acknowledgement waits for the next. 1.7.3 sends
+    # 103.3 and 73.7 packets a second here; with a copy in a packet of its own, or its acknowledgement hurried, 109.5 and 81.1.
+    $hostPackets = if ($bytes -match 'host_packets_s=([\d.]+)') { [double]$Matches[1] } else { -1 }
+    $guestPackets = if ($bytes -match 'guest_packets_s=([\d.]+)') { [double]$Matches[1] } else { -1 }
+    $good = $hostPackets -gt 0 -and $hostPackets -lt 105 -and $guestPackets -gt 0 -and $guestPackets -lt 75.5
+    "  $(if ($good) { 'ok  ' } else { 'FAIL' }) and no more packets for it: $hostPackets a second from the host (limit 105), $guestPackets from the guest (limit 75.5)"
+    if (-not $good) { [void]$failed.Add('netsim, packets') }
+    # A party above 60 FPS: each guest's place goes on to the others 60 times a second at most. Six players at 120 FPS upload
+    # 174 KB/s from the host on 1.7.3 and 175 here; with every place passed on it was 205.
+    $out = & (Join-Path $PSScriptRoot 'netsim.ps1') -Run '--players 6 --enemies 8 --rtt 80 --jitter 10 --loss 1 --fps 120' -Seconds 120 -Work (Join-Path $private 'netsim')
+    $bytes = $out | Where-Object { $_ -match '^new bytes ' } | Select-Object -First 1
+    $upload = if ($bytes -match 'host_up_kb_s=([\d.]+)') { [double]$Matches[1] } else { -1 }
+    $good = $upload -gt 0 -and $upload -lt 185
+    "  $(if ($good) { 'ok  ' } else { 'FAIL' }) six players at 120 FPS: the host uploads $upload KB/s (limit 185)"
+    if (-not $good) { [void]$failed.Add('netsim, party') }
 }
 
 if (-not $NoRestart) { Step 'restart-test' {

@@ -2,8 +2,8 @@
 //   Sure   every event arrives, once, in order (a death, a hit, loot). Several travel at a time, and a lost one is sent
 //          again once the partner's acknowledgement shows the gap and a round trip has gone by since it was sent, so a loss
 //          costs about one round trip. With nothing sent after it to show the gap, it goes again after retry_s. In play
-//          they come one at a time, so each also goes again a frame later, and again after that, before any loss can be
-//          known: a lost packet then costs a frame, not a round trip and a half.
+//          they come one at a time, so a short one also goes again a frame later, and twice more after that, before any
+//          loss can be known (copies): a lost packet then costs a frame, not a round trip and a half.
 //   Quick  moves and hit reactions: each goes out in the next few packets, is played once, and is dropped once it's too
 //          late to matter. An attack shown two seconds late is worse than none, and old ones must never hold up a death.
 // Plain logic with no Windows calls, so relay_cli can test it against simulated connections.
@@ -22,6 +22,8 @@ constexpr size_t MAX_SURE_PENDING = 8192;     // events waiting for a partner wh
 constexpr int SURE_COPIES = 3;                // a sure event goes again this many times before any loss is known...
 constexpr size_t SURE_COPIES_UP_TO = 8;       // ...while this few wait: a long queue (a join, a re-tell) shows its gaps in the
                                               // acknowledgements at once, and copies would only make it four times as long
+constexpr size_t SURE_COPY_BYTES = 200;       // ...and only one this short: a fight's events are under 100 bytes, and a long one
+                                              // is a list told at a join (a bag's 600), whose copies would be packets of their own
 
 // In order or not at all: a lost event would hold back everything behind it forever. So once the queue has really dropped
 // one, overflowed stays set, and the relay starts both sides over when the partner is back (Relay::flush).
@@ -32,7 +34,7 @@ public:
         std::string text;
         double sent_at = -1e9;
         int sends = 0;
-        double copy_at = -1e9;  // its last copy (see for_each_due): a copy changes nothing above
+        double copy_at = -1e9;  // its last copy (see for_each_copy): a copy changes nothing above
         int copies = 0;
         bool acked = false;
         bool passed = false;    // an acknowledgement confirmed something sent after this, and not this (see on_ack)
@@ -52,33 +54,39 @@ public:
     // Everything due now, oldest first: new events, and sent ones that have gone unconfirmed for retry_s. One passed over
     // by an acknowledgement is lost, not late: it's due again once lost_after_s has gone by since it was sent (about one
     // round trip), not retry_s (half as much again, and 15 ms). Negative lost_after_s: retry_s for both.
-    // copy_gap_s: with few waiting, an unconfirmed event also goes again that long after it was sent, then twice and four
-    // times that after each copy (SURE_COPIES), with no loss known. In a fight an event comes alone, a second or more from
-    // the next: nothing sent after it shows that it was lost, and it waited out retry_s, the partner's enemy standing at 1
-    // health meanwhile. A copy is on top of all the above and changes none of it: when an event is taken for lost is still
-    // counted from sent_at, so nothing comes later than it did without copies. Negative: no copies. copy_wait_s is added
-    // to each copy's wait: the relay's, for a copy that would have to go in a packet of its own.
     template <typename Fn>
-    void for_each_due(double now, double retry_s, Fn&& take, double lost_after_s = -1, double copy_gap_s = -1, double copy_wait_s = 0) {
-        const bool few = copy_gap_s >= 0 && pending_.size() <= SURE_COPIES_UP_TO;
+    void for_each_due(double now, double retry_s, Fn&& take, double lost_after_s = -1) {
         for (Item& item : pending_) {
             if (item.acked) continue;
             const double wait = item.passed && lost_after_s >= 0 ? std::min(lost_after_s, retry_s) : retry_s;
-            if (now - item.sent_at >= wait) {
-                if (!take(static_cast<const Item&>(item))) return;
-                if (item.sends) resent++;
-                if (item.sends && item.passed && now - item.sent_at < retry_s) resent_early++;
-                item.sent_at = now;
-                item.sends++;
-                item.passed = false;    // (sent again: only a confirmation of something sent after this counts now)
-                item.copy_at = now;     // (and its copies start over)
-                item.copies = 0;
-            } else if (few && item.copies < SURE_COPIES && now - item.copy_at >= copy_gap_s * (1 << item.copies) + copy_wait_s) {
-                if (!take(static_cast<const Item&>(item))) return;
-                copied++;
-                item.copy_at = now;
-                item.copies++;
-            }
+            if (now - item.sent_at < wait) continue;
+            if (!take(static_cast<const Item&>(item))) return;
+            if (item.sends) resent++;
+            if (item.sends && item.passed && now - item.sent_at < retry_s) resent_early++;
+            item.sent_at = now;
+            item.sends++;
+            item.passed = false;    // (sent again: only a confirmation of something sent after this counts now)
+            item.copy_at = now;     // (and its copies start over: for_each_copy)
+            item.copies = 0;
+        }
+    }
+
+    // Copies: with few waiting, a short unconfirmed event goes again gap_s after it was sent, then twice and four times that
+    // after each copy (SURE_COPIES), with no loss known. In a fight an event comes alone, a second or more from the next:
+    // nothing sent after it shows that it was lost, and it waited out retry_s, the partner's enemy standing at 1 health
+    // meanwhile. The relay asks for them after everything else a packet carries, so a copy takes only the room that's left
+    // and holds nothing up; and a copy changes nothing of for_each_due's: when an event is taken for lost still counts from
+    // sent_at. wait_s is added to each wait: the relay's, for a copy that would have to go in a packet of its own.
+    template <typename Fn>
+    void for_each_copy(double now, double gap_s, double wait_s, Fn&& take) {
+        if (pending_.size() > SURE_COPIES_UP_TO) return;
+        for (Item& item : pending_) {
+            if (item.acked || !item.sends || item.copies >= SURE_COPIES || item.text.size() > SURE_COPY_BYTES) continue;
+            if (now - item.copy_at < gap_s * (1 << item.copies) + wait_s) continue;
+            if (!take(static_cast<const Item&>(item))) return;
+            copied++;
+            item.copy_at = now;
+            item.copies++;
         }
     }
 
