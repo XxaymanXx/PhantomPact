@@ -666,6 +666,20 @@ class Words:
         return rows[0][1]
 
 
+def player_badge(words):
+    def draw(t):
+        img, d = lp.badge_ground()
+        page = Page(img)
+        line(page, t[words], (192, 48), 34, LABEL, lp.BRIGHT, "center", room=330)
+        return page
+    return draw
+
+
+def local_pictures():
+    """The badge on the game's menu while it's player 2's own (loadout.lua)."""
+    picture("ar_player_menu_2", ["PLAYER 2"], ("local.art.",), player_badge("PLAYER 2"))
+
+
 def main(args):
     sys.stdout.reconfigure(errors="replace")
     tables = [a for a in args if a.lower().endswith(".tsv")]      # (the table wherever it is given, once)
@@ -679,6 +693,7 @@ def main(args):
     online_pictures()
     pvp_pictures()
     match_pictures()
+    local_pictures()
     made, skipped = [], []
     for name, english, ids, draw, hud in PICTURES:
         if only and name not in only:

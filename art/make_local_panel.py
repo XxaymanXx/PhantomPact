@@ -184,6 +184,24 @@ def button(name, text, red=False, face=font, gap=3):
     save(img, name)
 
 
+def badge_ground():
+    """The badge on the game's menu while it's a player's own (loadout.lua), with no words: see-through black, a silver
+    frame and a faint one inside it."""
+    w, h = 384, 96
+    img, d = canvas(w, h)
+    d.rectangle((0, 0, w * K, h * K), fill=BLACK)
+    frame(d, w, h, SILVER)
+    frame(d, w, h, FAINT, inset=6)
+    return img, d
+
+
+def player_badge(n):
+    w, h = 384, 96
+    img, d = badge_ground()
+    spaced(d, (w * K / 2, h * K / 2), "PLAYER %d" % n, font(34, True), BRIGHT, gap=6)
+    save(img, "player_menu_%d" % n)
+
+
 def health_bar():
     """Player 2's health: the game draws its own bar for player 1 only."""
     w, h = 300, 16
@@ -221,4 +239,5 @@ if __name__ == "__main__":
     button("apply", "APPLY")
     button("applied", "APPLIED", red=True)
     button("multiplayer", "MULTIPLAYER", gap=1)
+    player_badge(2)
     print("panel art written to", os.path.normpath(OUT))

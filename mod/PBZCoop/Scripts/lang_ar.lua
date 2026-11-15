@@ -97,6 +97,9 @@ return {
         ["player 1 is on the top monitor, player 2 on the bottom one."] = "اللاعب 1 على الشاشة العليا، واللاعب 2 على الشاشة السفلى.",  -- local.tip.mon_tb
         ["two monitors: there's no monitor beside this one, so both players stay on this one."] = "وضع الشاشتين: لا توجد شاشة بجانب هذه الشاشة، لذا يبقى اللاعبان عليها.",  -- local.tip.mon_single
         ["two monitors need the game's display mode on Borderless or Windowed."] = "يحتاج وضع الشاشتين إلى ضبط وضع العرض في اللعبة على «نافذة بلا حدود» أو «نافذة».",  -- local.tip.mon_mode
+        ["player 2's menu: what's equipped here is player 2's own."] = "قائمة اللاعب 2: ما يُجهَّز هنا خاص باللاعب 2.",  -- local.tip.own_menu
+        ["player 2 took a talisman player 1 was wearing: it's player 2's now."] = "أخذ اللاعب 2 تميمة كان يرتديها اللاعب 1: أصبحت الآن للاعب 2.",  -- local.tip.talisman_taken
+        ["player 1 put on a talisman player 2 was wearing: it's player 1's now."] = "ارتدى اللاعب 1 تميمة كان يرتديها اللاعب 2: أصبحت الآن للاعب 1.",  -- local.tip.talisman_back
         -- the match screen (arenaui.lua): the countdown's words, a foe's name before their slot, YOU before the score
         ["ONE"] = "واحد",  -- match.count.one
         ["TWO"] = "اثنان",  -- match.count.two

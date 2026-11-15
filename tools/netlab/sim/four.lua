@@ -8267,7 +8267,7 @@ local function localScreen()
     local s, pc, state = localGame()
     s:run(1.5)
     local p2 = state.p2Pawn
-    Fake.put(p2, "loc", { X = 8000.0, Y = 100.0, Z = 100.0 })
+    Fake.put(p2, "loc", { X = 7900.0, Y = 0.0, Z = 100.0 })        -- (the bell straight ahead of their view)
     local bell = Fake.switch(pc, "BP_Bell_C", 8000.0, 0.0, 100.0, true)
     s:run(0.5)
     local comp = field(p2, "promptComp")
@@ -8286,11 +8286,17 @@ local function localScreen()
     rawset(bell, "__forbidden", nil)
     s:run(0.5)
     check(field(comp, "shown") == true and field(w, "plays") == 2, "back when the game says yes")
-    rawset(bell, "__behind", true)
+    -- (Faced by their own view: the game's IsPlayerFaceToActor answers for player 1's screen.)
+    Fake.put(state.p2Controller, "controlRot", { Pitch = 0.0, Yaw = 180.0, Roll = 0.0 })
+    rawset(bell, "__behind", nil)
     s:run(0.5)
     check(field(comp, "shown") == false, "behind them, there's no prompt")
     Session.press2(s, "Gamepad_FaceButton_Right")
     check(field(pc.controller, "Pawn") == pc.pawn, "and nothing to press")
+    rawset(bell, "__behind", true)
+    Fake.put(state.p2Controller, "controlRot", nil)
+    s:run(0.5)
+    check(field(comp, "shown") == true, "in front of them it's there, whatever player 1's screen says")
     rawset(bell, "__behind", nil)
     s:run(0.5)
     Fake.put(field(p2, "CharacterMovement"), "MovementMode", 5)
@@ -8442,6 +8448,20 @@ local function localScreen()
     check(field(hpc.playerHud, "visibility") == 1, "away over a menu")
     hpc.paused = false
     h:run(0.5)
+    -- Its health reading asks for player 1's (the game's Get Health Percentage): theirs is written in by hand.
+    local _, max2 = hpc.env.PBZ.game.getHealth(hstate.p2Pawn)
+    check(field(hpc.playerHud, "hpShown") == 1, "their bar holds their own health")
+    local shows = field(hpc.playerHud, "shows") or 0
+    Fake.setHealth(hstate.p2Pawn, max2 / 2)
+    h:run(0.2)
+    check(field(hpc.playerHud, "hpShown") == 0.5 and (field(hpc.playerHud, "shows") or 0) == shows + 1, "a hit of theirs takes it down, and shows it")
+    hpc.playerHud:ForSeq_UpdatePlayerHP(1.0)       -- (the game writing player 1's there as player 1 is hit)
+    Fake.setHealth(hpc.pawn, 700)
+    h:run(0.2)
+    check(field(hpc.playerHud, "hpShown") == 0.5, "player 1's hit leaves theirs as it is")
+    Fake.setHealth(hstate.p2Pawn, max2)
+    h:run(0.2)
+    check(field(hpc.playerHud, "hpShown") == 1, "and it fills again")
     local boss = Fake.enemy(hpc, "boss", "BP_Boss_C", 100.0, 0.0, 100.0, 5000, 100, true)
     hpc.env.PBZ.game.bossActors = function() return { boss } end
     h:run(1.5)
@@ -8471,6 +8491,265 @@ local function localScreen()
     h:run(1.5)
     check(field(bar, "removed") == true, "and the bar goes with the fight")
     allErrors(h)
+end
+
+-- Player 2's Options (BUGHUNT 248): the game's menu layer takes every joystick's as player 1's, so main.dll keeps pad 2's
+-- from it while the mod asks, every frame in play, and the mod opens player 2's menu for each press kept.
+-- Player 2's Cross and Circle do what player 1's do, by the game's own sets and its own rule for a climb spot (11-12).
+local function localButtons()
+    part("player 2's Cross and Circle")
+    local s, pc, state = localGame()
+    s:run(1.5)
+    local p2 = state.p2Pawn
+    local climbSet, useSet = pc.promptSets.IMC_InteractionSpecialMove, pc.promptSets.IMC_Interaction
+    local used = function() return field(field(p2, "interact"), "used") end
+    Fake.put(p2, "loc", { X = 7900.0, Y = 0.0, Z = 100.0 })
+    local run = Fake.volume(pc, "BP_SpecialMove_UpRunning_C", 8000.0, 0.0, 100.0)
+    s:run(0.5)
+    check(pc.inputSets[1][climbSet] == 1000 and pc.inputSets[1][useSet] == nil, "at a wall run the game offers, Cross is theirs to climb with: its set over the rest")
+    check(pc.inputSets[0][climbSet] == nil, "player 1's buttons don't change")
+    local before = #used()
+    Session.press2(s, "Gamepad_FaceButton_Bottom")
+    check(#used() == before + 1 and used()[#used()] == run, "and Cross starts it")
+    Fake.put(field(p2, "CharacterMovement"), "MovementMode", 5)        -- (the run under way, then over)
+    s:run(1.0)
+    Fake.put(field(p2, "CharacterMovement"), "MovementMode", 1)
+    rawset(run, "__invalid", true)
+    s:run(0.5)
+    check(pc.inputSets[1][climbSet] == nil, "where the game wouldn't offer it (the ledge above, a ladder from behind), the set goes")
+    before = #used()
+    Session.press2(s, "Gamepad_FaceButton_Bottom")
+    s:run(1.0)
+    check(#used() == before, "and Cross stays the plain jump it is for player 1")
+    rawset(run, "__invalid", nil)
+    rawset(p2, "__tags", { ["CharacterState.Action.Phase.Act"] = 1 })
+    s:run(0.5)
+    check(pc.inputSets[1][climbSet] == nil, "nor in the middle of a swing, as the game says for player 1")
+    rawset(p2, "__tags", nil)
+    s:run(0.5)
+    check(pc.inputSets[1][climbSet] == 1000, "and it's back after the swing")
+    local chest = Fake.switch(pc, "BP_Chest_C", 7960.0, 0.0, 100.0)
+    s:run(2.6)          -- (what's newly streamed in is looked for every two seconds or so)
+    check(pc.inputSets[1][useSet] == 1000 and pc.inputSets[1][climbSet] == nil, "a chest nearer than the climb: what's offered is the chest, and Circle uses")
+    before = #used()
+    Session.press2(s, "Gamepad_FaceButton_Bottom")
+    s:run(0.5)
+    check(#used() == before, "and Cross is a jump, not the climb behind it")
+    check(pc.inputSets[0][useSet] == nil, "still none of it on player 1")
+    Fake.put(state.p2Controller, "controlRot", { Pitch = 0.0, Yaw = 180.0, Roll = 0.0 })
+    s:run(0.5)
+    check(pc.inputSets[1][useSet] == nil and pc.inputSets[1][climbSet] == 1000, "turned away from the chest, it isn't offered: the climb is")
+    Fake.put(state.p2Controller, "controlRot", nil)
+    pc.paused = true
+    s:run(0.5)
+    check(pc.inputSets[1][useSet] == nil and pc.inputSets[1][climbSet] == nil, "and neither set while a menu is up")
+    pc.paused = false
+    s:run(0.5)
+    rawset(chest, "__forbidden", true)
+    rawset(run, "__invalid", true)
+    s:run(0.5)
+    check(pc.inputSets[1][useSet] == nil and pc.inputSets[1][climbSet] == nil, "nothing offered, no set: Circle is the execution button again")
+    allErrors(s)
+
+    -- Select: the game's sense-only set over player 2's others (the hold is the sense; the map's tap isn't the game's for them), and
+    -- a tap opens their own menu on the map.
+    local m, mpc, mstate = localGame()
+    m:run(1.5)
+    check(mpc.inputSets[1][mpc.senseSet] == 100 and mpc.inputSets[0][mpc.senseSet] == nil, "the sense-only set on player 2's pad, not player 1's")
+    local n0 = #mpc.injected
+    -- (Player 2's own menu as loadout.lua starts it, which the fake game's bag doesn't go as far as.)
+    local loadout = mpc.env.PBZ.loadout
+    local begin = loadout.begin
+    loadout.begin = function() return false end
+    Session.press2(m, "Gamepad_Special_Left")
+    check(#mpc.injected == n0, "a tap when their own menu can't start: no map, as a shared one would put their choices on player 1")
+    loadout.begin = function() return true end
+    Session.press2(m, "Gamepad_Special_Left")
+    check(#mpc.injected == n0 + 1 and mpc.injected[#mpc.injected] == "IA_Map", "a tap of Select asks for the map, their own menu started")
+    loadout.begin = begin
+    mpc.keys2["Gamepad_Special_Left"] = true
+    m:run(0.6)
+    mpc.keys2["Gamepad_Special_Left"] = false
+    m:run(0.2)
+    check(#mpc.injected == n0 + 1, "a hold is the sense, the game's: no map")
+    allErrors(m)
+
+    -- Screens the game plays on under keep player 2's pad theirs; a menu still shares both.
+    local t, tpc, tstate = localGame()
+    t:run(1.5)
+    local title = Fake.screen(tpc, "WB_ChapterIntro_C")
+    title.InputConfig, title.bPauseGameWhenOpen = 2, false
+    t:run(0.6)
+    check(tpc.fullWidth ~= true and field(tstate.p2Controller, "ignored") ~= true, "a chapter's title: the split stays and player 2 plays on")
+    tpc.screens[1] = nil
+    local tip = Fake.screen(tpc, "WB_hud_tutorial_C")
+    tip.InputConfig, tip.bPauseGameWhenOpen = 1, false
+    t:run(0.6)
+    check(tpc.fullWidth ~= true and field(tstate.p2Controller, "ignored") ~= true, "a tip that doesn't pause: the same")
+    tpc.screens[1] = nil
+    local page = Fake.screen(tpc, "WB_Hud_tutorial_Complex_C")
+    page.InputConfig, page.bPauseGameWhenOpen = 3, false
+    t:run(0.6)
+    check(tpc.fullWidth == true, "a page that takes the menu's buttons is a menu, full width, both pads on it")
+    tpc.screens[1] = nil
+    t:run(0.6)
+    check(tpc.fullWidth ~= true, "and the split's back after it")
+    local load = Fake.screen(tpc, "WB_AdditionalLoading_C")
+    load.InputConfig, load.bPauseGameWhenOpen = 2, false
+    t:run(0.6)
+    check(tpc.fullWidth == true, "a load is still one: a world not there yet holds them both")
+    tpc.screens[1] = nil
+    t:run(0.6)
+    allErrors(t)
+end
+
+-- Player 2 in a fight as the game puts player 1 in one: its InCombat while an enemy in combat hates them (11-12).
+local function localFight()
+    part("player 2 in a fight")
+    local c, cpc, cstate = localGame()
+    c:run(1.5)
+    local p2 = cstate.p2Pawn
+    local inFight = function(body) return (rawget(body, "__tags") or {})["CharacterState.InCombat"] or 0 end
+    local foe = Session.enemyOn(cpc, "thug1")
+    field(foe, "BP_PBZHatredManagerComponent"):AddActorToHatredList(p2, {})
+    c:run(1.2)
+    check(inFight(p2) == 0, "hated by an enemy that isn't fighting yet: not in a fight")
+    rawset(foe, "__tags", { ["AI.State.Combat"] = 1 })
+    c:run(1.2)
+    check(inFight(p2) == 1, "an enemy in combat after them: in a fight, as the game has player 1 (its camera, its stance)")
+    c:run(1.0)
+    check(inFight(p2) == 1, "once, however long it lasts")
+    check(inFight(cpc.pawn) == 0, "and player 1 isn't put in it for them")
+    rawset(foe, "__tags", nil)
+    c:run(1.2)
+    check(inFight(p2) == 0, "the enemy out of combat: out of the fight")
+    rawset(foe, "__tags", { ["AI.State.Combat"] = 1 })
+    c:run(1.2)
+    check(inFight(p2) == 1, "back in")
+    Fake.setHealth(foe, 0)
+    c:run(1.2)
+    check(inFight(p2) == 0, "and out when it dies")
+    allErrors(c)
+
+    -- Down is out of the fight, as a partner down online: off the enemy's list, and the enemy turns to player 1.
+    local d, dpc, dstate = localGame()
+    d:run(1.5)
+    local body = dstate.p2Pawn
+    local thug = Session.enemyOn(dpc, "thug2")
+    local hm = field(thug, "BP_PBZHatredManagerComponent")
+    hm:AddActorToHatredList(body, {})
+    rawset(thug, "__tags", { ["AI.State.Combat"] = 1 })
+    d:run(1.2)
+    check(inFight(body) == 1, "a thug fighting player 2")
+    Fake.setHealth(body, 1)
+    d:run(1.2)
+    local listed = {}
+    for _, a in ipairs(rawget(hm, "__fields").HatredList.items) do
+        listed[a] = true
+    end
+    check(not listed[body], "down, they're off its list")
+    check(field(field(body, "BP_PBZHatredManagerComponent"), "CanBeHatredNow") == false, "and can't be put back on it while down")
+    check(listed[dpc.pawn] == true, "player 1 is on it, so it has someone to turn to")
+    check(inFight(body) == 0, "and they're out of the fight")
+    check(field(field(body, "faction"), "faction") == "Faction.Environment", "their body on the ground is the scenery's side: no enemy's eyes put it back")
+    allErrors(d)
+
+    -- A thug fighting player 2 far from player 1 leaves player 1 out of it; with player 1 near, or the fight over, as the game has it.
+    local f, fpc, fstate = localGame()
+    f:run(1.5)
+    local p2f, p1f = fstate.p2Pawn, fpc.pawn
+    local thug = Session.enemyOn(fpc, "thug1")
+    Fake.put(thug, "loc", { X = 6000.0, Y = 0.0, Z = 100.0 })
+    Fake.put(p2f, "loc", { X = 5900.0, Y = 0.0, Z = 100.0 })
+    local thm = field(thug, "BP_PBZHatredManagerComponent")
+    thm:AddActorToHatredList(p2f, {})
+    thm:AddActorToHatredList(p1f, {})
+    rawset(thug, "__tags", { ["AI.State.Combat"] = 1 })
+    f:run(1.2)
+    local on = function(who)
+        for _, a in ipairs(rawget(thm, "__fields").HatredList.items) do
+            if a == who then return true end
+        end
+        return false
+    end
+    local rel = function() return field(thug, "faction"):GetFactionRelation(p1f) end
+    check(rel() == 1 and not on(p1f) and on(p2f), "a thug fighting player 2 with player 1 60 m off: player 1 neither side to it, and off its list")
+    check(inFight(p1f) == 0, "player 1 isn't in a fight they never saw")
+    thm:AddActorToHatredList(p1f, {})
+    f:run(1.2)
+    check(not on(p1f) and rel() == 1, "the game putting them back on its list: off again at the next look")
+    Fake.put(p1f, "loc", { X = 5000.0, Y = 0.0, Z = 100.0 })
+    f:run(1.2)
+    check(rel() == 2, "player 1 near: the game's own again")
+    Fake.put(p1f, "loc", { X = 0.0, Y = 0.0, Z = 100.0 })
+    f:run(1.2)
+    check(rel() == 1, "far again: out of it again")
+    rawset(thug, "__tags", nil)
+    f:run(1.2)
+    check(rel() == 2, "and the fight over, the game's own")
+    allErrors(f)
+
+    -- An enemy's health bar over its head in the half of whoever it's after.
+    local h, hpc, hstate = localGame()
+    h:run(1.5)
+    local foe2 = Session.enemyOn(hpc, "thug1")
+    local bar = field(foe2, "hpbar")
+    Fake.put(foe2, "target", hstate.p2Pawn)
+    h:run(1.2)
+    check(field(bar, "ownerPlayer") == field(hstate.p2Controller, "Player"), "after player 2: its bar in their half")
+    Fake.setHealth(foe2, 300)
+    h:run(1.2)
+    check(field(bar, "bHiddenInGame") == false, "and up once it's hurt, as the game puts it up for player 1's blows")
+    Fake.put(foe2, "target", hpc.pawn)
+    h:run(1.2)
+    check(field(bar, "ownerPlayer") == field(hpc.controller, "Player"), "after player 1: in player 1's")
+    check(field(bar, "bHiddenInGame") == true, "and the one we put up goes again")
+    Fake.put(foe2, "target", hstate.p2Pawn)
+    h:run(1.2)
+    Fake.setHealth(hstate.p2Pawn, 1)
+    h:run(1.2)
+    check(field(bar, "ownerPlayer") == field(hpc.controller, "Player"), "player 2 down: every bar back in player 1's")
+    allErrors(h)
+end
+
+local function localOptions()
+    part("player 2's Options, kept by main.dll")
+    local s, pc = localGame()
+    local asks, kept = {}, 0
+    pc.env.PBZ.link.pad_grab = function(device, name)
+        asks[#asks + 1] = { device = device, name = name }
+        return kept, device, name, 0, 0
+    end
+    s:run(0.5)
+    local pad
+    for _, line in ipairs(pc.logs) do
+        pad = line:match("player 2 joy(%d)") or pad
+    end
+    local last = asks[#asks]
+    check(#asks >= 20, "asked every frame")
+    check(last ~= nil and pad ~= nil and last.device == tonumber(pad), "for player 2's own pad")
+    check(last ~= nil and last.name == pc.env.FName("Gamepad_Special_Right"):GetComparisonIndex(), "and its Options")
+    local before = #pc.injected
+    s:run(0.5)
+    check(#pc.injected == before, "nothing asked for while none is kept")
+    kept = kept + 1
+    s:run(0.05)
+    check(#pc.injected == before + 1 and pc.injected[#pc.injected] == "IA_PushGameSystemMenu", "a press kept asks for the menu")
+    s:run(0.5)
+    check(#pc.injected == before + 1, "once")
+    pc.paused = true
+    s:run(0.5)
+    check(asks[#asks].device == -1, "not asked while a menu is up: pad 2's Options is the game's own there")
+    kept = kept + 1
+    s:run(0.2)
+    pc.paused = false
+    s:run(0.5)
+    check(#pc.injected == before + 1, "a press kept as the menu came up opens nothing after it")
+    check(asks[#asks].device == tonumber(pad), "and it's asked for again after the menu")
+    pc.env.PBZ.link.pad_grab = nil
+    Session.press2(s, "Gamepad_Special_Right")
+    check(#pc.injected == before + 2, "an older main.dll: player 2's controller's own Options opens it as before")
+    allErrors(s)
 end
 
 local function localPlay()
@@ -8683,7 +8962,7 @@ local function localPlay()
 
     local read, rpc0, rstate0 = localGame()
     read:run(1.5)
-    Fake.put(rstate0.p2Pawn, "loc", { X = 8000.0, Y = 100.0, Z = 100.0 })
+    Fake.put(rstate0.p2Pawn, "loc", { X = 7900.0, Y = 0.0, Z = 100.0 })        -- (looking at it)
     local petal = Fake.flow(rpc0, "BP_FlowInteract_MemoryFlower_C", 8000.0, 0.0, 100.0)
     read:run(0.5)
     local comp0 = field(rstate0.p2Pawn, "promptComp")
@@ -8711,7 +8990,7 @@ local function localPlay()
             break
         end
     end
-    Fake.put(lstate.p2Pawn, "loc", { X = 8000.0, Y = 100.0, Z = 100.0 })
+    Fake.put(lstate.p2Pawn, "loc", { X = 7900.0, Y = 0.0, Z = 100.0 })
     Session.press2(late, "Gamepad_FaceButton_Right")
     local rang = field(field(lpc.pawn, "interact"), "used")
     check(#rang == 0, "as a load ends nothing's started under the page that's about to go up")
@@ -8722,7 +9001,7 @@ local function localPlay()
 
     local b, bpc, bstate = localGame()
     b:run(1.5)
-    Fake.put(bstate.p2Pawn, "loc", { X = 8000.0, Y = 100.0, Z = 100.0 })
+    Fake.put(bstate.p2Pawn, "loc", { X = 7900.0, Y = 0.0, Z = 100.0 })
     local ringing = Fake.switch(bpc, "BP_Bell_C", 8000.0, 0.0, 100.0, true)
     b:run(0.5)
     Session.press2(b, "Gamepad_FaceButton_Right")
@@ -11250,6 +11529,9 @@ return function(print_, scripts)
     localPlay()
     padHold()
     localScreen()
+    localButtons()
+    localFight()
+    localOptions()
     elsewhere()
     travel()
     hatred()

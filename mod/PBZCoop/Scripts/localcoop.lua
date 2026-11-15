@@ -84,6 +84,22 @@ return function(api)
         WB_BlackScreen_Flow_C = true, WBP_FlowSequencer_C = true,
         W_PlayerDead_C = true,          -- the game's death screen: player 2 going down shows it, player 1 plays on
     }
+    -- A screen the game plays on under: its input is the game's (InputConfig 2, Game: a chapter's title, subtitles) and it doesn't
+    -- pause, or it's the tutorial tip, which takes a press as well (1, GameAndMenu) and doesn't pause. Player 1 plays on under these,
+    -- so player 2 does too, with their own pad. As a menu they gave player 2's pad to player 1: on the bench (11-12) pad 2's stick
+    -- walked player 1 11 m during a chapter's title and 2 m during a tip. Not a load (a world not there yet holds them both).
+    V.GAME_INPUT, V.GAME_AND_MENU_INPUT = 2, 1
+    V.PLAY_ON_TIPS = { WB_hud_tutorial_C = true }
+    function V.playsOn(w, name)
+        if name:find("Loading", 1, true) then
+            return false
+        end
+        local ok, input, pauses = pcall(function() return w.InputConfig, w.bPauseGameWhenOpen end)
+        if not ok or pauses == true or pauses == 1 then
+            return false
+        end
+        return input == V.GAME_INPUT or (input == V.GAME_AND_MENU_INPUT and V.PLAY_ON_TIPS[name] == true)
+    end
     V.screenNow, V.screenClass, V.nextScreenCheck = false, nil, 0
     local function screenUp()
         if os.clock() < V.nextScreenCheck then
@@ -100,7 +116,11 @@ return function(api)
                 local name = w:GetClass():GetFName():ToString()
                 V.onBoat = V.onBoat or name == "W_ShipHudLayout_C"
                 -- Tutorial hint bars (W_TutorialBar_Hint_*) are passive overlays, not pages: they hold nobody.
-                return (not ALWAYS_ON_SCREENS[name] and not name:find("^W_TutorialBar_")) and name or nil
+                if ALWAYS_ON_SCREENS[name] or name:find("^W_TutorialBar_") then
+                    return nil
+                end
+                -- Nor is a screen the game itself plays on under (V.playsOn): a chapter's title, a tip.
+                return not V.playsOn(w, name) and name or nil
             end)
             if ok and hit then
                 up, cls = true, hit
@@ -539,6 +559,8 @@ return function(api)
         if valid(state.p2Pawn) then
             passDust(p1, state.p2Pawn)
             pcall(V.keepGauge, state.p2Pawn)
+            -- (Off every enemy's list before it goes: a list kept a body gone for good, whatever was after it left with no one.)
+            pcall(game.ghostInFight, state.p2Pawn, false, game.listEnemies(true))
             state.p2Pawn:K2_DestroyActor()
         end
         state.p2Pawn = nil
@@ -828,11 +850,47 @@ return function(api)
     -- ones that spawn later get it too. From then on their own eyes and hatred work on player 2 as on player 1.
     V.ARM_EVERY_S = 10.0
     V.armed = {}                -- enemy address -> os.clock() of the last enter event
+    -- Script by script, unless player 1 is in the area too (p1Here: then the component tells them all of player 1, the game's own
+    -- way). AIScript_UpdateAwareness, which keeps who's in the area to be seen and heard (InMobDomainEnemyActorsCache), is told of
+    -- player 2; the rest (AIScript_PBZMisc's invulnerability until a fight, for one) of player 1, whom they wait for. (Told of player
+    -- 1 and then put right, awareness had already shared a fight on player 1 with the enemy beside it.)
+    V.AWARE_OF_P2 = { AIScript_UpdateAwareness_C = true }
+    function V.armScripts(ai, p1, p2, p1Here)
+        if p1Here then
+            ai:OnActorEnterDomain(p1)
+            return
+        end
+        local scripts, told = {}, 0
+        pcall(function()
+            ai.SpawnedAIScripts:ForEach(function(_, s)
+                local script = s:get()
+                if valid(script) then
+                    scripts[#scripts + 1] = script
+                end
+            end)
+        end)
+        for _, script in ipairs(scripts) do      -- (gathered first: a script told may add to the list)
+            local who = V.AWARE_OF_P2[script:GetClass():GetFName():ToString()] and p2 or p1
+            if pcall(function() script:OnActorEnterDomain(who) end) then
+                told = told + 1
+            end
+        end
+        if told == 0 then
+            ai:OnActorEnterDomain(p1)       -- (no scripts to tell: the component, as before)
+        end
+    end
     local function armCombatAI(d, p1, p2)
         if not valid(p1) then
             return
         end
         local now = os.clock()
+        local p1Here = false
+        pcall(function()
+            d.ActorsInMobDomain:ForEach(function(_, el)
+                local a = el:get()
+                p1Here = p1Here or (valid(a) and a:GetAddress() == p1:GetAddress())
+            end)
+        end)
         pcall(function()
             d.ActorsInMobDomain:ForEach(function(_, el)
                 local a = el:get()
@@ -843,7 +901,10 @@ return function(api)
                         V.armed[addr] = now
                         local ai = valid(a.Controller) and componentOf(a.Controller, "BP_SGameAIComponent_C") or nil
                         if ai then
-                            pcall(function() ai:OnActorEnterDomain(p1) end)
+                            -- Awareness hears of player 2, who did come (V.armScripts). Told of player 1, as the whole component
+                            -- told every script, it put player 1 on the enemy's list from 70 m off, in a fight of player 2's
+                            -- alone (bench, 11-12): player 1 was in a fight at the bell, and the enemy turned to them for 2 s.
+                            pcall(V.armScripts, ai, p1, p2, p1Here)
                         end
                     end
                 end
@@ -886,10 +947,13 @@ return function(api)
     -- The enemies' eyes work for player 1: a Soul walking up to an idle enemy is V.noticed, hated and fought. Player 2
     -- walking up alone mostly isn't (one in three enemies reacted in testing, the rest stood idle with player 2 in
     -- their face). So player 2 is pointed out to an idle enemy the way the game's own area trigger does it: in its
-    -- face within V.NOTICE_FRONT_CM for a moment, or right behind it within V.NOTICE_BACK_CM. The enemy's own check
-    -- decides whether it may hate player 2 at all (a resetting or scripted enemy says no, as it does for player 1).
+    -- face within V.NOTICE_FRONT_CM for a moment, or at once within V.NOTICE_NEAR_CM. Only in its face: beside and
+    -- behind it, its own senses decide, as they do for player 1 (both players are on its awareness list, V.armScripts),
+    -- so player 2 may walk up to an idle enemy's back and take it unseen as player 1 may (the game's sneak kill, never
+    -- offered from in front, reaches about 3 m; the user, 11-12: "it should be able to sneak kill"). The enemy's own
+    -- check decides whether it may hate player 2 at all (a resetting or scripted enemy says no, as it does for player 1).
     V.NOTICE_FRONT_CM = 1000
-    V.NOTICE_BACK_CM = 300
+    V.NOTICE_NEAR_CM = 300
     V.NOTICE_HOLD_S = 1.0
     V.noticed = {}              -- enemy address -> os.clock() of the last notice
     V.inFace = {}               -- enemy address -> os.clock() since player 2 has been in its face
@@ -918,6 +982,7 @@ return function(api)
         V.nextNotice = os.clock() + 0.25
         local here = p2:K2_GetActorLocation()
         local now = os.clock()
+        local fights = false
         for _, e in ipairs(game.listEnemies(true)) do
             pcall(function()
                 local addr = e:GetAddress()
@@ -929,6 +994,11 @@ return function(api)
                 if not q.X or (q.X == 0 and q.Y == 0) then
                     return
                 end
+                -- (In a fight with player 2, however far: V.setInCombat. And player 1 left out of it from afar: V.farPlayer1.)
+                local withP2 = select(2, pcall(V.fightsPlayer2, e, p2)) == true
+                fights = fights or withP2
+                pcall(V.farPlayer1, e, p1, distance(q, p1:K2_GetActorLocation()), withP2)
+                pcall(V.barTo, e, p1, distance(q, here))        -- (its health bar in the half of whoever it's after)
                 local d = distance(q, here)
                 if d > V.NOTICE_FRONT_CM then
                     V.inFace[addr] = nil
@@ -962,7 +1032,7 @@ return function(api)
                 else
                     V.inFace[addr] = nil
                 end
-                local due = (front and now - V.inFace[addr] >= V.NOTICE_HOLD_S) or d <= V.NOTICE_BACK_CM
+                local due = front and (now - V.inFace[addr] >= V.NOTICE_HOLD_S or d <= V.NOTICE_NEAR_CM)
                 if not due or (V.noticed[addr] and now - V.noticed[addr] < 5.0) then
                     return
                 end
@@ -981,6 +1051,204 @@ return function(api)
                 end
             end)
         end
+        pcall(V.setInCombat, fights)
+    end
+
+    -- The game counts player 1 in a fight (CharacterState.InCombat) while enemies fight them: each that comes into combat with them
+    -- adds to it, each that leaves takes it off (bench, 11-12: two thugs, 2; both given up 7 s after player 1 left, 0). Player 2 it
+    -- never counts, though the same thugs hated them too; a thug fighting player 2 alone gave player 1 nothing either. And it's
+    -- read all over: the camera's combat mode (CombatModeTag: player 2 fought with the walking-about camera while player 1's framed
+    -- the fight), the body's fighting stance, health coming back only out of a fight, the quest sense. So player 2 is in a fight
+    -- (once) while a live enemy in combat has them on its hatred list, and out when none has: looked at in noticePlayer2's pass, on
+    -- the enemies it finds that same frame (an enemy kept from an earlier look may be gone, and calling into one kills the game).
+    -- The tags go on through the camera's own requirement, which is that one tag: a container built by hand
+    -- (MakeGameplayTagContainerFromTag) killed UE4SS (bench, 11-12).
+    V.inCombatOn, V.inCombatBody = false, nil
+    function V.inCombatTags(pawn)
+        local cam = pawn:GetComponentByClass(StaticFindObject("/Script/NBCamera.NBCameraComponent"))
+        if not valid(cam) then
+            return nil
+        end
+        local tags, n, only = cam.CombatModeTag.RequireTags, 0, nil
+        tags.GameplayTags:ForEach(function(_, t)
+            n = n + 1
+            only = t:get().TagName:ToString()
+        end)
+        -- (Only while it's that tag alone: anything else in it would go on player 2 as well.)
+        return (n == 1 and only == "CharacterState.InCombat") and tags or nil
+    end
+    -- Whether this enemy (live, found this frame) is in combat with player 2 on its hatred list.
+    function V.fightsPlayer2(e, p2)
+        V.combatTagName = V.combatTagName or FName("AI.State.Combat")
+        local asc = StaticFindObject("/Script/GameplayAbilities.Default__AbilitySystemBlueprintLibrary"):GetAbilitySystemComponent(e)
+        if not (valid(asc) and asc:GetGameplayTagCount({ TagName = V.combatTagName }) > 0) then
+            return false
+        end
+        local me, hates = p2:GetAddress(), false
+        e.BP_PBZHatredManagerComponent.HatredList:ForEach(function(_, el)
+            local a = el:get()
+            hates = hates or (valid(a) and a:GetAddress() == me)
+        end)
+        return hates
+    end
+    -- An enemy fighting player 2 with player 1 far off (beyond its eyes and ears, V.FAR_P1_CM) leaves player 1 out of it: the
+    -- game kept putting "the player" on its list, every few seconds (bench, 11-12, a spear thug and its rock thrower fighting
+    -- player 2: player 1, 77 m off at the bell, on the list 3 s in, then again and again, and in a fight they never saw). For that
+    -- enemy player 1 is neither side (FactionComponent's override, its own side only) while it fights player 2 and player 1 is far,
+    -- the game's again as soon as player 1 comes near or the fight's over; and off its list, looked at every pass. If it was after
+    -- player 1 it looks again, with player 2 on its list. The enemies set so are known by address (V.p1Out), so that only those
+    -- are put back: one neither side to player 1 of itself is the game's to leave.
+    V.FAR_P1_CM = 4000
+    V.NEUTRAL = 1               -- (ETeamAttitude: 0 friendly, 1 neutral, 2 hostile; read back as 1 after the override, bench)
+    V.p1Out = {}                -- enemy address -> true while it's left player 1 out of it
+    function V.farPlayer1(e, p1, d, withP2)
+        local addr = e:GetAddress()
+        local want = withP2 and d ~= nil and d > V.FAR_P1_CM
+        if not want and not V.p1Out[addr] then
+            return              -- (nothing to do, and nothing asked of the game: this runs for every enemy)
+        end
+        local side = e:GetComponentByClass(StaticFindObject("/Script/SGameCombatSystem.FactionComponent"))
+        if not want then
+            if V.p1Out[addr] then
+                V.p1Out[addr] = nil
+                if valid(side) then
+                    side:ClearFactionRelationOverride(p1)
+                end
+            end
+            return
+        end
+        if not V.p1Out[addr] and valid(side) then
+            side:SetFactionRelationOverride(p1, V.NEUTRAL, false)
+            V.p1Out[addr] = true
+        end
+        local hm, listed = e.BP_PBZHatredManagerComponent, false
+        hm.HatredList:ForEach(function(_, el)
+            local a = el:get()
+            listed = listed or (valid(a) and a:GetAddress() == p1:GetAddress())
+        end)
+        if not listed then
+            return
+        end
+        hm:RemoveActorFromHatredList(p1)
+        local out = {}
+        pcall(function() StaticFindObject("/Script/SGameAI.Default__SGameAIFunctionLibrary"):GetTargetActor(e.Controller, out) end)
+        if valid(out.Target) and out.Target:GetAddress() == p1:GetAddress() then
+            local picker = nil
+            e.Controller.SGameAIComponent.SpawnedAIScripts:ForEach(function(_, sc)
+                local script = sc:get()
+                if valid(script) and script:GetClass():GetFName():ToString() == "AIScript_TargetSelector_C" then
+                    picker = script
+                end
+            end)
+            if picker then
+                picker.LastSwitchTime = 0
+                picker:TrySwitchTarget()
+            end
+        end
+        if os.clock() - (V.p1OutSaid or -1e9) > 30 then       -- (said once in a while: the game may put them back each pass)
+            V.p1OutSaid = os.clock()
+            log(string.format("%s leaves player 1 out of it (%.0f m off).", e:GetClass():GetFName():ToString():gsub("^BP_Monster_", ""):gsub("_C$", ""), d / 100))
+        end
+    end
+    -- Player 2 out of play, down, or on the boat (noticePlayer2's pass doesn't run then): every enemy set so as the game had it.
+    function V.player1Back()
+        local _, p1 = getPlayer1()
+        if valid(p1) and next(V.p1Out) ~= nil then
+            for _, e in ipairs(game.listEnemies(true)) do
+                pcall(V.farPlayer1, e, p1, nil, false)
+            end
+        end
+        V.p1Out = {}
+    end
+
+    -- An enemy's health bar over its head (its hpbar WidgetComponent) is drawn in one player's half, its owner's, and the game
+    -- makes every one player 1's: player 2 fought a twin-hoe woman with no bar over her in their half, while player 1's, 9 m off,
+    -- showed it (bench, 11-12). The bar goes to whoever the enemy is after: player 2's half while it's after player 2, player 1's
+    -- otherwise; and every bar back to player 1 with player 2 down, on the boat or out of play (V.barsBack).
+    V.barsOut = false
+    V.BAR_NEAR_CM = 5000        -- (an enemy further from player 2 than this, its bar given them by none of ours, is left alone)
+    V.barToP2 = {}              -- enemy address -> true while its bar is in player 2's half
+    function V.barTo(e, p1, d2)
+        if d2 and d2 > V.BAR_NEAR_CM and not V.barToP2[e:GetAddress()] then
+            return
+        end
+        local bar = e.hpbar
+        if not valid(bar) then
+            return
+        end
+        local out = {}
+        pcall(function() StaticFindObject("/Script/SGameAI.Default__SGameAIFunctionLibrary"):GetTargetActor(e.Controller, out) end)
+        local p2 = state.p2Pawn
+        local toP2 = valid(out.Target) and valid(p2) and out.Target:GetAddress() == p2:GetAddress()
+        local pc1 = getPlayer1()
+        local player = toP2 and state.p2Controller.Player or (valid(pc1) and pc1.Player or nil)
+        if not valid(player) then
+            return
+        end
+        local now = bar:GetOwnerPlayer()
+        if not (valid(now) and now:GetAddress() == player:GetAddress()) then
+            bar:SetOwnerPlayer(player)
+        end
+        V.barsOut = V.barsOut or toP2
+        V.barToP2[e:GetAddress()] = toP2 or nil
+        -- (And shown: the game shows it as player 1's blows land, and player 2's never did: a twin-hoe woman at 1540 of 1700
+        -- from player 2's had none, at 1280 from player 1's hers was up. It hides it hidden-in-game (bHiddenInGame), not by
+        -- visibility. Hurt and after player 2, it's up for them; ours goes again when it's after them no more.)
+        local addr = e:GetAddress()
+        local h, m = game.getHealth(e)
+        if toP2 and h and m and h > 0 and h < m and bar.bHiddenInGame then
+            bar:SetHiddenInGame(false, false)
+            V.barUnhid[addr] = true
+        elseif not toP2 and V.barUnhid[addr] then
+            V.barUnhid[addr] = nil
+            bar:SetHiddenInGame(true, false)
+        end
+    end
+    V.barUnhid = {}             -- enemy address -> true while its bar is up by us
+    function V.barsBack()
+        local pc1 = getPlayer1()
+        if valid(pc1) and valid(pc1.Player) and V.barsOut then
+            for _, e in ipairs(game.listEnemies(true)) do
+                pcall(function()
+                    local bar = e.hpbar
+                    local now = valid(bar) and bar:GetOwnerPlayer() or nil
+                    if valid(bar) and not (valid(now) and now:GetAddress() == pc1.Player:GetAddress()) then
+                        bar:SetOwnerPlayer(pc1.Player)
+                    end
+                    if valid(bar) and V.barUnhid[e:GetAddress()] then
+                        bar:SetHiddenInGame(true, false)
+                    end
+                end)
+            end
+        end
+        V.barsOut, V.barUnhid, V.barToP2 = false, {}, {}
+    end
+
+    -- Player 2 in or out of a fight (want), as their Soul is now: down, dead or out of play, out.
+    function V.setInCombat(want)
+        local p2 = state.p2Pawn
+        if not valid(p2) then
+            V.inCombatOn, V.inCombatBody = false, nil
+            return
+        end
+        if V.inCombatBody ~= p2:GetAddress() then
+            V.inCombatOn, V.inCombatBody = false, p2:GetAddress()      -- (a new Soul starts out of it)
+        end
+        want = want and not (paused or p2DownSince or V.sailing or game.isDead(p2))
+        if want == V.inCombatOn then
+            return
+        end
+        local tags = V.inCombatTags(p2)
+        if not tags then
+            return
+        end
+        local lib = StaticFindObject("/Script/GameplayAbilities.Default__AbilitySystemBlueprintLibrary")
+        if want then
+            lib:AddLooseGameplayTags(p2, tags, false)
+        else
+            lib:RemoveLooseGameplayTags(p2, tags, false)
+        end
+        V.inCombatOn = want
     end
 
     -- The game's camera sits over the shoulder, with the Soul off to the left. With the screen split each Soul belongs
@@ -1324,6 +1592,18 @@ return function(api)
                 p2DownSince = os.clock()
                 log("Player 2 is down.")
                 leaveDomains(p2)
+                -- Down is out of the fight, as a partner down online is: off every enemy's list, not to be put back, and an enemy
+                -- that was after them turns to player 1. (Bench, 11-12: a spear thug spent the whole 6 s on the body on the ground,
+                -- three special attacks it couldn't die of, and turned only when the body went.)
+                pcall(game.ghostInFight, p2, false, game.listEnemies(true))
+                -- And no enemy's eyes put them back on: the body lying there is the scenery's side (Faction.Environment, neutral to
+                -- all, player 1 too), as a partner down online is hidden. (Bench, 11-12: a thug's own sight had it back on its list 2 s
+                -- after it was taken off.) The body goes when they're back, and the new one is a player's.
+                pcall(function()
+                    p2:GetComponentByClass(StaticFindObject("/Script/SGameCombatSystem.FactionComponent"))
+                        :SetFaction({ TagName = FName("Faction.Environment") })
+                end)
+                pcall(V.player1Back)        -- (out of the fight, nobody's fighting them: player 1 is everyone's again)
                 pcall(function() p2:DisableInput(state.p2Controller) end)
                 pcall(function() p2.Mesh:SetSimulatePhysics(true) end)      -- no real death, so no death animation
                 V.showDeathCard(pc)
@@ -1477,6 +1757,7 @@ return function(api)
 
     -- Back to one player: full screen, the normal camera, and the game's own controls for player 1.
     local function goSolo()
+        pcall(api.loadout.leave, 2, "single player")        -- (their own menu ends, player 1's set back in the bag)
         local pc, p1 = getPlayer1()
         paused = true
         -- Player 2 stays as a local player, with no Soul and no screen: really removing them makes the game delete the UI
@@ -1506,6 +1787,7 @@ return function(api)
         menuOpen, V.screenHeld, V.sceneHeld = false, nil, nil
         -- (Enemies switched to full detail for player 2 went back to the game's own: they stayed at full cost all solo.)
         V.giveBackOptimizations()
+        pcall(V.player1Back)          -- (and none of them left blind to player 1)
         api.setGamepadOffset(false)
         routePads(nil)
         if valid(pc) then
@@ -1779,6 +2061,12 @@ return function(api)
             menuOpen = menu             -- (single player: there's no split screen to put back, nor pads to share out)
         elseif menu ~= menuOpen then
             menuOpen = menu
+            -- (Player 2's own menu: up now, so its close ends it; closed, their choices are kept and player 1's set goes back.)
+            if menu then
+                pcall(api.loadout.opened)
+            else
+                pcall(api.loadout.finish, "closed")
+            end
             api.gs():SetForceDisableSplitscreen(pc, V.fullWidth())      -- (over two monitors, on player 1's monitor)
             holdForScreen(menu)
             if menu then
@@ -1908,12 +2196,19 @@ return function(api)
         local _, p1 = getPlayer1()
         local ic1 = valid(p1) and p1:GetComponentByClass(StaticFindObject("/Script/ProjectPBZ.PBZInteractComponent")) or nil
         local offered = valid(ic1) and valid(ic1:GetInteractActor())
+        -- (Not player 2's prompt sets, V.promptSets: those are theirs alone, and on player 1 Circle would only ever use. Nor their
+        -- sense-only set, V.mapAsTheirs: on player 1 it would keep the map from Select.)
+        local promptSet = { IMC_OnlySense = true }
+        for _, name in pairs(V.PROMPT_SETS) do
+            promptSet[name] = true
+        end
         for _, c in ipairs(FindAllOf("InputMappingContext") or {}) do
             local found = {}
-            if s2:HasMappingContext(c, found) and not s1:HasMappingContext(c, {}) then
+            local name = c:GetFName():ToString()
+            if not promptSet[name] and s2:HasMappingContext(c, found) and not s1:HasMappingContext(c, {}) then
                 s1:AddMappingContext(c, found.OutFoundPriority or 0, {})
                 given = given + 1
-            elseif offered and c:GetFName():ToString() == "IMC_Interaction" and not s1:HasMappingContext(c, {}) then
+            elseif offered and name == "IMC_Interaction" and not s1:HasMappingContext(c, {}) then
                 s1:AddMappingContext(c, 1000, {})
                 given = given + 1
             end
@@ -1952,6 +2247,7 @@ return function(api)
             end
         end
         V.hud, V.hudFor, V.hudUp, V.hudBosses, V.pointers = nil, nil, nil, {}, {}
+        V.hudHp1, V.hudHp2, V.hudShownAt = nil, nil, nil       -- (a new HUD gets their health written in at once)
     end
 
     function V.keepHud(pc, p2)
@@ -1983,6 +2279,7 @@ return function(api)
         local up = not (paused or inScene or menuOpen or p2DownSince or api.panel.open)
         if up ~= V.hudUp then
             V.hudUp = up
+            V.hudUpAt = up and os.clock() or V.hudUpAt      -- (back up: their health written in again, V.hudOwnHealth)
             pcall(function() V.hud:SetVisibility(up and 3 or 1) end)
             for _, bar in pairs(V.hudBosses) do
                 pcall(function() bar:SetVisibility(up and 3 or 1) end)
@@ -1992,6 +2289,28 @@ return function(api)
         if up and p2Charges then
             pcall(function() V.hud.WB_quickslot.BottomMedicineNum:SetText(FText(tostring(p2Charges))) end)
         end
+        if up then
+            V.hudOwnHealth()
+        end
+    end
+
+    -- The HUD's health reading (its Get Health Percentage) asks for "the local player", player 1, whichever HUD asks: player
+    -- 2's bar showed player 1's health, and their hits took nothing off it (the user's pads, 11-11). Theirs goes in by hand at
+    -- each change of theirs, shown as a real change is, and again at each of player 1's (the game may write player 1's there
+    -- too) and as it comes back up.
+    function V.hudOwnHealth()
+        local _, p1 = getPlayer1()
+        local h2, max2 = game.getHealth(state.p2Pawn)
+        local h1 = valid(p1) and game.getHealth(p1) or nil
+        if not (h2 and max2 and max2 > 0) then
+            return
+        end
+        if V.hudHp2 ~= nil and h2 ~= V.hudHp2 then
+            V.hudHealth(state.p2Pawn)
+        elseif V.hudHp2 == nil or h1 ~= V.hudHp1 or V.hudShownAt ~= V.hudUpAt then
+            pcall(function() V.hud:ForSeq_UpdatePlayerHP(h2 / max2) end)
+        end
+        V.hudHp1, V.hudHp2, V.hudShownAt = h1, h2, V.hudUpAt
     end
 
     -- Health written by hand tells nobody, so the bar is told, and comes up as it does for a real change.
@@ -2102,7 +2421,6 @@ return function(api)
     -- findTarget is the same look-around, used for the prompt on player 2's screen as well.
     local INTERACT_CM = 500          -- the game's own interaction distance (PBZInteractComponent.DistanceB)
     local VOLUME_CM = 500            -- climb spots are big; the interaction itself still decides if it's really in reach
-    V.CLOSE_CM = 150              -- right against a climb spot counts as inside it
     local PROMPT_SIZE = 60
     local PROMPT_Y = 0.6             -- down the view, where the game shows player 1's own prompts
 
@@ -2132,10 +2450,12 @@ return function(api)
     -- A look around for player 2's prompt took six looks through the game's whole object list, in one frame, a few times a second. How
     -- far the nearest of each kind is gets remembered instead, as plain numbers (an actor kept for later may be gone by then, and calling
     -- into one kills the game). Until they've walked that far, or a moment has passed for what's newly streamed in, it isn't looked for.
+    -- A button press always looks (`fresh`): a spot measured as far from where they last stood (a wall run's foot seen from the
+    -- ledge above it) was otherwise out of reach for two seconds, and Cross there was a plain jump.
     V.looked, V.LOOK_AGAIN_S, V.LOOK_MOVED_CM = {}, 2.0, 1500
-    function V.around(class, need, at)
+    function V.around(class, need, at, fresh)
         local now, last = os.clock(), V.looked[class]
-        if last and now < last.till and distance(at, last.at) < last.free then
+        if not fresh and last and now < last.till and distance(at, last.at) < last.free then
             return {}
         end
         local list, nearest = FindAllOf(class) or {}, 1e9
@@ -2187,24 +2507,55 @@ return function(api)
     V.GAP_CM = 3000             -- a gap blocker is used from afar (its DisplayPointDistance)
     V.RING_CM = 2000            -- the game's ring shows on a thing from about here
 
-    -- The game's own rule for this Soul and this thing: in its reach and faced, as player 1 must. Player 2's own interact component
-    -- answers it as player 1's does. Without it, a button that's also an execution rang the bell behind them in a fight, and a fog
-    -- door or a music trigger counted as something to use.
+    -- The game's own rule for this Soul and this thing: in its reach (V.gameOffers) and faced, as player 1 must. Without it, a button
+    -- that's also an execution rang the bell behind them in a fight, and a fog door or a music trigger counted as something to use.
+    -- Faced is player 2's own view (V.FACE_DOT, about 60 degrees either side): the game's IsPlayerFaceToActor answers for player 1's
+    -- screen whichever Soul it's given (bench, 11-12: player 2 at a rubbish pile, looking at it or away, always "no"; player 1
+    -- there, either way, "yes"), so player 2 could open things only where player 1 happened to be.
+    V.FACE_DOT = 0.5
     function V.gameAllows(pawn, thing)
-        local ok, can = pcall(function()
-            V.interactClass = V.interactClass or StaticFindObject("/Script/ProjectPBZ.PBZInteractComponent")
-            local ic = pawn:GetComponentByClass(V.interactClass)
-            return valid(ic) and ic:CanTriggerInteract(thing) and ic:IsPlayerFaceToActor(pawn, thing)
-        end)
-        if ok and can == true and #game.bossActors() > 0 then
+        local okL, loc = pcall(function() return thing:K2_GetActorLocation() end)
+        if not (okL and loc.X and facing(pawn, loc, V.FACE_DOT) and V.gameOffers(pawn, thing)) then
+            return false
+        end
+        if #game.bossActors() > 0 then
             -- (A bell in a boss fight: the game turns player 1's prompt red and won't have it.)
             local okB, bell = pcall(function() return thing:IsA(StaticFindObject("/Script/ProjectPBZ.PBZCheckPoint")) end)
             return not (okB and bell)
         end
-        return ok and can == true
+        return true
     end
 
-    local function findTarget(pawn, want)
+    -- The game's rule for a climb spot, as its search offers player 1 one: valid for the Soul as it stands (on the ground or in
+    -- the air, in the middle of a swing or not, facing it the right way) and in reach to be used. Player 2's own component
+    -- answers it for player 2. (Bench, 11-12: at a ladder's foot facing away, on the platform above a wall run, at a ledge from
+    -- below, both players got "no" and player 1 was offered nothing; at the wall run, a side run, a ladder from the front,
+    -- both "yes" and player 1 offered it. Before, the nearest spot within 1.5 m of its box was taken: X on top of a waterfall
+    -- ran player 2 up the wall at its foot, turned round.)
+    function V.gameOffers(pawn, thing)
+        local ok, yes = pcall(function()
+            V.interactClass = V.interactClass or StaticFindObject("/Script/ProjectPBZ.PBZInteractComponent")
+            local ic = pawn:GetComponentByClass(V.interactClass)
+            local asc = StaticFindObject("/Script/GameplayAbilities.Default__AbilitySystemBlueprintLibrary"):GetAbilitySystemComponent(pawn)
+            if not (valid(ic) and valid(asc)) then
+                return false
+            end
+            local function has(tag)
+                local okT, n = pcall(function() return asc:GetGameplayTagCount({ TagName = tag.TagName }) end)
+                return okT and type(n) == "number" and n > 0
+            end
+            local blocked = false
+            pcall(function()
+                ic.BlockTag.GameplayTags:ForEach(function(_, t)
+                    blocked = blocked or has(t:get())
+                end)
+            end)
+            return ic:IsValidInteract(thing, blocked, has(ic.SprintTag), has(ic.InAirTag)) and ic:CanTriggerInteract(thing)
+        end)
+        return ok and yes == true
+    end
+
+    local function findTarget(pawn, want, fresh)
         local bp = backpackOf(pawn)
         if want ~= "climb" and bp and bp.bShowPickItemWidget then
             local okW, card = pcall(function() return bp.ActivePickupWidget:Get() end)
@@ -2223,7 +2574,7 @@ return function(api)
         -- Two families of climb spots: the SpecialMove volumes (ladders, wall and side runs, rappels) and the ASM
         -- ones (poles, slides, rope swings, holes, temporary ladders). Both are the game's own interactables.
         for _, family in ipairs(volume == false and {} or { { "SpecialMoveVolumeBase", VOLUME_CM }, { "BP_ASM_SpVolumeBase_C", V.GAP_CM } }) do
-            for _, v in ipairs(V.around(family[1], family[2], at)) do
+            for _, v in ipairs(V.around(family[1], family[2], at, fresh)) do
                 -- To the spot's box, not its origin: a ladder's origin is at its foot, and player 2 may be at the top.
                 local d
                 -- A gap blocker (the ShaChi hook shot across a gap) is used from a distance, looking at it: the
@@ -2240,14 +2591,10 @@ return function(api)
                 else
                     d = reach(at, v, 2500)      -- climb spots are legitimately big (a ladder is 19 m tall)
                 end
-                if d and d <= VOLUME_CM and (bestD == nil or d < bestD) then
-                    -- The game starts a move only for a Soul inside the spot: a press near a wall run from the
-                    -- platform above it must stay the plain jump it is for player 1, not a wall run begun from
-                    -- the wrong place. Right up against the spot counts too (a ladder's top edge).
-                    local okO, inside = pcall(function() return v:IsOverlappingActor(pawn) end)
-                    if (okO and inside) or d <= V.CLOSE_CM then
-                        volume, bestD = v, d
-                    end
+                -- The game starts a move only where it would offer it to player 1 (V.gameOffers): a press near a wall
+                -- run from the platform above it stays the plain jump it is for player 1.
+                if d and d <= VOLUME_CM and (bestD == nil or d < bestD) and V.gameOffers(pawn, v) then
+                    volume, bestD = v, d
                 end
             end
         end
@@ -2255,7 +2602,7 @@ return function(api)
         if sm and valid(sm.CurrentSpecialMoveVolume) then
             local okL, loc = pcall(function() return sm.CurrentSpecialMoveVolume:K2_GetActorLocation() end)
             local okO, inside = pcall(function() return sm.CurrentSpecialMoveVolume:IsOverlappingActor(pawn) end)
-            if okL and loc.X and distance(at, loc) <= VOLUME_CM and okO and inside then
+            if okL and loc.X and distance(at, loc) <= VOLUME_CM and okO and inside and V.gameOffers(pawn, sm.CurrentSpecialMoveVolume) then
                 volume = sm.CurrentSpecialMoveVolume
             end
         end
@@ -2267,7 +2614,7 @@ return function(api)
         end
         local best = nil
         bestD = nil
-        for _, s in ipairs(V.around("PBZSwitchBase", V.RING_CM, at)) do
+        for _, s in ipairs(V.around("PBZSwitchBase", V.RING_CM, at, fresh)) do
             local d = reach(at, s)
             if d then
                 if d <= INTERACT_CM and (bestD == nil or d < bestD) then
@@ -2284,7 +2631,7 @@ return function(api)
         -- A person close by. The game only offers one to player 2 now and then, and not at all with player 1 far away, so
         -- its offer isn't waited for: a talk starts from anywhere (see kind "talk").
         local person, personD = nil, V.TALK_CM
-        for _, n in ipairs(V.around("BP_NPC_Narrative_C", V.TALK_CM, at)) do
+        for _, n in ipairs(V.around("BP_NPC_Narrative_C", V.TALK_CM, at, fresh)) do
             local okL, loc = pcall(function() return n:K2_GetActorLocation() end)
             if okL and loc.X and distance(at, loc) < personD and facing(pawn, loc, 0.5) then
                 person, personD = n, distance(at, loc)
@@ -2296,7 +2643,7 @@ return function(api)
         -- A Memory Flower, a thing to look at or to read: what the game calls a flow actor. Each runs a little story, and those only start
         -- from player 1's side, as a talk does.
         local flow, flowD = nil, INTERACT_CM
-        for _, f in ipairs(V.around("PBZFlowInteractActorBase", INTERACT_CM, at)) do
+        for _, f in ipairs(V.around("PBZFlowInteractActorBase", INTERACT_CM, at, fresh)) do
             local okL, loc = pcall(function() return f:K2_GetActorLocation() end)
             if okL and loc.X and distance(at, loc) < flowD and V.gameAllows(pawn, f) then
                 flow, flowD = f, distance(at, loc)
@@ -2305,7 +2652,7 @@ return function(api)
         if flow then
             return "talk", flow, bp
         end
-        for _, p in ipairs(V.around("PBZPickupActor", INTERACT_CM, at)) do
+        for _, p in ipairs(V.around("PBZPickupActor", INTERACT_CM, at, fresh)) do
             local okL, loc = pcall(function() return p:K2_GetActorLocation() end)
             local okP, pickable = pcall(function() return p.bIsPickable end)
             if okL and loc.X and distance(at, loc) <= INTERACT_CM and (not okP or pickable ~= false) then
@@ -2531,11 +2878,15 @@ return function(api)
         end
         local kind, target, bp
         local fresh = os.clock() - promptTargetAt < 0.4 and valid(promptTarget)
-        if fresh and ((want == "climb" and (promptTargetKind == "volume" or promptTargetKind == "gap"))
-                or (want == "use" and promptTargetKind ~= "volume" and promptTargetKind ~= "gap")) then
+        if fresh then
+            -- What the prompt offers is what the buttons do, as for player 1: with a thing to use offered, Cross stays a jump,
+            -- and with a climb offered, Circle stays the execution button.
+            if (want == "climb") ~= (promptTargetKind == "volume" or promptTargetKind == "gap") then
+                return
+            end
             kind, target, bp = promptTargetKind, promptTarget, backpackOf(pawn)
         else
-            kind, target, bp = findTarget(pawn, want)
+            kind, target, bp = findTarget(pawn, want, true)
         end
         if kind == nil then
             return
@@ -2572,16 +2923,17 @@ return function(api)
                 return not valid(pawn) or pawn.CharacterMovement.MovementMode == 5
                     or distance(pawn:K2_GetActorLocation(), before) > 60
             end
+            -- (Each again only while the game still offers it: a press as they walk off a ledge isn't followed by a climb.)
             for _, delay in ipairs({ 0.2, 0.4, 0.65 }) do
                 game.after(delay, function()
-                    if not started() and valid(volume) and valid(ic) then
+                    if not started() and valid(volume) and valid(ic) and V.gameOffers(pawn, volume) then
                         pcall(function() ic:CheckAndForceEndInteract() end)
                         pcall(function() ic:DoInteract(volume) end)
                     end
                 end)
             end
             game.after(1.5, function()
-                if started() then
+                if started() or not (valid(volume) and V.gameOffers(pawn, volume)) then
                     return
                 end
                 local s, action = inputSubsystemOf(state.p2Controller), nil
@@ -2951,30 +3303,96 @@ return function(api)
         pcall(function() promptWidget:SetRenderOpacity(ease) end)
     end
 
+    -- While its prompt is up the game changes what a button does, with a set of its own over player 1's others (priority
+    -- 1000): Cross climbs instead of jumping (IMC_InteractionSpecialMove), Circle uses instead of executing (IMC_Interaction).
+    -- Player 2 has the same sets while their own prompt is up. (Bench, 11-12: at a wall run player 1's Cross started the run
+    -- 0.20 s in; player 2's jumped first, and their run began 0.8 s in, after the landing. With the set: 0.12 s, no jump.)
+    V.PROMPT_SETS = { climb = "IMC_InteractionSpecialMove", use = "IMC_Interaction" }
+    V.promptSetObjects = {}
+
+    -- The game offers player 1 one thing at a time: the loot card while it's up, else the nearer of a thing to use and a climb spot
+    -- (bench, 11-12: at the foot of a wall run with rubbish 3.6 m off, player 1 was offered the run). Player 2's prompt is the same.
+    function V.pickPrompt(pawn)
+        local okU, kindU, targetU = pcall(findTarget, pawn, "use")
+        if not (okU and kindU) then
+            kindU, targetU = nil, nil
+        end
+        if kindU == "card" then
+            return kindU, targetU
+        end
+        local okC, kindC, targetC = pcall(findTarget, pawn, "climb")
+        if not (okC and kindC) then
+            return kindU, targetU
+        end
+        if kindU then
+            local at = pawn:K2_GetActorLocation()
+            if (reach(at, targetC, 2500) or 1e9) >= (reach(at, targetU, 2500) or 1e9) then
+                return kindU, targetU
+            end
+        end
+        return kindC, targetC
+    end
+    -- (Looked at as the wanted set changes, and once a second besides: a controller taking a body can clear them. A set not
+    -- found is looked for again in 10 s, not every tick.)
+    V.PROMPT_SETS_EVERY_S, V.promptWant, V.promptAt, V.promptMissAt = 1.0, false, 0, {}
+    function V.promptSets(kind)
+        local want = kind and ((kind == "volume" or kind == "gap") and "climb" or "use") or nil
+        local now = os.clock()
+        if want == V.promptWant and now < V.promptAt then
+            return
+        end
+        V.promptWant, V.promptAt = want, now + V.PROMPT_SETS_EVERY_S
+        local s = inputSubsystemOf(state.p2Controller)
+        if not s then
+            return
+        end
+        for key, name in pairs(V.PROMPT_SETS) do
+            local c = V.promptSetObjects[name]
+            if not valid(c) and now >= (V.promptMissAt[name] or 0) then
+                c = nil
+                for _, x in ipairs(FindAllOf("InputMappingContext") or {}) do
+                    if x:GetFName():ToString() == name then
+                        c = x
+                    end
+                end
+                V.promptSetObjects[name] = c
+                V.promptMissAt[name] = c == nil and now + 10 or nil
+            end
+            c = valid(c) and c or nil
+            if c then
+                local has = s:HasMappingContext(c, {})
+                if key == want and not has then
+                    s:AddMappingContext(c, 1000, {})
+                elseif key ~= want and has then
+                    s:RemoveMappingContext(c, {})
+                end
+            end
+        end
+    end
+
     local function updatePrompt()
         local pc = getPlayer1()
         local pawn = state.p2Pawn
         if paused or inScene or menuOpen or api.panel.open or not (valid(pc) and valid(pawn))
             or game.isDead(pawn) or p2DownSince then
             hidePrompt(true)
+            pcall(V.promptSets, nil)
             return
         end
         -- (On a rope or a ladder, or in the air, there's nothing to press: the game shows player 1 nothing either.)
         local okM, mode = pcall(function() return pawn.CharacterMovement.MovementMode end)
         if V.opening or V.closeUp or (okM and mode ~= 1 and mode ~= 2) then
             hidePrompt()
+            pcall(V.promptSets, nil)
             return
         end
         local now = os.clock()
         if now >= nextPrompt then
             nextPrompt = now + PROMPT_EVERY_S
-            local ok, kind, target = pcall(findTarget, pawn, "use")
-            promptKind = ok and kind or nil
-            if promptKind == nil then
-                ok, kind, target = pcall(findTarget, pawn, "climb")
-                promptKind = ok and kind or nil
-            end
-            promptTarget, promptTargetKind, promptTargetAt = ok and target or nil, promptKind, now
+            local okP, kind, target = pcall(V.pickPrompt, pawn)
+            promptKind = okP and kind or nil
+            promptTarget, promptTargetKind, promptTargetAt = okP and target or nil, promptKind, now
+            pcall(V.promptSets, promptKind)
         end
         if promptKind == nil then
             -- Something near, not yet in reach: the game's ring on it, as player 1 has.
@@ -3222,17 +3640,76 @@ return function(api)
         end
     end
 
+    -- Player 2's Select: tapped, the game's map (IA_Map) came up as the shared menu, player 1's, and from its tabs a gear change
+    -- went on player 1 (bench, 11-12). Held, the quest sense, which is fine as it is. Pad 2's Select reaches player 2's controller
+    -- (unlike Options), so the game's sense-only set (IMC_OnlySense) goes over their others: the sense stays on the hold, and its
+    -- action, taking the button, keeps the map's tap from the game (IA_Map is the HUD set's, below it). The tap itself is the
+    -- mod's: player 2's own menu (loadout.lua), opened on the map as their Options opens it on its first page.
+    V.SENSE_SET, V.SENSE_PRIORITY, V.MAP_ACTION = "/Game/PBZContent/Input/IMC_OnlySense.IMC_OnlySense", 100,
+        "/Game/PBZContent/Input/InputActions/IA_Map.IA_Map"
+    V.TAP_S = 0.4               -- the game's own: longer is the sense (PBZInputTriggerHoldNonTouchpadGamepad 0.40)
+    V.senseAt = 0
+    function V.mapAsTheirs()
+        if os.clock() < V.senseAt then          -- (once a second: a controller taking a body can clear it)
+            return
+        end
+        V.senseAt = os.clock() + 1.0
+        local s = inputSubsystemOf(state.p2Controller)
+        local set = StaticFindObject(V.SENSE_SET)
+        if s and valid(set) and not s:HasMappingContext(set, {}) then
+            s:AddMappingContext(set, V.SENSE_PRIORITY, {})
+        end
+    end
+    function V.openMapAsTheirs(pc)
+        -- (Theirs or none: shared, its tabs would put what's chosen on player 1. Not while down either.)
+        if p2DownSince then
+            return
+        end
+        local own = select(2, pcall(api.loadout.begin, 2)) == true
+        if not own then
+            return
+        end
+        local action, asked = StaticFindObject(V.MAP_ACTION), false
+        for _, s in ipairs(FindAllOf("EnhancedInputLocalPlayerSubsystem") or {}) do
+            if valid(action) and s:GetOuter().ControllerId == pc.Player.ControllerId then
+                s:InjectInputVectorForAction(action, { X = 1, Y = 0, Z = 0 }, {}, {})
+                asked = true
+            end
+        end
+        if not asked then
+            pcall(api.loadout.finish, "no map to ask for")
+        end
+    end
+
+    -- Player 2's Options: the game's menu layer takes every joystick's as player 1's, so main.dll keeps pad 2's from it
+    -- (pad_route.hpp) while it's theirs to press, asked again every frame (nil: not now, the game's own). True once for
+    -- each press kept since the last look. Without that call (an older main.dll), the press reaches the game as before.
+    function V.keptOptions(pad)
+        local grab = api.link and api.link.pad_grab
+        if not grab then
+            return false
+        end
+        V.optionsName = V.optionsName or FName("Gamepad_Special_Right"):GetComparisonIndex()
+        local kept = grab(tonumber(tostring(pad or ""):match("^joy(%d)$")) or -1, V.optionsName)
+        local seen = V.optionsKept
+        V.optionsKept = kept
+        return seen ~= nil and kept ~= nil and kept > seen
+    end
+
     local function relayButtons()
         local pc = getPlayer1()
         local p2pc = state.p2Controller
         drawPrompt(pc)
         V.drawDeathCard()
         if paused or inScene or menuOpen or api.panel.open or not (valid(pc) and valid(p2pc) and valid(pc.Player)) then
+            pcall(V.keptOptions, nil)       -- (the game's own Options meanwhile; a press kept just before goes unanswered)
             if valid(p2pc) then
                 optionsHeld = p2pc:IsInputKeyDown({ KeyName = FName("Gamepad_Special_Right") })
                 climbHeld = p2pc:IsInputKeyDown({ KeyName = FName("Gamepad_FaceButton_Bottom") })
                 useHeld = p2pc:IsInputKeyDown({ KeyName = FName("Gamepad_FaceButton_Right") })
             end
+            -- (A Select pressed in a menu is the menu's, and still held as it closes, no tap: -1, released as it is.)
+            V.selectDownAt = valid(p2pc) and p2pc:IsInputKeyDown({ KeyName = FName("Gamepad_Special_Left") }) and -1 or nil
             return
         end
         local _, p1 = getPlayer1()
@@ -3240,15 +3717,36 @@ return function(api)
             watchHeal(pc, p2pc, p1, state.p2Pawn)
         end
         local pressed = p2pc:IsInputKeyDown({ KeyName = FName("Gamepad_Special_Right") })
-        if pressed and not optionsHeld then
+        -- (Pad 2's press, kept from the game by main.dll; not while their menu is on its way.)
+        local kept = select(2, pcall(V.keptOptions, not api.loadout.inMenu() and config.p2 or nil)) == true
+        if (pressed and not optionsHeld) or kept then
+            -- (Player 2's own menu: their set in the bag and their body the menu's, loadout.lua, else it opens shared.)
+            local own = select(2, pcall(api.loadout.begin, 2)) == true
+            local asked = false
             local action = StaticFindObject(MENU_ACTION)
             for _, s in ipairs(FindAllOf("EnhancedInputLocalPlayerSubsystem") or {}) do
                 if valid(action) and s:GetOuter().ControllerId == pc.Player.ControllerId then
                     s:InjectInputVectorForAction(action, { X = 1, Y = 0, Z = 0 }, {}, {})
+                    asked = true
                 end
+            end
+            if own and not asked then
+                pcall(api.loadout.finish, "no menu to ask for")
             end
         end
         optionsHeld = pressed
+        -- Pad 2's Select: a tap is their own menu on the map (V.openMapAsTheirs); a hold stays the game's sense.
+        local sel = p2pc:IsInputKeyDown({ KeyName = FName("Gamepad_Special_Left") })
+        if sel and not V.selectDownAt then
+            V.selectDownAt = os.clock()
+        elseif not sel and V.selectDownAt then
+            local held = os.clock() - V.selectDownAt
+            local fromMenu = V.selectDownAt < 0
+            V.selectDownAt = nil
+            if held < V.TAP_S and not fromMenu then
+                pcall(V.openMapAsTheirs, pc)
+            end
+        end
         -- As the game binds them for player 1: Cross (Space) starts a climb, Circle (E) interacts with the rest.
         local climb = p2pc:IsInputKeyDown({ KeyName = FName("Gamepad_FaceButton_Bottom") })
             or (config.p2 == "kbm" and p2pc:IsInputKeyDown({ KeyName = FName("SpaceBar") }))
@@ -3294,6 +3792,8 @@ return function(api)
         pcall(function()
             RegisterLoadMapPreHook(function()
                 local ok, err = pcall(function()
+                    -- (Player 2's own menu ends first: player 1's set back in the bag, their controller back on their body.)
+                    pcall(api.loadout.leave, 2, "a map load")
                     local had = valid(state.p2Controller)
                     if valid(state.p2Pawn) then
                         local _, p1 = getPlayer1()
@@ -3352,9 +3852,32 @@ return function(api)
         LoopInGameThreadWithDelay(BAR_MS, function()
             local ok, err = pcall(function()
                 pcall(giveControlsBack)
+                -- Player 2's own gear back on them after the bag dressed everyone (loadout.lua). Held while their body is
+                -- out of play (a scene, a menu, the boat, down, single player).
+                local okG, errG = pcall(api.loadout.keep, 2, paused or inScene or menuOpen or V.sailing or p2DownSince ~= nil)
+                if not okG and errG ~= V.lastGearError then
+                    V.lastGearError = errG
+                    log("Player 2's gear: " .. tostring(errG))
+                end
                 updateBar()
                 updateBossBar(getPlayer1())
                 updatePrompt()
+                -- (Out of a fight at once when down, out of play or on the boat, where noticePlayer2's pass doesn't run; in it
+                -- again from its next pass. And player 1 back to every enemy left without them.)
+                if paused or p2DownSince or V.sailing then
+                    if V.inCombatOn then
+                        pcall(V.setInCombat, false)
+                    end
+                    if next(V.p1Out) ~= nil then
+                        pcall(V.player1Back)
+                    end
+                    if V.barsOut then
+                        pcall(V.barsBack)
+                    end
+                end
+                if not paused then
+                    pcall(V.mapAsTheirs)
+                end
                 if valid(state.p2Pawn) then
                     pcall(V.pointPictures, getPlayer1())
                 end

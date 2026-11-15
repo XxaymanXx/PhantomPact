@@ -93,6 +93,12 @@ local function getPlayer1()
         end
     end
     local pawn = player1Pc.Pawn
+    -- Player 2's own menu points this controller at their body, for the game (loadout.lua): the mod still gets player 1's
+    -- own, which AcknowledgedPawn keeps (none, if that can't be had: never player 2's for player 1's).
+    if state.pointedMenu then
+        local own = player1Pc.AcknowledgedPawn
+        pawn = valid(own) and own or nil
+    end
     if not valid(pawn) then
         return player1Pc, nil
     end
@@ -466,7 +472,7 @@ local function openLink()
         end
         link[name] = fn
     end
-    for _, name in ipairs({ "layout", "read", "pointer", "paste", "party", "player", "send_to" }) do      -- only ever faster: without them, reads go through UE4SS
+    for _, name in ipairs({ "layout", "read", "pointer", "paste", "party", "player", "send_to", "pad_grab" }) do      -- only ever faster: without them, reads go through UE4SS (pad_grab: pad 2's Options, localcoop.lua)
         link[name] = package.loadlib(dll, "pp_" .. name)
     end
     if not link.now() then
@@ -569,6 +575,7 @@ end
 api.story = dofile(SCRIPT_DIR .. "story.lua")(api)
 api.flowsync = dofile(SCRIPT_DIR .. "flowsync.lua")(api)
 api.units = dofile(SCRIPT_DIR .. "units.lua")(api)
+api.loadout = dofile(SCRIPT_DIR .. "loadout.lua")(api)
 api.localcoop = dofile(SCRIPT_DIR .. "localcoop.lua")(api)
 api.panel = dofile(SCRIPT_DIR .. "panel.lua")(api)
 api.onlinepanel = dofile(SCRIPT_DIR .. "onlinepanel.lua")(api)
@@ -614,6 +621,7 @@ PBZ = {
     hitfx = api.hitfx,
     lang = api.lang,
     status = api.status,
+    loadout = api.loadout,
 }
 
 -- Command file: lets a developer drive tests from outside the game. Write one command per line

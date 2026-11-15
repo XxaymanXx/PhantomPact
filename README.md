@@ -37,7 +37,8 @@ share loot and dust, and regroup at bells. The host's world leads, and your part
 - English, 中文 and العربية (Arabic, new in 1.7.2): the F5 panel, the PvP page and the mod's tips in your language
 - Local co-op (F5 > MORE > Mode > LOCAL, in testing): two players on one PC in split screen, one pad each or keyboard plus
   pad, or each on a monitor of their own (F4 panel, or `Monitors = 2`, new in 1.7.2). Player 2 climbs, opens chests, rings bells, drinks and fights on their own, with the game's own HUD, button prompts,
-  boss bars and execution points in their half of the screen, and one shared backpack
+  boss bars and execution points in their half of the screen, and one shared backpack, out of which they wear and hold
+  their own: outfit, weapons and talismans, picked in the game's own menu from their own pad's Options
   ([docs/LOCAL_COOP.md](docs/LOCAL_COOP.md))
 - 4 players (beta) and 6 players (experimental): the host picks Players under MORE in the F5 panel, and up to three or
   five guests can join. Enemies and bosses get 50% more health for each person connected, up to four players. With five or

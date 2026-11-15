@@ -247,6 +247,10 @@ function Fake.character(pc, class, x, y, z, hp, posture)
             return { X = l.X, Y = l.Y, Z = l.Z }
         end,
         K2_GetActorRotation = function(self) return { Pitch = 0.0, Yaw = rawget(self, "__fields").yaw, Roll = 0.0 } end,
+        GetActorForwardVector = function(self)
+            local yaw = math.rad(rawget(self, "__fields").yaw or 0)
+            return { X = math.cos(yaw), Y = math.sin(yaw), Z = 0.0 }
+        end,
         Respawn = function(self) put(self, "respawned", (rawget(self, "__fields").respawned or 0) + 1) end,     -- (to the bell)
         -- (Swept, it stops on the floor: flat at 100 everywhere, unless pc.noFloor says there's none at a spot.)
         K2_SetActorLocation = function(self, l, sweep)
@@ -591,8 +595,13 @@ end
 function Fake.enemy(pc, id, class, x, y, z, hp, posture, boss)
     local e = Fake.character(pc, class, x, y, z, hp, posture)
     rawset(e, "__name", id .. "_actor")
-    local bar = object(pc, "WidgetComponent", { shown = true })
-    defs(pc, bar, { SetVisibility = function(self, on) put(self, "shown", on) end, GetUserWidgetObject = function() return nil end })
+    local bar = object(pc, "WidgetComponent", { shown = true, ownerPlayer = nil })
+    defs(pc, bar, { SetVisibility = function(self, on) put(self, "shown", on) end, GetUserWidgetObject = function() return nil end,
+        GetOwnerPlayer = function(self) return rawget(self, "__fields").ownerPlayer end,
+        SetOwnerPlayer = function(self, player) put(self, "ownerPlayer", player) end,
+        IsVisible = function(self) return rawget(self, "__fields").shown end,
+        SetHiddenInGame = function(self, hidden) put(self, "bHiddenInGame", hidden) end })
+    put(bar, "bHiddenInGame", true)        -- (as the game has it until player 1's blows land)
     put(e, "hpbar", bar)
     local f = rawget(e, "__fields")
     put(e, "BIsMonster", true)
@@ -616,6 +625,15 @@ function Fake.enemy(pc, id, class, x, y, z, hp, posture, boss)
     local controller = object(pc, "AIController", { BrainComponent = brain,
         SGameAIComponent = { SpawnedAIScripts = list({ picker }) }, Blackboard = object(pc, "Blackboard") })
     put(e, "Controller", controller)
+    -- Its side: hostile to players (2) unless overridden for one of them.
+    local side = object(pc, "FactionComponent", { overrides = {} })
+    defs(pc, side, {
+        GetFactionRelation = function(self, other) return rawget(self, "__fields").overrides[other] or 2 end,
+        SetFactionRelationOverride = function(self, other, relation) rawget(self, "__fields").overrides[other] = relation end,
+        ClearFactionRelationOverride = function(self, other) rawget(self, "__fields").overrides[other] = nil end,
+    })
+    put(e, "faction", side)
+    put(e, "GetComponentByClass", function(_, class) return (class == pc.factionClass and side) or nil end)
     defs(pc, e, {
         GetController = function() return controller end,
         Kill = function(self, reason)
@@ -1153,6 +1171,24 @@ function Fake.given(soul)
     return rawget(soul, "__given") or {}
 end
 
+-- A climb spot, one of the game's SpecialMove volumes (a wall run, a ladder): the game offers it unless __invalid is set.
+function Fake.volume(pc, class, x, y, z)
+    local v = object(pc, class)
+    rawset(v, "__name", class)
+    defs(pc, v, {
+        K2_GetActorLocation = function() return { X = x, Y = y, Z = z } end,
+        GetActorBounds = function(_, _, o, e)
+            o.X, o.Y, o.Z = x, y, z
+            e.X, e.Y, e.Z = 50, 50, 100
+        end,
+        IsOverlappingActor = function() return true end,
+        GetComponentByClass = function() return nil end,
+    })
+    pc.volumes = pc.volumes or {}
+    pc.volumes[#pc.volumes + 1] = v
+    return v
+end
+
 -- A flow actor: a switch to the eye, but it isn't one of the game's switches.
 function Fake.flow(pc, class, x, y, z)
     local f = Fake.switch(pc, class, x, y, z)
@@ -1414,6 +1450,12 @@ function Fake.new(id, scripts, ini, link)
         })
         put(ic, "CanTriggerInteract", function(_, thing) return rawget(thing, "__forbidden") == nil end)
         put(ic, "IsPlayerFaceToActor", function(_, _, thing) return rawget(thing, "__behind") == nil end)
+        put(ic, "IsValidInteract", function(_, thing, blocked, _, inAir)
+            return rawget(thing, "__invalid") == nil and not blocked and not (inAir and rawget(thing, "__groundOnly"))
+        end)
+        put(ic, "BlockTag", { GameplayTags = list({ { TagName = name("CharacterState.Action.Phase.Act") } }) })
+        put(ic, "SprintTag", { TagName = name("None") })
+        put(ic, "InAirTag", { TagName = name("CharacterState.Space.Air") })
         put(ic, "PauseTimer", function(self) put(self, "paused", true) end)
         put(ic, "GetInteractActor", function() return nil end)
         put(ic, "GetInteractingActor", function(self) return rawget(self, "__fields").InteractingActor end)
@@ -1441,8 +1483,15 @@ function Fake.new(id, scripts, ini, link)
             end,
         })
         put(p, "look", look)
+        -- (Its camera: the combat mode wants the body in a fight, the one tag.)
+        local cam = object(pc, "NBCameraComponent", { CombatModeTag = { RequireTags = { GameplayTags = list({ { TagName = name("CharacterState.InCombat") } }) } } })
+        -- (And its side in the game's factions, a player's.)
+        local side = object(pc, "FactionComponent", { faction = "Faction.Player" })
+        put(side, "SetFaction", function(self, tag) put(self, "faction", tag.TagName:ToString()) end)
+        put(p, "faction", side)
         put(p, "GetComponentByClass", function(_, class)
-            return (class == pc.interactClass and ic) or (class == pc.appearanceClass and look) or nil
+            return (class == pc.interactClass and ic) or (class == pc.appearanceClass and look) or (class == pc.cameraClass and cam)
+                or (class == pc.factionClass and side) or nil
         end)
         local points = {}
         local pointPairs = {}
@@ -1491,7 +1540,7 @@ function Fake.new(id, scripts, ini, link)
     pc.interactComps, pc.switches, pc.bellMenus, pc.screens, pc.keys2, pc.loadedAt = {}, {}, {}, {}, {}, 0
     pc.afterHooks = {}
     pc.inputActions = {}
-    for _, action in ipairs({ "IA_UseBottomItem" }) do
+    for _, action in ipairs({ "IA_UseBottomItem", "IA_PushGameSystemMenu", "IA_Map" }) do
         local a = object(pc, "InputAction")
         rawset(a, "__name", action)
         pc.inputActions[#pc.inputActions + 1] = a
@@ -1504,6 +1553,14 @@ function Fake.new(id, scripts, ini, link)
     for _, c in ipairs(pc.inputContexts) do
         pc.inputSets[0][c], pc.inputSets[1][c] = 1, 1
     end
+    -- (The sets a prompt puts over the rest, none at the start: Cross climbs, Circle uses.)
+    pc.promptSets = {}
+    for _, n in ipairs({ "IMC_InteractionSpecialMove", "IMC_Interaction" }) do
+        local c = object(pc, "InputMappingContext")
+        rawset(c, "__name", n)
+        pc.inputContexts[#pc.inputContexts + 1] = c
+        pc.promptSets[n] = c
+    end
     for id = 0, 1 do
         local s = object(pc, "InputSubsystem", {}, true)
         put(s, "GetOuter", function() return { ControllerId = id } end)
@@ -1512,6 +1569,7 @@ function Fake.new(id, scripts, ini, link)
             return pc.inputSets[id][c] ~= nil
         end)
         put(s, "AddMappingContext", function(_, c, priority) pc.inputSets[id][c] = priority end)
+        put(s, "RemoveMappingContext", function(_, c) pc.inputSets[id][c] = nil end)
         put(s, "InjectInputVectorForAction", function(_, action)
             pc.injected[#pc.injected + 1] = action:GetFName():ToString()
         end)
@@ -1536,13 +1594,24 @@ function Fake.new(id, scripts, ini, link)
             ClientStopForceFeedback = function(self, effect) put(self, "rumbleStopped", effect) end,
             IsActorTickEnabled = function(self) return rawget(self, "__fields").ticking end,
             SetActorTickEnabled = function(self, on) put(self, "ticking", on) end,
-            Possess = function(self, b) put(self, "Pawn", b) end,
-            UnPossess = function(self) put(self, "Pawn", nil) end,
+            Possess = function(self, b)
+                put(self, "Pawn", b)
+                if b then
+                    put(b, "Controller", self)
+                end
+            end,
+            UnPossess = function(self)
+                local b = rawget(self, "__fields").Pawn
+                if b and rawget(b, "__fields") and rawget(b, "__fields").Controller == self then
+                    put(b, "Controller", nil)
+                end
+                put(self, "Pawn", nil)
+            end,
             SetIgnoreMoveInput = function(self, on) put(self, "ignored", on) end,
             SetIgnoreLookInput = false,
             ResetIgnoreInputFlags = function(self) put(self, "ignored", false) end,
             IsMoveInputIgnored = function(self) return rawget(self, "__fields").ignored end,
-            GetControlRotation = function() return { Pitch = 0.0, Yaw = 0.0, Roll = 0.0 } end,
+            GetControlRotation = function(self) return rawget(self, "__fields").controlRot or { Pitch = 0.0, Yaw = 0.0, Roll = 0.0 } end,
             FlushPressedKeys = false,
             ProjectWorldLocationToScreen = function(_, _, out)          -- (revive.lua's ring over a body)
                 local at = pc.projected or { X = 960, Y = 540 }
@@ -1553,6 +1622,9 @@ function Fake.new(id, scripts, ini, link)
     end
     local controller = playerController(pc.keys, 0, pawn)
     pc.controller = controller
+    if pawn then
+        put(pawn, "Controller", controller)
+    end
     local mode = object(pc, "GameMode")
     put(mode, "Refresh Monster", function()
         record(pc, "GameMode", "Refresh Monster")
@@ -1907,6 +1979,9 @@ function Fake.new(id, scripts, ini, link)
             put(w, "ShowEnemyIndicator", function(self, e) rawget(self, "__fields").pointers[e] = true end)
             put(w, "RemoveEnemyIndicator", function(self, e) rawget(self, "__fields").pointers[e] = nil end)
             put(w, "pointers", {})
+            -- (Its health bar: the last share it was told, and how often it was told to show.)
+            put(w, "ForSeq_UpdatePlayerHP", function(self, share) put(self, "hpShown", share) end)
+            put(w, "Need To Show", function(self) put(self, "shows", (rawget(self, "__fields").shows or 0) + 1) end)
             pc.playerHud = w
             return w
         end
@@ -1957,6 +2032,16 @@ function Fake.new(id, scripts, ini, link)
             Ability = { IsValid = function() return true end, GetClass = function() return cls end } }
     end
     local abilities = object(pc, "AbilitySystemLibrary")
+    local function loose(actor, tags, by)
+        local mine = rawget(actor, "__tags") or {}
+        tags.GameplayTags:ForEach(function(_, t)
+            local n = t:get().TagName:ToString()
+            mine[n] = math.max(0, (mine[n] or 0) + by)
+        end)
+        rawset(actor, "__tags", mine)
+    end
+    put(abilities, "AddLooseGameplayTags", function(_, actor, tags) loose(actor, tags, 1) end)
+    put(abilities, "RemoveLooseGameplayTags", function(_, actor, tags) loose(actor, tags, -1) end)
     defs(pc, abilities, { GetAbilitySystemComponent = function(_, actor)
         local asc = rawget(actor, "__fields").asc
         if asc == nil then
@@ -2049,6 +2134,11 @@ function Fake.new(id, scripts, ini, link)
                     end
                 end)
             end
+            -- (Its tags, as the game counts them: __tags on the actor, name -> count, none by default.)
+            put(asc, "GetGameplayTagCount", function(_, tag)
+                local tags = rawget(actor, "__tags") or {}
+                return tags[tag.TagName:ToString()] or 0
+            end)
             put(actor, "asc", asc)
         end
         return asc
@@ -2133,6 +2223,10 @@ function Fake.new(id, scripts, ini, link)
     found["/Script/Engine.SkeletalMeshComponent"] = object(pc, "Class")
     pc.appearanceClass = pc.appearanceClass or object(pc, "Class")
     found["/Script/ProjectPBZ.PBZAppearanceComponent"] = pc.appearanceClass
+    pc.cameraClass = pc.cameraClass or object(pc, "Class")
+    found["/Script/NBCamera.NBCameraComponent"] = pc.cameraClass
+    pc.factionClass = pc.factionClass or object(pc, "Class")
+    found["/Script/SGameCombatSystem.FactionComponent"] = pc.factionClass
     -- Effects: spawned on a body (the ghost's), and what was spawned where.
     for _, k in ipairs({ "/Script/Niagara.NiagaraComponent", "/Script/Niagara.NiagaraSystem", "/Script/Engine.Character" }) do
         found[k] = object(pc, "Class")
@@ -2179,6 +2273,18 @@ function Fake.new(id, scripts, ini, link)
         found[path] = object(pc, "AnimSequence", { Skeleton = pc.chestSkeleton })
         rawset(found[path], "__path", path)
     end
+    -- The pause menu's input action, which local co-op asks for on player 1's input for player 2's Options; the map's for
+    -- their Select; and the game's sense-only set, which goes over player 2's others.
+    for _, a in ipairs(pc.inputActions) do
+        local n = rawget(a, "__name")
+        if n == "IA_PushGameSystemMenu" or n == "IA_Map" then
+            found["/Game/PBZContent/Input/InputActions/" .. n .. "." .. n] = a
+        end
+    end
+    pc.senseSet = object(pc, "InputMappingContext")
+    rawset(pc.senseSet, "__name", "IMC_OnlySense")
+    pc.inputContexts[#pc.inputContexts + 1] = pc.senseSet
+    found["/Game/PBZContent/Input/IMC_OnlySense.IMC_OnlySense"] = pc.senseSet
     local statics = object(pc, "StaticObject", {}, true)
     pc.found = found
     pc.montages, pc.weaponConfigs = {}, {}
@@ -2348,6 +2454,8 @@ function Fake.new(id, scripts, ini, link)
             return pc.proxies
         elseif class == "PBZFlowInteractActorBase" then
             return pc.flows
+        elseif class == "SpecialMoveVolumeBase" then
+            return pc.volumes or {}
         elseif class == "PBZAbilityNodesComponent" then
             return pc.tree and { pc.tree } or {}
         end
@@ -2364,8 +2472,15 @@ function Fake.new(id, scripts, ini, link)
         end
         return #out > 0 and out or nil
     end
+    local nameIndex, names = {}, 0      -- (the engine's name table: one number per name, as GetComparisonIndex gives)
     env.FName = function(text)
-        return setmetatable({ TagName = nil }, { __index = { ToString = function() return text end } })
+        if not nameIndex[text] then
+            names = names + 1
+            nameIndex[text] = 7000 + names
+        end
+        local index = nameIndex[text]
+        return setmetatable({ TagName = nil }, { __index = { ToString = function() return text end,
+            GetComparisonIndex = function() return index end } })
     end
     env.FText = function(text) return text end
     env.LoadAsset = function() end

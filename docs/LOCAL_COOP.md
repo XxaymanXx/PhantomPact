@@ -16,8 +16,27 @@ played through all ten regions of the story with player 2's presses injected, an
 5. MULTIPLAYER in that panel goes back to online co-op, from the next start of the game: it sets `Role = Off`, and F5 works again.
    Local co-op can't be turned off live, since taking player 2 away at the wrong moment has killed the game's menus.
 
-Player 2 shares player 1's save, backpack, dust and gourd count, and rests at the same bells. Player 2 cannot die for
-good: at zero health they are down for a while and come back beside player 1.
+Player 2 shares player 1's save, backpack, dust and gourd count, and rests at the same bells, but wears and holds their
+own: see "Player 2's own gear" below. Player 2 cannot die for good: at zero health they are down for a while and come back
+beside player 1.
+
+## Player 2's own gear
+
+Options on pad 2 opens the game's own menu as player 2's, with a PLAYER 2 badge in its top left corner. The backpack in it is
+the shared one, as on a couch; what player 2 puts on there is theirs alone:
+
+- **Outfit** (CHARACTER, Appearance), with the headwear shown or hidden.
+- **Main weapons and Phantom Edges**, and the one in hand. Their moves are that weapon's, and their hits land as it does, at
+  the shared backpack's level of that weapon.
+- **Talismans.** One talisman has one wearer: one player 2 puts on that player 1 was wearing becomes player 2's, and the
+  other way round.
+
+Medicines stay the shared slots (player 2's gourd has charges of their own). Until player 2 first opens their menu, they wear and
+hold what player 1 does, as before. What they chose is kept in `localcoop_gear.txt` in the mod's folder and comes back at the
+next start; a weapon, outfit or talisman the loaded save doesn't have is left out. While player 2's menu is open the game
+doesn't save, so player 2's set never reaches the save; saving goes on as usual once it closes. A story moment that sets the
+weapons itself (the prologue's bare hands) sets them for both players. The menu opens on player 1's screen (or monitor), as
+the game's menus do.
 
 ## Two monitors
 
@@ -74,19 +93,28 @@ for those and performs the action with player 2's own body:
 | Pad 2 | Does |
 |---|---|
 | Left stick, right stick, attacks, dodge, block | The game's own handling, as for player 1 |
-| Cross (A) | Jump; inside a climb spot: ladder, wall run, side run, rope swing, rappel, pole or slide; looking at a gap blocker within its range: the hook shot across |
-| Circle (B) | Use: chest, rubbish pile, door, lever, bell, loot card confirm |
+| Cross (A) | Jump; where the game offers a climb (a ladder, wall run, side run, rope swing, rappel, pole or slide, by its own rule for player 2's body as it stands): the climb, at once and with no jump first; looking at a gap blocker within its range: the hook shot across |
+| Circle (B) | Use: chest, rubbish pile, door, lever, bell, loot card confirm; with nothing to use offered, the game's execution |
 | L2 | The weapon's combat art, spending their own Ultimate charge, as for player 1 |
 | D-pad down | Drink the gourd: heals player 2 and uses player 2's own charges |
-| Options | Pause menu (the one menu is shared; whichever pad opened it drives it) |
-| Select / touchpad | Quest-direction sense; it reports on both screens |
+| Options | Player 2's own menu: the game's pause menu with a PLAYER 2 badge, where what's put on is player 2's (both pads drive it) |
+| Select / touchpad | Held: the quest-direction sense, reported on both screens. Tapped: player 2's own menu, on the map |
 
 Player 2's prompts are the game's own: the same widget and animations as player 1's, set down on the thing itself in their half
-of the screen, with the button of their own pad. They follow the game's rules: in reach and faced, on the ground. With the thing
-out of their half, a plain button stands in at the bottom of it.
+of the screen, with the button of their own pad. They follow the game's rules: in reach and faced (by player 2's own view), on the
+ground. With the thing out of their half, a plain button stands in at the bottom of it. As for player 1, one thing is offered at a
+time (the nearer of a thing to use and a climb), and while it is, the game's own button set for it is on player 2's pad: Cross
+climbs instead of jumping, Circle uses instead of executing. A chapter's title or a tip the game plays on under doesn't stop
+player 2: their pad stays theirs.
+
+In a fight player 2 is counted in it as player 1 is (the game's own in-combat state, while an enemy fighting them has them on its
+list): their camera goes to the game's combat view with its soft focus on the enemy, their body to its fighting stance. Down, they're
+out of the fight: enemies turn to player 1 until they're back, and their body lying there is nobody's target. A fight of player 2's
+far from player 1 (over 40 m) is theirs alone: the enemies in it leave player 1 out of it, as they would a player they never saw.
 
 Player 2 has the game's own HUD in their half too: health and ShaChi bars, gourd, weapons, buffs, a boss's bar, arrows to enemies
-out of view, and execution points on the enemies they can finish, all their own. The gourd on it shows their own charges. Going
+out of view, and execution points on the enemies they can finish, all their own. An enemy's health bar over its head is in the
+half of whoever it's after, up once it's hurt. The gourd on it shows their own charges. Going
 down, the game's death card plays in their half alone, and they get back up off the ground beside player 1.
 
 ## What the game hardwires to player 1, and how 1.5.0 bridges it
@@ -108,6 +136,12 @@ down, the game's death card plays in their half alone, and they get back up off 
   dry still drinks their own charge.
 - **The bell menu and pause menu** listen on player 1's screen. The mod makes them full screen, routes both pads to
   them, and hands the pads back when they close.
+- **The backpack's equipment is one set**, and the game sends every change of it to every Soul: player 2 used to copy player 1's
+  gear because of that. Player 2's own (loadout.lua) is put back on their body after each change, and on each new body. Their
+  menu is the game's, with their set put in the backpack the game's own way (as a PvP match does) and player 1's controller
+  pointed at their body while it's open, so the menu's outfit page and talismans are theirs; saving waits meanwhile, and
+  player 1's set goes back as it closes. A talisman's effects land on that body as it's put on, and are put on it by hand
+  after. Their weapon switch also set the backpack's weapon in hand, which the save keeps: player 1's goes back there.
 - **Enemy optimization** (the NPC optimizer) measures distance from player 1. Enemies far from player 1 are set
   flying, ticked slowly and hidden. The mod switches optimization off within 80 m of player 2 and puts those enemies
   back on their feet, visible and ticking normally.
@@ -115,6 +149,9 @@ down, the game's death card plays in their half alone, and they get back up off 
   player 2 into the area and fires each enemy's enter event with player 1 named as the one who came in. From then on
   the enemies' own eyes and hatred work on player 2 as on player 1: in testing, enemies 300 m from player 1 noticed a
   lone player 2 in about 2 s and were hitting within 7 s.
+- **Noticing player 2.** On top of that, the mod points player 2 out to an idle enemy only in its face: within 3 m at
+  once, within 10 m after a second. Beside and behind it, the enemy's own senses decide, as they do for player 1, so
+  player 2 can walk up to an enemy's back and take it unseen (the game's sneak kill, never from in front, about 3 m).
 - **Enemies around a lone player 2** are woken from their spawners when player 2 is more than 20 m from player 1.
 - **Story scenes** play on player 1's camera. Both players watch full screen; player 2's Soul and weapons are
   hidden and pad 2 is ignored for the scene, and both come back when it ends. If the scene moved player 1, player 2
