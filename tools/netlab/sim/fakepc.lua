@@ -2054,12 +2054,6 @@ function Fake.new(id, scripts, ini, link)
                 rawset(actor, "__given", given)
             end)
             if rawget(actor, "__class") == "BP_Renewal_Hun_C" then
-                -- The game's count of enemies in combat with the player (CharacterState.InCombat): pc.inCombat, a test's hand.
-                put(asc, "GetGameplayTagCount", function(_, tag)
-                    local t = tag and tag.TagName
-                    local n = t and t.ToString and t:ToString()
-                    return (n == "CharacterState.InCombat" and actor == pc.pawn) and (pc.inCombat or 0) or 0
-                end)
                 -- A player's or a figure's: effects on it counted (a shield), each with a handle to take it off by.
                 put(asc, "BP_ApplyGameplayEffectToSelf", function()
                     put(actor, "effects", (rawget(actor, "__fields").effects or 0) + 1)
@@ -2134,10 +2128,14 @@ function Fake.new(id, scripts, ini, link)
                     end
                 end)
             end
-            -- (Its tags, as the game counts them: __tags on the actor, name -> count, none by default.)
+            -- (Its tags, as the game counts them: __tags on the actor, name -> count, none by default. And the game's count of
+            -- enemies in combat with the player, CharacterState.InCombat: pc.inCombat, a test's hand, on top of its own.)
             put(asc, "GetGameplayTagCount", function(_, tag)
                 local tags = rawget(actor, "__tags") or {}
-                return tags[tag.TagName:ToString()] or 0
+                local t = tag and tag.TagName
+                local n = t and t.ToString and t:ToString()
+                local fights = (n == "CharacterState.InCombat" and actor == pc.pawn) and (pc.inCombat or 0) or 0
+                return (n and tags[n] or 0) + fights
             end)
             put(actor, "asc", asc)
         end
