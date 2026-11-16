@@ -284,6 +284,9 @@ Phantom Pact changes no game files: it's a UE4SS Lua mod with a small DLL of its
 - **`connected=no`, or it feels laggy:** see Connection problems below.
 - **No `[PBZCoop] Loaded` line at all:** UE4SS isn't installed in `PBZ\platform\steam`, or the mod folder isn't at
   `platform\steam\ue4ss\Mods\PBZCoop`.
+- **No `dwmapi.dll` in `platform\steam`:** that file is UE4SS's, not this mod's. Install UE4SS for Phantom Blade Zero
+  first (What you need, above). If it was there and has gone, your antivirus removed it: allow it, then install UE4SS
+  again.
 - **UE4SS stops at launch with "AOB scans could not be completed" (`GNatives`, `GUObjectArray`):** a game update moved
   what UE4SS looks for. The two files in `platform\steam\ue4ss\UE4SS_Signatures` from this zip handle the game as of the
   November 4 update; if a later update breaks them, look for a newer Phantom Pact.

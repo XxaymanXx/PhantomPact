@@ -203,7 +203,14 @@ return function(api)
         return choice.p1 == card and 1 or ((choice.players > 1 and choice.p2 == card) and 2 or nil)
     end
 
+    -- (Or the devices as they already are: a change of layout or monitors alone asks nothing new of them. A player in
+    -- split screen already found Apply grey for exactly that: "i select the option but the apply button is greyed out",
+    -- a report on 1.7.1; their pads were theirs to play with, and not ones this panel had as plugged in.)
     local function ready()
+        local now = api.localcoop.current()
+        if now.players == choice.players and now.p1 == choice.p1 and (choice.players == 1 or now.p2 == choice.p2) then
+            return true
+        end
         if choice.p1 == nil or not available(choice.p1) then
             return false
         end
@@ -345,6 +352,18 @@ return function(api)
                     return
                 end
             end
+        end
+        -- Grey, and no word why (the same report: "the apply button is greyed out"). It waits for each player's device: a
+        -- joystick card is one Windows shows as an Xbox pad (XInput: main.dll's pads.txt), which a PlayStation pad isn't
+        -- till DS4Windows makes it one.
+        if inside(x, y, APPLY) and not ready() and api.status and api.status.notify then
+            local n = (choice.p1 == nil or not available(choice.p1)) and 1 or 2
+            api.status.lastShown.apply = nil        -- (a click deserves its answer, however soon after the last)
+            api.status.notify("apply", choice["p" .. n] == nil
+                and string.format("APPLY waits for player %d: drag the keyboard or a controller onto their slot.", n)
+                or string.format("APPLY waits for player %d's controller: it isn't connected, or isn't one Windows sees as an "
+                    .. "Xbox pad. A PlayStation pad needs DS4Windows: the local co-op guide has the steps.", n))
+            return
         end
         if inside(x, y, APPLY) and ready() then
             local wasMon = api.localcoop.current().layout == "mon"

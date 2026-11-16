@@ -3593,6 +3593,27 @@ local function doorsOfTheGames()
     s:run(25)
     check(field(guestGate, "DoorOpen") == true, "one that went out of reach and came back shut is opened by the host's word, as ever")
     allErrors(s)
+
+    -- A lever has no DoorOpen. Asked for one at every look (1.5 s) of every lever, lift and cage around: a name the class
+    -- hasn't got is the read that took the game down on the bench (an actor still streaming in). Asked till the class is
+    -- known, then no more; a door's is still read every look.
+    local t, th, tg = pair()
+    local LEVER = "BP_SwitchDevice_C_UAID_9"
+    local hostLever, guestLever = Fake.switch(th, LEVER, 330.0, 0.0, 100.0), Fake.switch(tg, LEVER, 330.0, 0.0, 100.0)
+    Fake.put(guestLever, "SwitchWithoutPlaySequence", function(self) Fake.put(self, "CurSwitchState", true) end)
+    local tDoor = door(tg, KEY)
+    door(th, KEY)
+    t:run(40)
+    local asked = th.missed[LEVER .. ".DoorOpen"] or 0
+    check(asked >= 1 and asked <= 3, "a lever is asked for a DoorOpen three looks at most, not at every look (" .. asked .. " in 40 s)")
+    Fake.put(hostLever, "CurSwitchState", true)     -- (the host pulls it)
+    t:run(3)
+    check(field(guestLever, "CurSwitchState") == true and count(th.sent, "^E SWO " .. LEVER .. "$") == 1,
+        "pulled by the host, it's still told and opens for the guest")
+    Fake.put(tDoor, "DoorOpen", true)               -- (and a door the guest opens then, long after)
+    t:run(3)
+    check(count(tg.sent, "^E SWO " .. KEY .. "$") == 1, "and a door opened after all that is still seen and told")
+    allErrors(t)
 end
 
 -- Point 6 of a report on 1.7.1 (three players): "unless we're near each other (like within 75m), bells and certain things
@@ -10405,6 +10426,62 @@ local function padHold()
     allErrors(a)
 end
 
+-- A player report on 1.7.1 ("i select the option but the apply button is greyed out", the F4 panel, split layout and two
+-- monitors; only the ini worked): two in split screen already, on pads this panel doesn't have as plugged in (pads.txt
+-- is XInput's list, and theirs were pads the game reads itself). Apply waited for those pads, with no word why.
+local function panelApply()
+    part("the F4 panel: Apply with the devices as they are")
+    local function cfg(pc, key)
+        return (pc.files["localcoop.txt"] or ""):match(key .. "=(%w+)")
+    end
+    local s, pc = localGame()
+    s:run(1.5)
+    pc.files["pads.txt"] = "0\n0\n0\n0\n"           -- (no pad XInput shows: player 2's card isn't "plugged in")
+    Session.command(pc, "panel toggle")
+    s:run(0.5)
+    local was = cfg(pc, "layout")
+    Session.command(pc, "panel press 650 140")      -- (SCREEN: side by side)
+    Session.command(pc, "panel press 760 510")      -- APPLY
+    s:run(0.5)
+    check(was ~= "lr" and cfg(pc, "layout") == "lr" and cfg(pc, "players") == "2" and cfg(pc, "p2") ~= "kbm",
+        string.format("a change of layout alone is applied, whatever the pads read (%s -> %s, players on %s and %s)",
+            tostring(was), tostring(cfg(pc, "layout")), tostring(cfg(pc, "p1")), tostring(cfg(pc, "p2"))))
+    check(count(pc.logs, "Status: APPLY waits") == 0, "and no tip")
+    allErrors(s)
+
+    -- One player, a second asked for whose pad isn't there: grey as before, and a click says what it waits for.
+    local a, apc = localGame()
+    a:run(1.5)
+    apc.files["pads.txt"] = "1\n0\n0\n0\n"          -- (player 1's pad in, player 2's not one XInput shows)
+    Session.command(apc, "panel toggle")
+    a:run(0.5)
+    Session.command(apc, "panel press 70 140")      -- (PLAYERS: 1)
+    Session.command(apc, "panel press 760 510")
+    a:run(1)
+    check(cfg(apc, "players") == "1", "down to one player: applied (player 1's pad is there)")
+    Session.command(apc, "panel press 150 140")     -- (PLAYERS: 2, player 2's pad still not one XInput shows)
+    Session.command(apc, "panel press 760 510")
+    a:run(0.5)
+    check(cfg(apc, "players") == "1"
+        and count(apc.logs, "Status: APPLY waits for player 2's controller: it isn't connected") == 1,
+        "a second player whose pad isn't there: grey as before, and the click says what Apply waits for")
+    local lang = apc.env.PBZ.lang
+    if lang then
+        lang.set("Chinese")
+        check(lang.say("APPLY waits for player 2's controller: it isn't connected, or isn't one Windows sees as an Xbox pad. "
+            .. "A PlayStation pad needs DS4Windows: the local co-op guide has the steps."):find("DS4Windows,步骤见本地分屏指南", 1, true) ~= nil
+            and lang.say("APPLY waits for player 1: drag the keyboard or a controller onto their slot."):find("玩家 1", 1, true) ~= nil,
+            "in Chinese too")
+        lang.set("English")
+    end
+    apc.files["pads.txt"] = "1\n1\n0\n0\n"          -- (the pad plugged in)
+    a:run(1)
+    Session.command(apc, "panel press 760 510")
+    a:run(1)
+    check(cfg(apc, "players") == "2", "the pad plugged in: applied")
+    allErrors(a)
+end
+
 local function elsewhere()
     part("what a partner on another map does")
     local y, yh, yg = pair()
@@ -12858,6 +12935,7 @@ return function(print_, scripts)
     localDifficulty()
     localTargets()
     padHold()
+    panelApply()
     localScreen()
     localSticks()
     localRise()

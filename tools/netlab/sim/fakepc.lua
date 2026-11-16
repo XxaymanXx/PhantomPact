@@ -77,7 +77,9 @@ local function makeMeta(pc)
             if rawget(t, "__open") then           -- UI: anything goes, and nothing about it is tested
                 return function() end
             end
-            pc.missing[rawget(t, "__class") .. "." .. tostring(k)] = true
+            local key = rawget(t, "__class") .. "." .. tostring(k)
+            pc.missing[key] = true
+            pc.missed[key] = (pc.missed[key] or 0) + 1      -- (how often: a name a class hasn't got is the costly read)
             return nil
         end,
         __newindex = function(t, k, v)
@@ -1472,7 +1474,7 @@ local function files(pc)
 end
 
 function Fake.new(id, scripts, ini, link)
-    local pc = { id = id, scripts = scripts, now = 100.0, trace = {}, logs = {}, errors = {}, missing = {}, files = {}, loops = {}, hooks = {},
+    local pc = { id = id, scripts = scripts, now = 100.0, trace = {}, logs = {}, errors = {}, missing = {}, missed = {}, files = {}, loops = {}, hooks = {},
         nextAddress = 0x100000, calls = 0, keys = {}, enemies = {}, spawners = {}, spawned = {}, hitComps = {}, factions = {}, pickups = {}, chests = {}, blockers = {}, link = link, map = "Map_Xigu",
         paused = false }
     pc.meta = makeMeta(pc)

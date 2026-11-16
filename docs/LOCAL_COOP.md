@@ -80,6 +80,10 @@ freeze for a moment. It's the setup two DualSense pads were tested with.
 5. **Start the game, then press F4.** Hold a button on each pad to light up its card, drag the cards onto the players
    and press APPLY.
 
+APPLY stays grey while a player's slot is empty, or their card is a pad Windows doesn't show as an Xbox pad (unplugged,
+or a PlayStation pad without DS4Windows): click it and a line says which player it waits for. Changing only the screen
+layout or the monitors never waits for a pad.
+
 Two layouts work: a pad for each player, or the keyboard and mouse for player 1 with a pad for player 2 (drag the
 Keyboard & Mouse card onto player 1 in the same panel). The keyboard and mouse can't be player 2's: the game ties its
 menus, its map and the F4 panel to player 1's keyboard, so a pad on player 1 with the keyboard on player 2 leaves
