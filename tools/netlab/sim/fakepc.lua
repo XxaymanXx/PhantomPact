@@ -1938,6 +1938,16 @@ function Fake.new(id, scripts, ini, link)
     defs(pc, subsystems, { GetWorldSubsystem = function(_, _, cls)
         local path = rawget(cls, "__path")
         return (path == BACKPACK and bag) or (path == "/Script/SGameCombatSystem.BulletSubsystem" and bulletSystem) or nil
+    end,
+    -- (A player's input subsystem, asked for by their controller: lesson.lua.)
+    GetLocalPlayerSubSystemFromPlayerController = function(_, controller)
+        local id = controller.Player.ControllerId
+        for _, sub in ipairs(pc.inputSubsystems) do
+            if sub:GetOuter().ControllerId == id then
+                return sub
+            end
+        end
+        return nil
     end })
     local aiLibrary = object(pc, "SGameAIFunctionLibrary")
     defs(pc, aiLibrary, {
@@ -2036,7 +2046,13 @@ function Fake.new(id, scripts, ini, link)
         local mine = rawget(actor, "__tags") or {}
         tags.GameplayTags:ForEach(function(_, t)
             local n = t:get().TagName:ToString()
-            mine[n] = math.max(0, (mine[n] or 0) + by)
+            -- (One count in the game, its own in it too: a tag taken off with none of a script's on takes the game's,
+            -- pc.inCombat, a player's count of the enemies in a fight with them.)
+            if by < 0 and (mine[n] or 0) == 0 and n == "CharacterState.InCombat" and actor == pc.pawn and (pc.inCombat or 0) > 0 then
+                pc.inCombat = pc.inCombat - 1
+            else
+                mine[n] = math.max(0, (mine[n] or 0) + by)
+            end
         end)
         rawset(actor, "__tags", mine)
     end
@@ -2220,6 +2236,7 @@ function Fake.new(id, scripts, ini, link)
     end
     found["/Game/PBZContent/Blueprint/Ability/GameplayEffects/GE_Kill.GE_Kill_C"] = object(pc, "Class")
     found["/Script/Engine.SkeletalMeshComponent"] = object(pc, "Class")
+    found["/Script/EnhancedInput.EnhancedInputLocalPlayerSubsystem"] = object(pc, "Class")
     pc.appearanceClass = pc.appearanceClass or object(pc, "Class")
     found["/Script/ProjectPBZ.PBZAppearanceComponent"] = pc.appearanceClass
     pc.cameraClass = pc.cameraClass or object(pc, "Class")

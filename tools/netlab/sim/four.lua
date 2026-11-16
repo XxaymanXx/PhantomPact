@@ -801,6 +801,128 @@ local function guestRunsItsBoss()
     allErrors(u)
 end
 
+-- Three or more players. A party has no handing over (its relay carries enemy lines from the host alone), but the host's
+-- game wakes enemies for its own player alone all the same: one by a guest some way from the host slept there, and on
+-- every guest's screen with it, a boss a guest went in to first too. The host's line says it's asleep there now, and each
+-- guest's game runs its own copy meanwhile: awake for the guest who's by it, its health and its death everyone's.
+local function asleepOnTheHost()
+    part("a party: enemies by a guest away from the host")
+    local list = {
+        { "byguest", THUG, 11500.0, 0.0, 100.0, 600, 100 },
+        { "byhost", THUG, 300.0, 0.0, 100.0, 600, 100 },
+        { "mid", THUG, 3000.0, 0.0, 100.0, 600, 100 },
+        { "boss", "BP_Monster_Boss_C", 2000.0, 3000.0, 100.0, 5000, 400, true },
+    }
+    local function brain(e)
+        return field(field(field(e, "Controller"), "BrainComponent"), "running")
+    end
+    local function floor(e)
+        return field(field(field(e, "AttributeSetBase"), "Health_Min"), "CurrentValue")
+    end
+    local function line(pc, name)
+        return net(pc).remoteEnemies["sp:" .. name] or {}
+    end
+    local s = party(list)
+    local h, a, b, c = s.pcs[1], s.pcs[2], s.pcs[3], s.pcs[4]
+    Session.moveTo(h, 0, 0)
+    Session.moveTo(a, 11000, 0)        -- 110 m off, by one the host's game has asleep
+    Session.moveTo(b, 500, 500)
+    Session.moveTo(c, 3300, 0)         -- by one 30 m from the host: awake there
+    s:run(3)
+    local onH, onA = Session.enemyOn(h, "byguest"), Session.enemyOn(a, "byguest")
+    check(line(a, "byguest").Asleep == true, "one by a guest 110 m from the host: its line says it's asleep there")
+    check(brain(onA) == true and floor(onA) == 0, "that guest's game runs its own copy: awake, and not held")
+    check(count(h.sent, "RUN sp:") == 0, "handed to nobody: a party has no handing over")
+    check(line(c, "mid").X ~= nil and line(c, "mid").Asleep ~= true and brain(Session.enemyOn(c, "mid")) == false,
+        "one 30 m from the host with a guest by it: awake there, the host's to run as ever")
+    check(brain(Session.enemyOn(b, "byhost")) == false and floor(Session.enemyOn(b, "byhost")) == 1, "and one by the host")
+    -- Its health is the host's world's: the guest's blow goes there, and comes to every other copy.
+    local full = select(1, Fake.health(onH))
+    check(select(1, Fake.health(onA)) == full, "the copy has the health the host's has")
+    swing(a, onA, full - 50)
+    s:run(1)
+    check(count(a.sent, "^E D sp:byguest ") == 1 and select(1, Fake.health(onH)) == full - 50,
+        "the guest's blow lands on the host's, asleep or not")
+    Session.moveTo(c, 11300, 300)
+    s:run(3)
+    local onC = Session.enemyOn(c, "byguest")
+    check(brain(onC) == true and select(1, Fake.health(onC)) == full - 50,
+        "a second guest by it: a copy of its own, awake, with what the host's has left")
+    -- The host walks up: awake there, and everyone's copy follows the host's again.
+    Session.moveTo(h, 8000, 0)
+    s:run(3)
+    check(line(a, "byguest").Asleep ~= true and brain(onA) == false and floor(onA) == 1,
+        "the host within 40 m of it: awake there, the guests' copies held and following the host's again")
+    Session.moveTo(h, 0, 0)
+    s:run(3)
+    check(line(a, "byguest").Asleep == true and brain(onA) == true, "the host away again: asleep there, each guest's own again")
+    -- It dies in a guest's game: dead for everyone, once.
+    swing(a, onA, 0)
+    Fake.put(onA, "dead", true)
+    s:run(2)
+    check(count(a.sent, "^E GK sp:byguest$") == 1, "it dies in a guest's game, which says so")
+    check(field(onH, "dead") == true and field(onC, "dead") == true, "and it's dead on the host and for the other guest by it")
+    check(count(h.sent, "^E K sp:byguest$") == 1 and count(c.sent, "^E GK ") == 0, "told once")
+
+    -- A boss a guest goes in to first, the host 36 m off and not in the fight: asleep there wherever the host stands.
+    Session.moveTo(b, 2100, 2900)
+    s:run(3)
+    local bossH, bossB = Session.enemyOn(h, "boss"), Session.enemyOn(b, "boss")
+    check(line(b, "boss").Boss == true and line(b, "boss").Asleep ~= true and brain(bossB) == false,
+        "a boss 36 m from the host, in no fight: the host's to run")
+    b.hudLayout:RegisterBossHPBar(bossB)
+    s:run(3)
+    check(net(h).partnerBosses["sp:boss"] == true and line(b, "boss").Asleep == true and line(b, "boss").Boss == true,
+        "a guest's fight with it, the host not in: its line says a boss, asleep there")
+    check(brain(bossB) == true and floor(bossB) == 0, "the guest's game runs its copy: awake in its fight, not held")
+    local left = select(1, Fake.health(bossB))
+    swing(b, bossB, left - 400)
+    s:run(2)
+    check(math.abs(select(1, Fake.health(bossH)) - (left - 400)) < 2, "the guest's blows reach the host's all the same")
+    Fake.setHealth(bossH, left - 1400)     -- (another guest's blows, landed on the host's)
+    s:run(2)
+    check(select(1, Fake.health(bossB)) == left - 400, "what it has left in its fight in the guest's game is that game's to say")
+    h.hudLayout:RegisterBossHPBar(bossH)   -- the host walks in: its own game's fight with it
+    Session.moveTo(h, 1900, 2800)
+    s:run(3)
+    check(line(b, "boss").Asleep ~= true and brain(bossB) == false,
+        "the host in the fight: awake there, the guests' copies following the host's again")
+    check(math.abs(select(1, Fake.health(bossB)) - select(1, Fake.health(bossH))) < 2, "at the health the host's has left")
+    allErrors(s)
+
+    -- A guest kills a boss asleep in the host's world: its death there is its death everywhere, the host's copy's too.
+    local t = party(list)
+    local th, tb, tc = t.pcs[1], t.pcs[3], t.pcs[4]
+    Session.moveTo(th, 0, 0)
+    Session.moveTo(t.pcs[2], 500, 0)
+    Session.moveTo(tb, 2100, 2900)
+    Session.moveTo(tc, 2200, 3100)
+    t:run(3)
+    local deadH, deadB, deadC = Session.enemyOn(th, "boss"), Session.enemyOn(tb, "boss"), Session.enemyOn(tc, "boss")
+    tb.hudLayout:RegisterBossHPBar(deadB)
+    t:run(3)
+    swing(tb, deadB, select(1, Fake.health(deadB)) - 300)
+    t:run(1)
+    swing(tb, deadB, 0)
+    Fake.put(deadB, "dead", true)
+    t:run(3)
+    check(count(tb.sent, "^E GK sp:boss$") == 1, "a guest kills a boss asleep in the host's world, and says so")
+    check(field(deadH, "dead") == true and field(deadH, "realDeath") == true, "the host's copy dies by the game's own death")
+    check(field(deadC, "dead") == true, "and the copy of another guest by it")
+    allErrors(t)
+
+    -- Two players: nothing sleeps by this rule (the guest's game runs what's by it, handed over).
+    local u = Session.new(SIM_SCRIPTS, { "Host", "Guest" }, false, list)
+    local ug = u.pcs[2]
+    u:run(4)
+    Session.moveTo(u.pcs[1], 0, 0)
+    Session.moveTo(ug, 11000, 0)
+    u:run(3)
+    check(net(ug).mine["sp:byguest"] == true and count(u.pcs[1].logs, "sleeps here with a guest by it") == 0,
+        "two players: handed over as ever, nothing called asleep")
+    allErrors(u)
+end
+
 local function rests()
     part("bells and deaths")
     local s = party()
@@ -2182,6 +2304,44 @@ end
 -- wait, as a guest who dies first does.
 -- A boss's items reach each player once, whoever's blow it was. (The host's game pays the host and shares what it gave
 -- (T); a boss's items were told to the guest by name as well (I), from the days before shares: one from each.)
+-- The Mind's Eye lesson: the game cuts the player's input down to the sense and waits for it, and the sense won't start
+-- while the game counts the player in a fight. Online an enemy by them that a partner fights keeps them counted, and
+-- they stood there able to do nothing ("during tutorial when game asks you to perform minds eye client get softlocked").
+local function mindsEyeLesson()
+    part("the Mind's Eye lesson, with an enemy by the player")
+    local s = pair()
+    local h, g = s.pcs[1], s.pcs[2]
+    local function counted(pc)
+        return pc.env.PBZ.game.inCombat(pc.pawn)
+    end
+    local said = "The Mind's Eye lesson holds your controls"
+    g.inCombat = 2
+    s:run(2)
+    check(counted(g) and g.inCombat == 2, "in a fight with no lesson up: the game's count is the game's")
+    g.inputSets[0][g.senseSet] = 100       -- (the lesson: the sense-only set on the guest's input)
+    s:run(1)
+    check(not counted(g) and g.inCombat == 0, "the lesson holds the guest's controls to the sense: counted out of the fight, so it can start")
+    g.inCombat = 1                          -- (the next enemy into a fight with them, the lesson still up)
+    s:run(1)
+    check(not counted(g) and count(g.logs, said) == 1, "and again while the lesson's up, said once")
+    g.inputSets[0][g.senseSet] = nil       -- (the sense started: the lesson's done)
+    g.inCombat = 1
+    s:run(2)
+    check(counted(g), "the lesson done: a fight is a fight again")
+    h.inCombat = 1
+    h.inputSets[0][h.senseSet] = 100
+    s:run(1)
+    check(not counted(h) and count(h.logs, said) == 1, "the host's own lesson the same")
+    h.inputSets[0][h.senseSet] = nil
+    Session.command(g, "netoff")
+    s:run(1)
+    g.inCombat = 1
+    g.inputSets[0][g.senseSet] = 100
+    s:run(2)
+    check(counted(g), "with co-op off the lesson is the game's own business")
+    allErrors(s)
+end
+
 local function bossItemsOnce()
     part("a boss's items, once each")
     local ITEM = "Weapon_Material_09"
@@ -2432,7 +2592,14 @@ local function hostDownAtBossDeath()
         .. "the host's, still down, not")
     Session.moveTo(g2, 9300, 2800)
     s:run(9)                                        -- (the guard's own look over: 20 s)
-    swing(g2, Session.enemyOn(g2, "far"), 1)
+    -- (65 m from a host who's down: asleep in the host's world, so guest 2's game runs its own copy of it, not held, and
+    -- its death there, the game's own, is told: asleepOnTheHost.)
+    local far = Session.enemyOn(g2, "far")
+    swing(g2, far, select(1, Fake.health(far)) - 50)
+    s:run(1)
+    g2.env.PBZ.game.noteLocalMove()
+    g2.env.StaticFindObject("/Script/GameplayAbilities.Default__AbilitySystemBlueprintLibrary"):GetAbilitySystemComponent(far)
+        :BP_ApplyGameplayEffectToSelf()
     s:run(14)
     check(has(g2.storyGuids, "N_FAR"), "an enemy 65 m off falls too, within the minute, its own step in the guests' worlds")
     upAgain(s, h)
@@ -11683,6 +11850,8 @@ return function(print_, scripts)
     farEnemy()
     guestRunsWhatsNearIt()
     guestRunsItsBoss()
+    asleepOnTheHost()
+    mindsEyeLesson()
     syncRaces()
     hitReactions()
     bossReactions()

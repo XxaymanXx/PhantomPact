@@ -586,6 +586,7 @@ api.blockers = dofile(SCRIPT_DIR .. "blockers.lua")(api)
 api.rules = dofile(SCRIPT_DIR .. "rules.lua")(api)
 api.prologue = dofile(SCRIPT_DIR .. "prologue.lua")(api)
 api.qte = dofile(SCRIPT_DIR .. "qte.lua")(api)
+api.lesson = dofile(SCRIPT_DIR .. "lesson.lua")(api)
 local net = coop.net
 
 -- Helpers for the "eval" command, so test snippets can reuse the mod's functions.
@@ -618,6 +619,7 @@ PBZ = {
     arena = api.arena,
     mapfog = api.mapfog,
     qte = api.qte,
+    lesson = api.lesson,
     hitfx = api.hitfx,
     lang = api.lang,
     status = api.status,

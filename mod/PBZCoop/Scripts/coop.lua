@@ -919,6 +919,7 @@ return function(api)
     -- guest's game goes quiet about it. One fighting the host, and anything without a spawner's id (which the two PCs
     -- might name apart) stay the host's. Two players only: a party's relay carries enemy lines from the host alone.
     -- A boss goes by its fight (handover.bossGoes): the guest's game runs one the guest is fighting and the host isn't.
+    -- With three or more, one asleep here is each guest's own to run a copy of meanwhile (handover.asleepHere).
     local handover = {
         APART_CM = 2500,        -- the two players further apart than this are apart
         TOGETHER_CM = 1500,     -- and back within this, together
@@ -930,6 +931,9 @@ return function(api)
         seen = {},              -- host: id -> { hp, posture, addr } of a copy the guest's game runs, as left last turn
         since = {},             -- host: id -> net.frameNow when it was handed over
         retryAt = {},           -- host: id -> os.clock() before which it isn't handed over again
+        ASLEEP_CM = 4500,       -- a party's host: an enemy further than this from its player sleeps in its game
+        AWAKE_CM = 4000,        -- and is awake there again within this
+        asleep = {},            -- a party's host: id -> true while it sleeps here with a guest by it (asleepHere)
     }
 
     -- An enemy's line goes the moment it says something new, and one that says the same as the last only every ENEMY_SAME_S,
@@ -996,9 +1000,9 @@ return function(api)
         end
         local paidThere = false
         -- (Not one the guest's game ran: the floor on its copy here is the handover's own, and its death ran its whole
-        -- script there.)
-        if not dead and net.guestKilled[name] and not net.guestRuns[name] and game.healthFloor and game.healthFloor(actor) >= 1
-            and game.isBoss and game.isBoss(actor, addr) then
+        -- script there. Nor, in a party, one asleep here that a guest's game ran a copy of: handover.asleepHere.)
+        if not dead and net.guestKilled[name] and not net.guestRuns[name] and not handover.asleep[name]
+            and game.healthFloor and game.healthFloor(actor) >= 1 and game.isBoss and game.isBoss(actor, addr) then
             -- A boss held up by its own floor (its phase ends in a scene) isn't the guest's kill to make: killed from here it
             -- died outside its script, with no scene after, its body left, and the story stuck in the host's save. It's
             -- fought here.
@@ -1040,6 +1044,7 @@ return function(api)
             -- (A guest's kill heard after it died here anyway is done with: kept, it killed the spawner's next enemy under
             -- that id on its first turn.)
             net.guestKilled[name] = nil
+            handover.asleep[name] = nil
             game.unfocus(addr)      -- (who hit it is forgotten: a later enemy may get its address)
             if net.guestRuns[name] then
                 handover.drop(actor, addr, name)
@@ -1142,6 +1147,10 @@ return function(api)
                 local boss = game.isBoss and game.isBoss(actor, addr) and 1 or 0
                 if (boss == 1 or (game.bossTwin and game.bossTwin(actor, addr))) and game.watchBossBar then
                     game.watchBossBar(actor, addr, posture)     -- (its breaks and fills, for a partner's blows: handlers.D)
+                end
+                -- (Asleep here with a guest by it, in a party: each guest's game runs its own copy. handover.asleepHere.)
+                if handover.asleepHere(name, actor, addr, x, y, z, boss == 1) then
+                    boss = boss + 2
                 end
                 -- "-" = unknown posture; the client leaves its own alone instead of zeroing it.
                 local number = enemyNumber(actor, name)
@@ -1522,6 +1531,7 @@ return function(api)
                         local hostOf = net.remoteEnemies[name]
                         local broke = false
                         if dPosture > 0.5 and prev.posture and game.partnerRefuses and game.setPosture
+                            and not (hostOf and hostOf.Asleep)      -- (asleep there: this game runs its copy, its bar its own)
                             and ((hostOf and hostOf.Boss) or net.partnerBosses[name] or (game.bossTwin and game.bossTwin(actor, addr)))
                             and game.partnerRefuses(actor, addr, true) then
                             local own = game.hitStateOf and game.hitStateOf(actor)
@@ -1565,10 +1575,20 @@ return function(api)
                 -- killing blow is never played twice and a copy that's a hit ahead doesn't die before the host's.
                 -- (Every turn, not once by address: a copy gone and a new one at its address was taken for held already, and
                 -- died here on a hit, the host's alive.)
-                if game.setMinHealth then
+                -- (Not one asleep in the host's world with a guest by it, in a party: this game runs its own copy of
+                -- that meanwhile, awake for this player as the game means it, neither held nor steered, and its death
+                -- here is this game's own to have and to tell (GK). The next round lets go of the hold and the steering
+                -- it had. handover.asleepHere.)
+                local asleep = r.Asleep == true
+                if asleep and not handover.woken[addr] then
+                    handover.wake(name, addr)
+                end
+                if game.setMinHealth and not asleep then
                     game.setMinHealth(actor, HELD_HP)
                 end
-                held[addr] = actor
+                if not asleep then
+                    held[addr] = actor
+                end
                 -- (On its floor with no killing blow told: every blow after read as nothing, and it died only to the host's
                 -- hits, "sometimes it can never be killed" (report 1 on 1.6.3). Lifted a point: the bar still reads empty,
                 -- and the next blow is a fall onto the floor again, told as the killing blow.)
@@ -1577,10 +1597,10 @@ return function(api)
                     game.setHealth(actor, HELD_HP + 1)
                     hp = HELD_HP + 1
                 end
-                if api.puppets then
+                if api.puppets and not asleep then
                     api.puppets.follow(name, actor, r)
                 end
-                if (r.Boss or (game.bossTwin and game.bossTwin(actor, addr))) and game.watchBossBar then
+                if not asleep and (r.Boss or (game.bossTwin and game.bossTwin(actor, addr))) and game.watchBossBar then
                     game.watchBossBar(actor, addr, r.Posture)   -- (the host's bar: its breaks and fills, for this player's blows)
                 end
                 if game.setMaxHealth and r.MaxHp and maxhp and math.abs(r.MaxHp - maxhp) > 1 then
@@ -1591,12 +1611,14 @@ return function(api)
                 -- world with no scene after it, and the guest's story stayed in the forest while the host's went on.)
                 -- (Half a point above it: a copy written to exactly the floor took every blow after with no drop, so none
                 -- was ever sent, the enemy the host's alone to finish.)
-                local want = r.Hp ~= nil and math.max(r.Hp, HELD_HP + 0.5) or nil
+                -- (A boss asleep there, in its fight here: what it has left is this game's to say, till the host is in.)
+                local own = asleep and r.Boss and handover.barOn(addr)
+                local want = not own and r.Hp ~= nil and math.max(r.Hp, HELD_HP + 0.5) or nil
                 if game.setHealth and want ~= nil and hp ~= nil and want < hp - 0.5 then
                     game.setHealth(actor, want)
                     hp = want
                 end
-                if game.setHealth and r.Hp ~= nil and hp ~= nil and r.MaxHp
+                if game.setHealth and not own and r.Hp ~= nil and hp ~= nil and r.MaxHp
                     and r.Hp > hp + math.max(1, r.MaxHp * 0.05) then
                     net.healTicks[name] = net.healTicks[name] or os.clock()
                     if os.clock() - net.healTicks[name] >= HEAL_TICKS then
@@ -1614,7 +1636,9 @@ return function(api)
                 -- copy broke here a second time at this player's next blow.)
                 local bars = game.bossBars and game.bossBars[addr]
                 local empty = (bars and bars.empty) or (game.POSTURE_EMPTY or 1.5)
-                if game.setPosture and r.Posture ~= nil and posture ~= nil and r.Posture < posture - 0.5
+                if asleep then
+                    net.postureTicks[name] = nil    -- (its bar is its own game's meanwhile: the host's stands still)
+                elseif game.setPosture and r.Posture ~= nil and posture ~= nil and r.Posture < posture - 0.5
                     and r.Posture > empty then
                     game.setPosture(actor, r.Posture)
                     posture = r.Posture
@@ -1688,6 +1712,59 @@ return function(api)
         end
         for _, boss in ipairs(game.bossActors and game.bossActors() or {}) do
             if boss:GetAddress() == addr and not (game.isMirrorBar and game.isMirrorBar(boss)) then
+                return true
+            end
+        end
+        return false
+    end
+
+    -- Host of a party: an enemy this game has asleep with a guest by it, which each guest's game runs a copy of for
+    -- itself meanwhile. A party has no handing over (its relay carries enemy lines from the host alone), but this game
+    -- wakes enemies for its own player alone all the same: with three or more players, one by a guest some way from the
+    -- host stood asleep here, and so on every guest's screen, a boss a guest went in to first too (104 and 263, as they
+    -- were for two). Its line says so (the boss field: 2, and 3 for a boss), and while it does a guest's copy is neither
+    -- held nor steered: it wakes there as the game means it to, for the guest who's by it, and its death there is told
+    -- (GK) and is its death everywhere. Its health is still this world's: every guest's blows come here, and its line
+    -- takes each copy down with it. What it does is each guest's own to see: two guests by the same one, away from the
+    -- host, fight a copy each.
+    -- Asleep: over 45 m from this player (the optimizer's third wave; awake again within 40 m), a guest within their own
+    -- 60 m of it and 10 m nearer, and none new while this player's own boss bar is up. And one in a guest's boss fight
+    -- that this player isn't in, wherever they stand.
+    function handover.asleepHere(name, actor, addr, x, y, z, boss)
+        local was = handover.asleep[name] == true
+        local yes = false
+        if net.party and not net.pvp and net.localLoc and name:sub(1, 3) == "sp:" then
+            local dh = handover.dist(x, y, z, net.localLoc)
+            local theirs = net.partnerBosses[name] ~= nil
+            if (boss or theirs) and (net.toldFighting or handover.hostIn(name, addr, dh)) then
+                yes = false
+            elseif theirs then
+                yes = true
+            elseif dh > (was and handover.AWAKE_CM or handover.ASLEEP_CM) and (was or not net.toldFighting) then
+                for _, p in ipairs(partners()) do
+                    local t = p.target
+                    if t ~= nil and not p.ghostHidden and not p.partnerGone and sameMap(t) then
+                        local dg = handover.dist(x, y, z, t)
+                        if dg <= ENEMY_RADIUS_CM and dg + handover.NEARER_CM < dh then
+                            yes = true
+                            break
+                        end
+                    end
+                end
+            end
+        end
+        if yes ~= was then
+            handover.asleep[name] = yes or nil
+            log(name .. (yes and " sleeps here with a guest by it: each guest's game runs its own copy of it."
+                or " is awake here again: this game's to run for everyone."))
+        end
+        return yes
+    end
+
+    -- A boss bar of any kind is up here on the actor at this address.
+    function handover.barOn(addr)
+        for _, boss in ipairs(game.bossActors and game.bossActors() or {}) do
+            if boss:GetAddress() == addr then
                 return true
             end
         end
@@ -1934,6 +2011,7 @@ return function(api)
         end
         net.guestRuns, net.guestLines, net.mine = {}, {}, {}
         handover.seen, handover.since, handover.retryAt, handover.on, handover.woken = {}, {}, {}, false, {}
+        handover.asleep = {}
     end
 
     local function startHostRound(now)
@@ -2282,7 +2360,7 @@ return function(api)
             -- (Not a line from before its K, come in the same frame: it brought the dead enemy back here, and another of its
             -- class stood in for it, its hits sent for a dead one.)
             local justKilled = who and isClient() and net.killedAt and net.killedAt[who.name]
-                and os.clock() - net.killedAt[who.name] < 1.5 and line:match(" (%S+) %S+$") ~= "1"
+                and os.clock() - net.killedAt[who.name] < 1.5 and boss ~= "1" and boss ~= "3"
             if who and not justKilled and (isHost() and net.guestRuns[who.name] or (isClient() and not net.mine[who.name])) then
                 local X, Y, Z, Yaw, Hp, MaxHp = num(x), num(y), num(z), num(yaw), num(hp), num(maxhp)
                 -- Unparsable numbers or no health (MaxHp 0) would teleport or zero our copy: ignore the record.
@@ -2295,7 +2373,9 @@ return function(api)
                     local r = into[who.name] or { Class = who.class }
                     r.X, r.Y, r.Z, r.Yaw, r.Hp, r.MaxHp = X, Y, Z, Yaw, Hp, MaxHp
                     r.VX, r.VY = num(vx) or 0, num(vy) or 0
-                    r.Boss, r.Posture, r.at = boss == "1", num(posture), now
+                    -- (2, and 3 for a boss: asleep in the host's world with a guest by it. handover.asleepHere.)
+                    r.Boss, r.Asleep = boss == "1" or boss == "3", boss == "2" or boss == "3"
+                    r.Posture, r.at = num(posture), now
                     into[who.name] = r
                 end
             end
