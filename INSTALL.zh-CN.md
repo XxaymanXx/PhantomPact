@@ -157,6 +157,7 @@ Phantom Pact 不修改任何游戏文件:它是一个 UE4SS Lua 模组,带一个
 - **模组文件夹里出现 `relay_error.txt`,或游戏提示 “co-op couldn't start”:** 连接无法启动,信息里写明了原因(例如端口被占用)。提交问题时请附上它。
 - **`connected=no`,或者感觉卡顿:** 见下面的“连接问题”。
 - **完全没有 `[PBZCoop] Loaded` 这一行:** UE4SS 没有安装在 `PBZ\platform\steam`,或模组文件夹不在 `platform\steam\ue4ss\Mods\PBZCoop`。
+- **`platform\steam` 里没有 `dwmapi.dll`:** 这个文件属于 UE4SS,不是本模组的。请先安装 Phantom Blade Zero 版 UE4SS(见上面的“需要准备”)。如果原来有、后来不见了,是杀毒软件删除了它:把它加入白名单,然后重新安装 UE4SS。
 
 ## 连接问题
 

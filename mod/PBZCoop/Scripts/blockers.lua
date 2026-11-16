@@ -201,7 +201,7 @@ return function(api)
                 return false
             end
         end
-        return true
+        return true, cn
     end
 
     -- (A door of the game's, BP_BlockBase and what's made of it: single and double doors, block gates. Open is its own
@@ -210,13 +210,38 @@ return function(api)
     -- of Xigu opened by the guest with its key, the host 4 m off and its door shut; and one opened here by word read
     -- shut, so the host never named it again to a guest who came later.)
     -- (The second answer: it's a door, one that has a DoorOpen to read.)
-    local function isOpen(s)
+    -- (Asked of a class till it's known, not of every switch at every look: a lever, a lift or a cage has no DoorOpen,
+    -- and a name its class hasn't got has UE4SS search all the class's fields and functions for it. One such search, on
+    -- an actor still streaming in 5.6 s after a map's load, took the game down inside UE4SS, where no pcall catches it:
+    -- the bench, 11-16, a probe that read DoorOpen on every switch. cn: the switch's class, sharedSwitch's. A class is
+    -- no door's once DOOR_MISSES looks, a second apart, found none.)
+    local DOOR_MISSES = 3
+    local doorClass, doorMiss = {}, {}      -- class -> true (doors) or false (none); class -> { n, at } while unknown
+    local function isOpen(s, cn)
         local ok, v = pcall(function() return s.CurSwitchState end)
         if ok and v == true then
             return true
         end
+        if cn and doorClass[cn] == false then
+            return false, false
+        end
         local okDoor, door = pcall(function() return s.DoorOpen end)
-        return okDoor and door == true, okDoor and type(door) == "boolean"
+        local isDoor = okDoor and type(door) == "boolean"
+        if cn and doorClass[cn] == nil then
+            if isDoor then
+                doorClass[cn], doorMiss[cn] = true, nil
+            else
+                local m, now = doorMiss[cn] or { n = 0, at = -1e9 }, os.clock()
+                if now - m.at >= 1 then
+                    m.n, m.at = m.n + 1, now
+                end
+                doorMiss[cn] = m
+                if m.n >= DOOR_MISSES then
+                    doorClass[cn], doorMiss[cn] = false, nil
+                end
+            end
+        end
+        return isDoor and door == true, isDoor
     end
 
     -- What's open in the host's world goes out again now and then, not only as it opens (player report 11-09): a door the
@@ -292,10 +317,14 @@ return function(api)
         onSwitchMap()
         local now = os.clock()
         for _, s in ipairs(FindAllOf("PBZSwitchBase") or {}) do
-            if valid(s) and sharedSwitch(s) then
+            local shared, cn
+            if valid(s) then
+                shared, cn = sharedSwitch(s)
+            end
+            if shared then
                 local name = nameOf(s)
                 if name and (pending[name] or not alone) then
-                    local open, door = isOpen(s)
+                    local open, door = isOpen(s, cn)
                     if open then
                         shutHere[name], openAt[name] = nil, now
                     elseif door and now - (openAt[name] or -1e9) <= LOOK_S * 2 then
@@ -351,7 +380,8 @@ return function(api)
                 local name = valid(s) and nameOf(s)
                 if name and want[name] then
                     want[name] = nil
-                    if sharedSwitch(s) and not isOpen(s) then
+                    local shared, cn = sharedSwitch(s)
+                    if shared and not isOpen(s, cn) then
                         openHere(s, name)
                     end
                 end
