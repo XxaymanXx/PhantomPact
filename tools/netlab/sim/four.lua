@@ -3518,6 +3518,107 @@ local function guestDownAtBossDeath()
     allErrors(t)
 end
 
+-- The reports of 11-06 and 11-09: "for some bosses, after the host enters, the guest can't deal damage; when the guest
+-- becomes the host, still can't". The bench, 11-17 (Peng Meng): a story boss stands unstarted (its AI's state None) till
+-- its player walks into the story's trigger and its scene has run. A guest outside it as the host walked in took the
+-- host's flow steps of that start as done, lost its own trigger with them, and had a boss never started in its world.
+local function bossStartsHere()
+    part("a boss's start is each world's own")
+    local GUID, STEP, FLAG = "1FC1300A41E19051E5E3EDA7CE2829B4", "Map_Xigu-SkeletalMeshActor_UAID_9", "xg.boss.appears"
+    local function has(list, x)
+        for _, v in ipairs(list) do
+            if v == x then
+                return true
+            end
+        end
+        return false
+    end
+    local function step(pc, node)       -- (a flow step run in this PC's world)
+        pc.storyGuids[node] = true
+        pc.storyGuids[#pc.storyGuids + 1] = node
+    end
+    local function ai(pc, state)        -- (its boss's AI state, as the game names it)
+        local c = rawget(field(Session.enemyOn(pc, "boss"), "Controller"), "__fields").SGameAIComponent
+        c.CurrentStateTag = { TagName = { ToString = function() return state end } }
+    end
+    local function scene(s, pc)         -- (the story's scene in this PC's world: its steps, its flag)
+        Session.scene(pc, true)
+        step(pc, GUID)
+        step(pc, STEP)
+        pc.globalTags[#pc.globalTags + 1] = FLAG
+        s:run(14)
+        Session.scene(pc, false)
+        ai(pc, "AI.State.Combat")
+    end
+    local function world()
+        local s, h, g = pair()
+        for _, pc in ipairs(s.pcs) do
+            pc.env.PBZ.game.isStoryLevel = function(level) return level == "Map_Xigu" end
+            ai(pc, "None")
+        end
+        s:run(8)
+        return s, h, g
+    end
+
+    -- The guest outside as the host walks in: its world keeps its own trigger.
+    local s, h, g = world()
+    scene(s, h)
+    bossStart(s)
+    s:run(20)
+    check(has(h.storyGuids, GUID) and not has(g.storyGuids, GUID) and not has(g.storyGuids, STEP) and not has(g.globalTags, FLAG),
+        "the host walks in alone: none of its start's flow steps and flags is taken in the guest's world")
+    check(count(g.logs, "left for this world's own start of it") == 1, "said once in the guest's log")
+    step(h, "Map_Xigu-BP_FlowActor_C_7")                    -- (something else the host's flow does, the fight on)
+    s:run(14)
+    check(has(g.storyGuids, "Map_Xigu-BP_FlowActor_C_7"), "what the host's flow does after that is taken as ever")
+    scene(s, g)                                             -- (the guest walks into its own trigger: its scene, its start)
+    s:run(3)
+    check(count(g.logs, "is taken now: started in this world") == 1 and has(g.storyGuids, GUID) and has(g.globalTags, FLAG),
+        "the guest walks into its own trigger: its world runs the start itself, and the wait is over")
+    allErrors(s)
+
+    -- The guest never goes in, and the host wins: taken then, as before.
+    local w, wh, wg = world()
+    scene(w, wh)
+    bossStart(w)
+    w:run(20)
+    check(not has(wg.storyGuids, GUID), "(held again)")
+    bossEnd(w)
+    w:run(8)
+    check(has(wg.storyGuids, GUID) and has(wg.storyGuids, STEP) and has(wg.globalTags, FLAG)
+        and count(wg.logs, "is taken now: beaten in the host's world") == 1,
+        "the host beats the boss, the guest never in: the start's steps are taken then, as before")
+    allErrors(w)
+
+    -- Both walk in together: each world runs its own, nothing is kept back.
+    local b, bh, bg = world()
+    Session.scene(bg, true)
+    step(bg, GUID)
+    step(bg, STEP)
+    bg.globalTags[#bg.globalTags + 1] = FLAG
+    scene(b, bh)
+    Session.scene(bg, false)
+    ai(bg, "AI.State.Combat")
+    bossStart(b)
+    b:run(24)
+    check(count(bg.logs, "left for this world's own start of it") == 0 and has(bg.storyGuids, GUID),
+        "both inside as it fires: nothing kept back")
+    allErrors(b)
+
+    -- A scene of the host's with no fight after it: what it told is taken as the wait ends.
+    local n, nh, ng = world()
+    Session.scene(nh, true)
+    step(nh, "Map_Xigu-BP_FlowActor_C_8")
+    n:run(14)
+    Session.scene(nh, false)
+    n:run(6)
+    check(not has(ng.storyGuids, "Map_Xigu-BP_FlowActor_C_8"), "a scene of the host's, no fight after: its steps wait a little")
+    n:run(16)
+    check(has(ng.storyGuids, "Map_Xigu-BP_FlowActor_C_8") and count(ng.logs, "left for this world's own start") == 0,
+        "and are taken")
+    allErrors(n)
+end
+
 local function doorsOpenedBefore()
     part("doors the host opened before the guest came")
     local s, h, g = pair()
@@ -12936,6 +13037,7 @@ return function(print_, scripts)
     localTargets()
     padHold()
     panelApply()
+    bossStartsHere()
     localScreen()
     localSticks()
     localRise()
