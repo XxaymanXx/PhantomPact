@@ -238,28 +238,12 @@ return function(api)
     local unknownSaid, unknownN = {}, 0
     scaling.letGoCount = 0
 
-    -- Local co-op (Role = Local): the second player's Soul is in this world (localSoul), and up (localTwo: held at a
-    -- sliver of health, it's down). The co-op difficulty is then as online. It never ran there: this file's ticks hang on
-    -- coop's, which stop without a link, so two players on one PC fought everything at the game's own numbers, a boss
-    -- with its poise and without its armour.
-    function scaling.localSoul()
-        local p2 = api.state and api.state.p2Pawn
-        return not net.enabled and valid(p2) and not game.isDead(p2)
-    end
-    function scaling.localTwo()
-        return scaling.localSoul() and (game.getHealth(api.state.p2Pawn) or 0) > 1
-    end
-
     -- Someone with you as the rest of co-op difficulty means it: a partner's figure here (this map, alive, not in a scene)
     -- and this player up. (By the connection alone, a partner on another map or dead gave a boss fought alone its armour:
-    -- the reviews of 11-10.) On one PC: both Souls up.
+    -- the reviews of 11-10.)
     local function partnerHere()
         if net.deadSince ~= nil then
             return false
-        end
-        if scaling.localTwo() then
-            local _, p1 = api.getPlayer1()
-            return valid(p1) and not game.isDead(p1)
         end
         for _, p in ipairs(api.coop.partners()) do
             if valid(p.ghost) and not p.ghostHidden and not p.silent then
@@ -487,7 +471,7 @@ return function(api)
                     return
                 end
             -- "With you": synced and the partner's ghost is in this world (same map, alive).
-            elseif not (scaling.localSoul() or (net.enabled and net.target and valid(net.ghost) and not net.ghostHidden)) then
+            elseif not (net.enabled and net.target and valid(net.ghost) and not net.ghostHidden) then
                 noteSoloFights()
                 return
             end
@@ -498,12 +482,7 @@ return function(api)
             if not net.party and net.partnerFighting then
                 soloFights = {}
             end
-            -- (On one PC nothing else keeps that list: looked for here, once a pass.)
-            if scaling.localSoul() then
-                todo, addrs = game.listEnemies()
-            else
-                todo, addrs = game.enemiesSoFar()
-            end
+            todo, addrs = game.enemiesSoFar()
             at = 1
             scaling.hitsBack = math.max(0, scaling.hitsBack - 1)
         end
@@ -562,45 +541,6 @@ return function(api)
         return tick()
     end
     api.coop.extraTicks.scaling = armourTick
-
-    -- Local co-op: the same ticks, as often, in a loop of this file's own (coop's don't run without a link), started with
-    -- Role = Local. A boss's moves are noted as a host notes them for its guests (puppets.watchHost: nothing goes out),
-    -- so one a hit cut is taken up again where its armour let the flinch go. And who an enemy goes for, by the online
-    -- rule, while both are up (pbz.lua's game.steerLocal).
-    function scaling.startLocal()
-        if scaling.localLoop then
-            return
-        end
-        scaling.localLoop = true
-        LoopInGameThreadWithDelay(25, function()
-            if not scaling.localSoul() then
-                if game.steerLocalOff then
-                    pcall(game.steerLocalOff)
-                end
-                return false
-            end
-            local ok, err = pcall(function()
-                local _, p1 = api.getPlayer1()
-                if game.steerLocal and scaling.localTwo() and valid(p1) and not game.isDead(p1) then
-                    game.steerLocal(p1, api.state.p2Pawn)
-                elseif game.steerLocalOff then
-                    game.steerLocalOff()
-                end
-                if scaling.bossArmor and api.puppets and api.puppets.watchHost then
-                    for _, boss in ipairs(game.bossActors()) do
-                        local addr = boss:GetAddress()
-                        api.puppets.watchHost(game.enemyId and game.enemyId(boss, addr) or boss:GetFName():ToString(), boss, addr)
-                    end
-                end
-                armourTick()
-            end)
-            if not ok and err ~= scaling.lastError then
-                scaling.lastError = err
-                log("Co-op difficulty: " .. tostring(err))
-            end
-            return false
-        end)
-    end
 
     -- scale <health %> [posture %]   (100 100 = normal enemies)
     function scaling.command(args)

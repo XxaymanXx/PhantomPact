@@ -4147,6 +4147,33 @@ return function(api)
             game.forgetFocus()
         end
     end
+    -- The loop that runs it, started with Role = Local (coop's ticks don't run without a link): while both Souls are
+    -- up, player 2's held at a sliver of health being down. Nothing else of co-op's runs there: local co-op keeps the
+    -- difficulty the player chose (autostart.lua), and who an enemy goes for is no difficulty.
+    function game.startLocalAim()
+        if localAim.loop then
+            return
+        end
+        localAim.loop = true
+        LoopInGameThreadWithDelay(100, function()
+            local ok, err = pcall(function()
+                local _, p1 = api.getPlayer1()
+                local p2 = api.state and api.state.p2Pawn
+                local online = api.coop and api.coop.net and api.coop.net.enabled
+                if not online and valid(p1) and valid(p2) and not game.isDead(p1) and not game.isDead(p2)
+                    and (game.getHealth(p2) or 0) > 1 then
+                    game.steerLocal(p1, p2)
+                else
+                    game.steerLocalOff()
+                end
+            end)
+            if not ok and err ~= localAim.lastError then
+                localAim.lastError = err
+                log("Local co-op targets: " .. tostring(err))
+            end
+            return false
+        end)
+    end
 
     -- A hidden ghost is nobody to fight: the partner's down, gone or elsewhere, and enemies swung at thin air. It comes off
     -- every list, can't be put back, and each enemy that was after it looks again. With nobody else on its list that look finds

@@ -101,7 +101,7 @@ return function(api)
         api.story.follow = (settings.followhoststory or "on"):lower() ~= "off"
     end
     -- The co-op difficulty's numbers as the ini has them: enemies' health and posture, a boss's poise and armour (first),
-    -- then bosses' own health and posture and how hard enemies and bosses hit. Read as co-op starts, linked or on one PC.
+    -- then bosses' own health and posture and how hard enemies and bosses hit. Read as co-op starts online.
     -- (Whole numbers: %d throws on 150.5, and the throw skipped what came after. And finite, in range: 1e999 threw too.)
     local function coopNumbers(s, first)
         local function pct(v, default)
@@ -143,17 +143,13 @@ return function(api)
     os.remove(modDir() .. "pads_want.txt")      -- left by a crash with a panel open: main.dll would think one still is
     if role == "local" then
         api.localcoop.start(tonumber(settings.joysticks) or 2, tonumber(settings.monitors) or 1)
-        -- (The co-op difficulty's numbers, as the online roles read them once linked: unread here, two players on one PC
-        -- fought everything at the game's own numbers.)
-        coopNumbers(settings, true)
-        coopNumbers(settings, false)
-        if api.scaling and api.scaling.startLocal then
-            api.scaling.startLocal()
-        end
-        -- (The co-op difficulty, as the online roles read it once linked: unread here, local co-op was Hellwalker whatever
-        -- the ini said, Off too.)
-        if api.difficulty and settings.coopdifficulty and settings.coopdifficulty ~= "" then
-            api.difficulty.command(settings.coopdifficulty)
+        -- (Local co-op keeps the difficulty the player chose: the game's own mode and the game's own enemy numbers. The
+        -- user, 11-16: "for local coop it is fine to keep it to the same difficulty of the user that he chose since it
+        -- isn't same as multiplayer coop where everyone has different difficulty". So nothing of CoopDifficulty or of
+        -- the co-op numbers is read here, and difficulty.lua counts no partner on one PC. Who an enemy goes for is no
+        -- difficulty: the online rule runs for the two bodies, pbz.lua's game.steerLocal.)
+        if api.game.startLocalAim then
+            api.game.startLocalAim()
         end
         return
     end

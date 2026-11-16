@@ -8763,35 +8763,37 @@ local function localGame(extra)
     return s, pc, pc.env.PBZ.state
 end
 
--- Local co-op reads the co-op difficulty as the online roles do: unread, it was Hellwalker whatever the ini said.
+-- Local co-op keeps the difficulty the player chose: the game's own mode and the game's own enemy numbers. (The user,
+-- 11-16: "for local coop it is fine to keep it to the same difficulty of the user that he chose since it isn't same as
+-- multiplayer coop where everyone has different difficulty". Up to 1.7.3 player 2's Soul counted as a partner, and two
+-- on one PC were raised to Hellwalker.)
 local function localDifficulty()
-    part("local co-op: the co-op difficulty")
-    local s, pc = localGame()
-    s:run(3)
-    check(pc.difficulty == 3, "as the ini ships: Hellwalker while the two play (" .. tostring(pc.difficulty) .. ")")
-    allErrors(s)
-    local t, tpc = localGame("CoopDifficulty = Off\n")
-    t:run(3)
-    check(tpc.difficulty == 2, "CoopDifficulty = Off: the player's own Pathbreaker stays (" .. tostring(tpc.difficulty) .. ")")
-    allErrors(t)
-
-    -- Its numbers too. Two players on one PC fought everything at the game's own: the ticks that set them hang on the
-    -- online loop, which doesn't run without a link.
+    part("local co-op: the player's own difficulty")
     local function most(pc, id)
         local _, hp, posture = Fake.health(Session.enemyOn(pc, id))
         return hp, posture
     end
-    local u, upc, ustate = localGame()
-    u:run(8)
-    local hp, posture = most(upc, "near")
-    check(upc.env.PBZ.valid(ustate.p2Pawn) and hp == 900 and math.abs(posture - 130) < 0.01,
-        string.format("two on one PC: an enemy at 150%% health and 130%% posture, as online (%s, %s)", tostring(hp), tostring(posture)))
-    check(select(1, most(upc, "boss")) == 7500, "and a boss")
-    allErrors(u)
-    local v, vpc = localGame("CoopEnemyHealth = 100\nCoopEnemyPosture = 100\n")
-    v:run(8)
-    check(select(1, most(vpc, "near")) == 600, "CoopEnemyHealth = 100: the game's own numbers")
-    allErrors(v)
+    local s, pc, state = localGame()
+    s:run(30)
+    check(pc.env.PBZ.valid(state.p2Pawn) and pc.difficulty == 2,
+        "as the ini ships, two on one PC: the player's own Pathbreaker stays (" .. tostring(pc.difficulty) .. ")")
+    local hp, posture = most(pc, "near")
+    check(hp == 600 and math.abs(posture - 100) < 0.01,
+        string.format("and the game's own enemy numbers: no 150%% health, no 130%% posture (%s, %s)", tostring(hp), tostring(posture)))
+    check(select(1, most(pc, "boss")) == 5000, "a boss's too")
+    check(pc.files["difficulty_own.txt"] == nil and count(pc.logs, "Co%-op difficulty: .* at %d+%% ") == 0,
+        "nothing of the co-op difficulty is said or kept")
+    allErrors(s)
+    -- (A mode an older version still holds, the player's own in its file: put back, as for anyone alone.)
+    local t = Session.new(SIM_SCRIPTS, { "Local" }, false, ENEMIES)
+    local tpc = t.pcs[1]
+    tpc.files["difficulty_own.txt"] = "2 3"
+    tpc.difficulty = 3
+    Session.scene(tpc, false)
+    t:run(40)
+    check(tpc.difficulty == 2 and tpc.files["difficulty_own.txt"] == nil,
+        "Hellwalker held from an older version: back to the player's own Pathbreaker (" .. tostring(tpc.difficulty) .. ")")
+    allErrors(t)
 end
 
 -- Local co-op: who an enemy goes for. The game's own picker was all there was (the nearest on its list, again and again):

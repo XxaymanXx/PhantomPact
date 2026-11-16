@@ -1,4 +1,4 @@
--- Co-op difficulty mode: while someone plays with you (online or local), the game's own difficulty is at least Hellwalker
+-- Co-op difficulty mode: while someone plays with you online, the game's own difficulty is at least Hellwalker
 -- (PhantomPact.ini CoopDifficulty). The player's own pick comes back once they're alone again.
 --
 -- The game's setting (read on the bench, 11-09): PBZGameSystem:SetDifficultMode(EDifficultMode) switches the global combat
@@ -119,10 +119,11 @@ return function(api)
         return ok and type(line) == "string" and line:find(" connected=yes", 1, true) ~= nil
     end
 
+    -- (Online only. A second player on this PC is no partner for this: local co-op keeps the mode the player chose. The
+    -- user, 11-16: "for local coop it is fine to keep it to the same difficulty of the user that he chose since it isn't
+    -- same as multiplayer coop where everyone has different difficulty". Up to 1.7.3 player 2's Soul counted here, and
+    -- local co-op was Hellwalker; a mode held from then is put back as for anyone who's alone.)
     local function together()
-        if api.state and valid(api.state.p2Pawn) then
-            return true
-        end
         if api.scaling and api.scaling.players then
             local ok, n = pcall(api.scaling.players)
             if ok and tonumber(n) and n > 1 then
