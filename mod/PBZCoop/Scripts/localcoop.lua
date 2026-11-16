@@ -348,8 +348,12 @@ return function(api)
         end
         local q = p1:K2_GetActorLocation()
         local yaw = math.rad(p1:K2_GetActorRotation().Yaw)
-        local got, half = pcall(function() return p1.CapsuleComponent:GetScaledCapsuleHalfHeight() end)
-        half = got and tonumber(half) or 90
+        local capsule, half = p1.CapsuleComponent, nil
+        if valid(capsule) then
+            local got, h = pcall(function() return capsule:GetScaledCapsuleHalfHeight() end)
+            half = got and tonumber(h) or nil
+        end
+        half = half or 90
         local feet = q.Z - half
         local skip, none, broken = { body }, { R = 0, G = 0, B = 0, A = 0 }, false
         local function hitOf(from, to)
@@ -386,7 +390,10 @@ return function(api)
         -- (Far, it's held in the air till player 1 lands, as the world streams in: the floor is looked for then.)
         pawn:K2_SetActorLocation(far and V.rightOf(p1, 120) or besidePoint(p1, 30, pawn), false, {}, true)
         -- (And it starts still: a fall's speed kept would land it hard, down from the fall it was brought back from.)
-        pcall(function() pawn.CharacterMovement:StopMovementImmediately() end)
+        local move = pawn.CharacterMovement
+        if valid(move) then
+            pcall(function() move:StopMovementImmediately() end)
+        end
         if far then
             pcall(function() pawn.CharacterMovement:SetMovementMode(5, 0) end)
             -- The world streams in around player 1: the Soul is set down once player 1 stands on the ground again

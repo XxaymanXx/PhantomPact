@@ -417,7 +417,10 @@ return function(api)
         -- with a partner linked: their game goes on, so this one must too.
         if api.coop.linked() then
             -- (By the input library: a controller's own FlushPressedKeys isn't one the game lets be called, bench 11-16.)
-            pcall(function() StaticFindObject("/Script/EnhancedInput.Default__EnhancedInputLibrary"):FlushPlayerInput(pc) end)
+            local input = StaticFindObject("/Script/EnhancedInput.Default__EnhancedInputLibrary")
+            if valid(input) and valid(pc) then
+                pcall(function() input:FlushPlayerInput(pc) end)
+            end
         else
             api.gs():SetGamePaused(pc, on)
         end
