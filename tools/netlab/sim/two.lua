@@ -171,7 +171,40 @@ local function escaped(path)
     return (path:gsub("[%-%.%+%[%]%(%)%$%^%%%?%*]", "%%%0"))
 end
 
+-- The deaths a host tells again as a guest starts sync anew go out in no order of their own (a table's, which goes by
+-- when each was noted and by this run's hash seed), and so do the guest's lines for them: each run of such lines is put
+-- in order before the two versions are compared. (11-16: two runs in five differed by that order alone, "E K sp:thug2"
+-- for "E K sp:thug1", and stopped the comparison there.)
+local RUNS = { "^E K ", "^%[PBZCoop%] Host says %S+ died; it's dead here already%.$" }
+local function ordered(lines)
+    local out, i = {}, 1
+    while i <= #lines do
+        local pattern = nil
+        for _, p in ipairs(RUNS) do
+            if lines[i]:find(p) then
+                pattern = p
+                break
+            end
+        end
+        local j = i
+        while pattern and j < #lines and lines[j + 1]:find(pattern) do
+            j = j + 1
+        end
+        local run = {}
+        for k = i, j do
+            run[#run + 1] = lines[k]
+        end
+        table.sort(run)
+        for _, line in ipairs(run) do
+            out[#out + 1] = line
+        end
+        i = j + 1
+    end
+    return out
+end
+
 local function compare(what, a, b, out, oldRoot, newRoot)
+    a, b = ordered(a), ordered(b)
     local n = math.max(#a, #b)
     for i = 1, n do
         if not same(a[i], b[i], oldRoot, newRoot) then
