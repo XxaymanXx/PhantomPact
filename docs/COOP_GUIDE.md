@@ -81,9 +81,9 @@ Which PC decides each of these, and how duplicates (double hits, double pickups,
 [AUTHORITY.md](AUTHORITY.md).
 
 Not synced: enemies the host hasn't loaded, which run their own AI on the guest's PC; cutscenes other than those of a
-boss both fight (each world plays its own, and a host's skip carries over); dialogue; doors, levers and gates (each
-world's own, except kick-stones: `KS` puts the partner's boulder where the kicker's came to rest); walking in the guard
-stance (the figure holds the pose and glides); spending currency.
+boss both fight (each world plays its own, and a host's skip carries over); dialogue; a door, lever or gate shutting
+again (one a player opens is open for everyone on that map, `SWO`, one way only; a kick-stone's boulder goes where the
+kicker's came to rest, `KS`); walking in the guard stance (the figure holds the pose and glides); spending currency.
 
 Known limits found in testing:
 - Item ids are the `ItemId` field of `DT_InventoryData` rows (ASCII, e.g. `Weapon_Material_01`, `Item_001`,

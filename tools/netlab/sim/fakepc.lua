@@ -497,7 +497,7 @@ end
 -- A move of an enemy's with the game's own cooldown, as its abilities' base class keeps one (the bench, 11-16:
 -- BP_AbilityBase's "Cooldown Mark Time" on the move's one instance, 30 s on a boss's combo): the ability system starts it
 -- only once that long has passed since the mark, and marks it as it starts. path: its class's, found by it from then on.
--- Returns { starts, inst }.
+-- Returns { starts, inst, spec }; its blocked = true has the game refuse the move for another reason.
 function Fake.cooldownMove(pc, actor, path, cooldown, mark)
     local cls = pc.found[path]
     if not cls then
@@ -511,15 +511,16 @@ function Fake.cooldownMove(pc, actor, path, cooldown, mark)
     local inst = object(pc, "LegoAbility", { ["Cooldown Mark Time"] = mark or -10000.0 })
     local move = { starts = 0, inst = inst }
     local items = rawget(asc, "__fields").ActivatableAbilities.Items.items
-    items[#items + 1] = { class = path:match("([^.]+)$"), ActiveCount = 0,
+    move.spec = { class = path:match("([^.]+)$"), ActiveCount = 0,
         Ability = { IsValid = function() return true end, GetClass = function() return cls end },
         NonReplicatedInstances = list({ inst }), ReplicatedInstances = list({}) }
+    items[#items + 1] = move.spec
     local before = rawget(asc, "__fields").TryActivateAbilityByClass
     put(asc, "TryActivateAbilityByClass", function(self, class)
         if class ~= cls then
             return before(self, class)
         end
-        if pc.now - rawget(inst, "__fields")["Cooldown Mark Time"] < cooldown then
+        if move.blocked or pc.now - rawget(inst, "__fields")["Cooldown Mark Time"] < cooldown then
             return false
         end
         put(inst, "Cooldown Mark Time", pc.now)

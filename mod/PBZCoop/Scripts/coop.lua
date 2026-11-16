@@ -441,6 +441,12 @@ return function(api)
         local dead = zero and (os.clock() - p.zeroSince) >= 1.0
         if dead then
             p.downSeenAt = os.clock()       -- (handlers.K: their dust watch holds back what the game pays them a while after)
+            -- (The host still down as a copy's pay, told with them down, waits: none of it comes however late the game
+            -- pays it. Read only as the K came, a thug's paying 5.7 s on was taken back, the host down all along.)
+            local pay = game.copyPay
+            if p == net and pay and pay.hostDownAt and p.downSeenAt - pay.hostDownAt < game.dustWatch.AFTER_DOWN_S then
+                pay.hostDownAt = p.downSeenAt
+            end
         end
         local gone = p.partnerGone == true       -- see watchPartner
         -- In a cutscene the partner isn't really playing: their ghost would stand idle in your world. And in one of yours it
@@ -1868,10 +1874,11 @@ return function(api)
     -- it loaded ran one, and a partner's figure beside a copy was enough to rouse it: a guest fought the elite of Xigu
     -- alone, and the copy of a third player 43 m off at the bell was in a fight of the game's own with that player
     -- within 3 s. They counted as in the boss fight (the fighter, down, waited on them to respawn, and the boss didn't
-    -- start over: 305), and five minutes on it had walked up to them. The bench of 11-16, three copies. By it: within 30 m;
-    -- or within the game's own 45 m with no partner nearer it, as a player alone has one that far wake; or in its fight
-    -- (walked in, its own bar here, a blow from near it). One this game runs stays its own within those 45 m, and past
-    -- them while it's still fighting here. Any other copy is held and follows the host's, as before 277.
+    -- start over: 305), and five minutes on it had walked up to them. The bench of 11-16, three copies. By it: within 30 m,
+    -- or in its fight (walked in, its own bar here, a blow from near it). One this game runs stays its own within the
+    -- game's own 45 m, and past them while it's still fighting here. Any other copy is held and follows the host's, as
+    -- before 277. (No "within 45 m with nobody nearer it": tried, and on the bench the copy of a watcher 42 m off woke
+    -- all the same as the fighter stepped in, their figure hidden for that moment.)
     handover.BY_CM, handover.BY_FAR_CM = 3000, 4500
     handover.live = {}          -- guest: enemy address -> its name, while this game runs its own copy of it
     function handover.byHere(name, actor, addr)
@@ -1881,18 +1888,8 @@ return function(api)
         if near and net.localLoc then
             local at = near.loc
             local gap = handover.dist(at.X, at.Y, at.Z, net.localLoc)
-            yes = gap <= handover.BY_CM or handover.hostIn(name, addr, gap)
-            if not yes and gap <= handover.BY_FAR_CM then
-                yes = true
-                for _, p in ipairs(was and {} or partners()) do
-                    local t = p.target
-                    if t ~= nil and not p.ghostHidden and not p.partnerGone and sameMap(t)
-                        and handover.dist(at.X, at.Y, at.Z, t) < gap then
-                        yes = false         -- (a partner is the one by it)
-                        break
-                    end
-                end
-            elseif not yes and was then
+            yes = gap <= (was and handover.BY_FAR_CM or handover.BY_CM) or handover.hostIn(name, addr, gap)
+            if not yes and was then
                 local state = game.aiState and game.aiState(actor)
                 yes = state ~= nil and state:find("Combat", 1, true) ~= nil
             end
@@ -4117,6 +4114,12 @@ return function(api)
         end
         net.travelUntil = os.clock() + 30
         log("Going to the other player, on " .. level .. ".")
+        -- (F3 into a fight there: a joiner's watch of it ends with the trip, as F3 into one on this map ends it. Kept on,
+        -- they landed in it told as out of it, F 0 whatever they struck: the host's death there wasn't held for them,
+        -- and the boss kept one player's numbers. The main session's second review, 11-16.)
+        if net.partnerFighting then
+            net.endWatch(pawn)
+        end
         return nil
     end
 

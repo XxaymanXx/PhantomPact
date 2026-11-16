@@ -65,13 +65,15 @@ and the co-op messages. Your choices are kept for the next start.
 OFF, Players (2, 4 or 6), and Mode: MULTIPLAYER, or LOCAL for two players on this PC. Mode works from the next time you start the
 game. **Skip Prologue** is red while you're in the prologue: the game skips it itself, when you start a New Game and
 choose its skip. A player who did that gets the healing gourd from the host on joining. It's green once you're past the
-prologue. Revive is coming soon. With a partner, the game is on Hellwalker at least (see [Co-op difficulty](#co-op-difficulty)),
+prologue. Revive is coming soon. With a partner online, the game is on Hellwalker at least (see
+[Co-op difficulty](#co-op-difficulty)),
 and enemies get extra health and posture on top of it.
 
 **Going to your partner.** Joining takes you to the host once, even on another map, so a friend with a new save can
 join a host further into the story. Your save stays where you land, so your own story can get ahead of where you were.
 After that, **F3** takes you to your partner if you turn TP > Partner on under MORE. It's off by default, because it's a
-lot of power to have on one key. Neither works during a boss fight, a cutscene, a duel or a menu, or while you or your
+lot of power to have on one key. With it off, F3 still takes a guest to a host who has gone on to another map. Neither
+works during a boss fight, a cutscene, a duel or a menu, or while you or your
 partner are down.
 
 ### 4 players (Beta) and 6 players (Experimental)
@@ -131,16 +133,19 @@ With more than two players:
 
 ## Co-op difficulty
 
-While someone plays with you, online or on this PC, the game's own difficulty is Hellwalker: a player on Wayfarer or
+While someone plays with you online, the game's own difficulty is Hellwalker: a player on Wayfarer or
 Pathbreaker is raised to it, and their own pick comes back 20 seconds after they're alone again (after a crash too, the
 next time they play alone). 66 Days stays 66 Days. Set `CoopDifficulty` in `PhantomPact.ini` to Pathbreaker, Wayfarer or
 Off to change that; each PC uses its own setting. A PvP match (F6) is Hellwalker for everyone whatever the setting, so
 nobody gets an easier guard; 66 Days stays 66 Days there too, with Hellwalker's perfect deflect window for the match.
 
-Like Elden Ring, enemies and bosses get tougher while your partner is with you: 150% health and 130% posture by
+Like Elden Ring, enemies and bosses get tougher while your partner is with you online: 150% health and 130% posture by
 default, and bosses twice their posture (the guard bar), so their guard breaks about as often as when you're alone.
 Change `CoopEnemyHealth` / `CoopEnemyPosture` and `CoopBossPosture` in `PhantomPact.ini` (percent; 100 = normal). Both
 players should use the same numbers.
+
+Local co-op (two players on this PC) keeps the difficulty you chose and the game's own enemy numbers: none of these
+settings change it.
 
 Bosses also have super armour while your partner is with you online (`CoopBossArmor = On`): a hit doesn't make a boss
 flinch, knock it back or cut its attack short, so two players can't keep it stuck and it keeps fighting. Breaking its

@@ -184,6 +184,12 @@ return function(api)
     -- handling, or are each player's own). One way only: opened, through the switch's own step without its scene.
     local SWITCH_OWN = { "^BP_Chest", "^BP_Rubbish", "^BP_KickStone", "^BP_FogDoor", "^BP_Teleport", "^BP_MelodiousBell" }
     local switchSeen, switchMap = {}, false
+    -- A door shut by this world's own game: seen open at one look and shut at the next, loaded all along (a fight's door,
+    -- a scene's, if any does that: none seen yet). The word opens what a player opened; it doesn't undo what this game
+    -- did, every 20 s from the host. One that went out of reach and came back shut is the load's, and still opened by
+    -- word, as is one last seen open before a load or time alone on the map. Doors only: a lever is as it was. The main
+    -- session's second review, 11-16. shutHere: name -> true; openAt: name -> when a look last saw it open.
+    local shutHere, openAt = {}, {}
 
     local function sharedSwitch(s)
         local ok, cn = pcall(function() return s:GetClass():GetFName():ToString() end)
@@ -203,13 +209,14 @@ return function(api)
     -- door one player opened was never told, and stayed shut in the partner's world: on the bench, 11-16, the key door
     -- of Xigu opened by the guest with its key, the host 4 m off and its door shut; and one opened here by word read
     -- shut, so the host never named it again to a guest who came later.)
+    -- (The second answer: it's a door, one that has a DoorOpen to read.)
     local function isOpen(s)
         local ok, v = pcall(function() return s.CurSwitchState end)
         if ok and v == true then
             return true
         end
         local okDoor, door = pcall(function() return s.DoorOpen end)
-        return okDoor and door == true
+        return okDoor and door == true, okDoor and type(door) == "boolean"
     end
 
     -- What's open in the host's world goes out again now and then, not only as it opens (player report 11-09): a door the
@@ -225,6 +232,7 @@ return function(api)
     local function onSwitchMap()
         if net.localMap ~= switchMap then
             switchSeen, switchMap = {}, net.localMap
+            shutHere, openAt = {}, {}
             local st = mapState(switchMap)
             openNow, pending = st.open, st.pending
         end
@@ -232,6 +240,15 @@ return function(api)
 
     local function openHere(s, name)
         pcall(function() s:SwitchWithoutPlaySequence() end)
+        -- (And the flags its own flow raises once it's opened, its presets' AddTagWhenSuccess, as a partner's chest's are
+        -- raised (coop.lua's OF): the word's call isn't the player's opening, and a quest's door a partner opened first
+        -- would stand open here without them. None seen yet: the doors on the bench have no presets. The second review.)
+        if api.flowsync and api.flowsync.raise and api.game and api.game.successTags then
+            local okT, tags = pcall(api.game.successTags, s)
+            if okT and type(tags) == "table" and #tags > 0 then
+                api.flowsync.raise(tags, name)
+            end
+        end
         switchSeen[name] = true
         blockers.broken = blockers.broken + 1
         log("The other player opened " .. name .. ": open here too.")
@@ -273,11 +290,17 @@ return function(api)
     -- alone: as watch's.
     local function watchSwitches(here, alone)
         onSwitchMap()
+        local now = os.clock()
         for _, s in ipairs(FindAllOf("PBZSwitchBase") or {}) do
             if valid(s) and sharedSwitch(s) then
                 local name = nameOf(s)
                 if name and (pending[name] or not alone) then
-                    local open = isOpen(s)
+                    local open, door = isOpen(s)
+                    if open then
+                        shutHere[name], openAt[name] = nil, now
+                    elseif door and now - (openAt[name] or -1e9) <= LOOK_S * 2 then
+                        shutHere[name] = true
+                    end
                     if pending[name] then
                         pending[name] = nil
                         if not open then
@@ -315,7 +338,8 @@ return function(api)
         onSwitchMap()
         local want = {}
         for name in rest:gmatch("%S+") do
-            if #name <= MAX_NAME and name:match("^[%w_]+$") and switchSeen[name] ~= true and not pending[name] then
+            if #name <= MAX_NAME and name:match("^[%w_]+$") and switchSeen[name] ~= true and not pending[name]
+                and not shutHere[name] then
                 want[name] = true
             end
         end
@@ -402,6 +426,7 @@ return function(api)
             log(string.format("%d chains and switches waited for here: forgotten (%s).", held, why))
         end
         byMap, seen, switchSeen = {}, {}, {}
+        shutHere, openAt = {}, {}
         seenMap, switchMap = false, false
         owed, brokenNow, openNow, pending = {}, {}, {}, {}
     end

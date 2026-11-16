@@ -3588,6 +3588,11 @@ return function(api)
     -- After the game has counted a drink: only the gourd is counted twice. The D-pad's other item is in the bag for both of them.
     function V.medicineCounted(id)
         local p2 = state.p2Pawn
+        -- (A drink draws an enemy's eye, as online: pbz.lua's game.steerLocal has the rule, and whose drink it is is told
+        -- here. Nothing told it on one PC. The main session's second review, 11-16.)
+        if game.playerHealed then
+            game.playerHealed(V.player2Drinks() and 2 or 1)
+        end
         local okB, bottom = pcall(function() return backpackOf(p2).BottomMedicineID:ToString() end)
         local gourd = okB and id == bottom
         if not V.player2Drinks() then

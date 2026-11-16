@@ -962,8 +962,7 @@ local function aPartysBystander()
     s:run(3)
     check(line(c, "boss").Asleep == true and brain(bossB) == true and floor(bossB) == 0,
         "a guest's fight with a boss asleep on the host: the fighter's own copy, awake")
-    check(brain(bossC) == false and floor(bossC) == 1,
-        "a third player 43 m off, the fighter nearer it: their copy stays held")
+    check(brain(bossC) == false and floor(bossC) == 1, "a third player 43 m off: their copy stays held")
     check(net(c).toldFighting ~= true and count(c.sent, "^E F 1") == 0, "and they're in no fight")
     local left = select(1, Fake.health(bossB))
     swing(b, bossB, left - 400)
@@ -980,19 +979,23 @@ local function aPartysBystander()
     Session.moveTo(c, 7200, 3000)
     s:run(3)
     check(brain(bossC) == false and floor(bossC) == 1, "at 52 m and in no fight with it: held again, following the host's")
-    -- Nobody nearer: a guest alone has one within the game's 45 m as their own, as a player alone has it wake.
+    -- Who else is near makes no difference ("nobody nearer" woke a watcher's copy 42 m off on the bench, as the fighter
+    -- stepped in): 30 m it is, for a guest alone too.
     Session.moveTo(h, 1000, 0)         -- (110 m from it: within the host's reach of a guest)
     Session.moveTo(a, 1200, 100)
     Session.moveTo(c, 8000, 0)
     s:run(5)
     local thugC = Session.enemyOn(c, "thug")
-    check(line(c, "thug").Asleep == true and brain(thugC) == true and floor(thugC) == 0,
-        "a guest alone 40 m from one asleep on the host, no partner nearer: their own copy ("
+    check(line(c, "thug").Asleep == true and brain(thugC) == false and floor(thugC) == 1,
+        "a guest alone 40 m from one asleep on the host: held still ("
         .. tostring(line(c, "thug").Asleep) .. " " .. tostring(brain(thugC)) .. " " .. tostring(floor(thugC)) .. ")")
+    Session.moveTo(c, 9300, 0)
+    s:run(3)
+    check(brain(thugC) == true and floor(thugC) == 0, "at 27 m from it: their own copy")
     Session.moveTo(b, 11800, 0)
     Session.moveTo(c, 7800, 0)
     s:run(3)
-    check(brain(thugC) == true, "(a partner comes by it after: theirs still)")
+    check(brain(thugC) == true, "(a partner comes by it and they step back to 42 m: theirs still)")
     allErrors(s)
 end
 
@@ -2654,6 +2657,21 @@ local function copyCooldown()
     use()
     check(onCopy.starts == 2, "and again as it comes off cooldown on the host, a moment early by the copy's own stamp: it "
         .. "starts all the same (" .. onCopy.starts .. ")")
+    -- Refused for another reason (a block, a break), its stamp goes back as it was; and a move still running here isn't
+    -- touched. Cleared and left so, a 30 s move was there again at once for the copy's own AI; a running one cleared
+    -- was started over from its beginning. (The main session's second review, 11-16.)
+    onCopy.blocked = true
+    s:run(28.4)
+    local stamp = field(onCopy.inst, "Cooldown Mark Time")
+    use()
+    check(onCopy.starts == 2 and field(onCopy.inst, "Cooldown Mark Time") == stamp,
+        "a move the copy won't start for another reason keeps its stamp (" .. tostring(field(onCopy.inst, "Cooldown Mark Time"))
+        .. " of " .. tostring(stamp) .. ")")
+    onCopy.blocked = false
+    onCopy.spec.ActiveCount = 1
+    use()
+    check(onCopy.starts == 2 and field(onCopy.inst, "Cooldown Mark Time") == stamp,
+        "and one still running there is neither cleared nor started over (" .. onCopy.starts .. ")")
     allErrors(s)
 end
 
@@ -3528,6 +3546,23 @@ local function doorsOfTheGames()
         end
     end
     check(named >= 1, "and the host names both again now and then, the one opened by word too, for one who comes later")
+    -- A door this world's own game shuts again, loaded all along (a fight's, a scene's, if any does that): the host's
+    -- word, every 20 s, opened it again. Left to the game now; one that comes back into reach shut is still opened.
+    Fake.put(guestDoor, "DoorOpen", false)          -- (shut in the guest's world by its own game, open in the host's)
+    s:run(45)
+    check(field(guestDoor, "DoorOpen") == false,
+        "a door the guest's game shuts again, open in the host's: left shut through the host's next words")
+    for i, sw in ipairs(g.switches) do              -- (the gate goes out of reach, and comes back shut 10 s on)
+        if sw == guestGate then
+            table.remove(g.switches, i)
+            break
+        end
+    end
+    Fake.put(guestGate, "DoorOpen", false)
+    s:run(10)
+    g.switches[#g.switches + 1] = guestGate
+    s:run(25)
+    check(field(guestGate, "DoorOpen") == true, "one that went out of reach and came back shut is opened by the host's word, as ever")
     allErrors(s)
 end
 
@@ -9398,6 +9433,18 @@ local function localTargets()
     Fake.put(rawget(p2, "__fields").anim, "montage", nil)
     s:run(5)
     check(field(e, "target") == p2 and (field(e, "targetChanges") or 0) == turns, "and holds to them for a while after the last blow")
+    -- Both gone from it (or it's dead): let go at the next look, as online's turns do, not kept with its body and its
+    -- picker till player 2's next down or past a load (the main session's second review, 11-16).
+    local steered = pc.env.PBZ.game.aim.steered
+    local addr = e:GetAddress()
+    check(steered[addr] ~= nil, "(it's steered between the two)")
+    Session.moveTo(pc, 4000, 300)
+    Fake.put(p2, "loc", { X = 4200.0, Y = 300.0, Z = 100.0 })
+    s:run(3)
+    check(steered[addr] == nil, "both walk 37 m from it: let go, its picker its own again")
+    Session.moveTo(pc, 100, 300)
+    Fake.put(p2, "loc", { X = 600.0, Y = 300.0, Z = 100.0 })
+    s:run(2)
     -- Player 2 down: nobody to steer between, the game's own picker again.
     Fake.setHealth(p2, 1)
     s:run(3)
