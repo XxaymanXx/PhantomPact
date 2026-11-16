@@ -1526,6 +1526,7 @@ function Fake.new(id, scripts, ini, link)
         local input = object(pc, "PBZNBInputComponent", { resets = 0 })
         put(input, "ResetToDefaultInputMode", function(self)
             put(self, "resets", rawget(self, "__fields").resets + 1)
+            put(self, "bCurrentCancelPlayerController", false)
             if p ~= pc.pawn then
                 for _, c in ipairs(pc.inputContexts) do
                     pc.inputSets[1][c] = 1
@@ -2047,7 +2048,13 @@ function Fake.new(id, scripts, ini, link)
         if asc == nil then
             local specs = rawget(actor, "__class") == "BP_Renewal_Hun_C" and { locomotion(actor) } or {}
             asc = object(pc, "ASC", { ActivatableAbilities = { Items = list(specs) } }, true)
-            put(asc, "TryActivateAbilityByClass", function(_, class) put(actor, "used", class) end)
+            put(asc, "TryActivateAbilityByClass", function(_, class)
+                put(actor, "used", class)
+                -- (The game's rise-up turns "cancel the player controller" on in player 1's input, whichever Soul rises: bench 11-16.)
+                if class == pc.riseClass and pc.pawn and rawget(pc.pawn, "__fields").PBZNBInput then
+                    put(rawget(pc.pawn, "__fields").PBZNBInput, "bCurrentCancelPlayerController", true)
+                end
+            end)
             put(asc, "K2_GiveAbility", function(_, class)
                 local given = rawget(actor, "__given") or {}
                 given[#given + 1] = class
@@ -2180,7 +2187,13 @@ function Fake.new(id, scripts, ini, link)
     pc.interactClass, pc.promptClass, pc.hudClass = object(pc, "Class"), object(pc, "WidgetClass"), object(pc, "WidgetClass")
     pc.bossBarClass, pc.bossBars = object(pc, "WidgetClass"), {}
     pc.riseClass = object(pc, "Class")
+    -- (Enhanced Input's library: what a controller holds let go, counted on the controller.)
+    local inputLibrary = object(pc, "EnhancedInputLibrary")
+    defs(pc, inputLibrary, { FlushPlayerInput = function(_, c)
+        put(c, "flushed", (rawget(c, "__fields").flushed or 0) + 1)
+    end })
     local found = {
+        ["/Script/EnhancedInput.Default__EnhancedInputLibrary"] = inputLibrary,
         ["/Game/PBZContent/UI/InGame/Dead/bg_dead.bg_dead"] = object(pc, "Texture", {}, true),
         ["/Game/PBZContent/UI/InGame/Dead/T_UI_blood_Combine.T_UI_blood_Combine"] = object(pc, "Texture", {}, true),
         ["/Game/PBZContent/UI/UINew/testplaceholder/yun.yun"] = object(pc, "Texture", {}, true),

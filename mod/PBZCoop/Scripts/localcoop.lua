@@ -522,7 +522,32 @@ return function(api)
         end
     end
 
+    -- The game's rise-up for a Soul back from down (GA_PlayerRespawn) turns "cancel the player controller" on in the input of "the
+    -- player", player 1, whichever Soul is rising: player 1 stood frozen through all of player 2's (a player report on 1.7.3: "When player
+    -- 2 dies and respawn player 1 can't move until player 2 finishes their revive animation"; bench, 11-16: player 1's flag on from 0.9 s
+    -- to 5.2 s into player 2's rise-up, and pad 1 moved them 0 cm). So while player 2 rises, player 1's input goes back to its own mode
+    -- each time that comes on, unless player 1 is in the middle of a move of their own (relayButtons, every frame).
+    V.RISE_S = 7.0
+    function V.keepPlayer1Moving(p1)
+        if not V.risingUntil then
+            return
+        end
+        if os.clock() > V.risingUntil then
+            V.risingUntil = nil
+            return
+        end
+        local comp = p1.PBZNBInput
+        if valid(comp) and comp.bCurrentCancelPlayerController == true and not V.acting(p1) then
+            comp:ResetToDefaultInputMode()
+            if not V.riseFreed then
+                V.riseFreed = true
+                log("Player 2's rise-up held player 1 still: let go.")
+            end
+        end
+    end
+
     function V.riseUp()
+        V.risingUntil, V.riseFreed = os.clock() + V.RISE_S, nil
         local path = V.RISE_ABILITY .. ".GA_PlayerRespawn_C"
         local class = StaticFindObject(path)
         if not valid(class) and type(LoadAsset) == "function" then
@@ -1686,6 +1711,31 @@ return function(api)
         end
     end
 
+    -- A player hears a stick only as it moves, so the player a pad reached keeps its last push when the pad goes to the other
+    -- one: a menu closing with player 2's stick held left player 1 running that way for good (a player report on 1.7.3,
+    -- keyboard on player 1: "player 1 will be stuck moving the same direction forever"). So once a change of where the pads
+    -- go has taken (main.dll reads pad_stay.txt every 40 ms), what each player holds is let go: player 2's as a menu opens,
+    -- both players' as the pads are shared out again. (By the input library's FlushPlayerInput: a controller's own
+    -- FlushPressedKeys isn't one the game lets be called, bench 11-16.)
+    V.FLUSH_AFTER_S = 0.15
+    V.INPUT_LIBRARY = "/Script/EnhancedInput.Default__EnhancedInputLibrary"
+    function V.flushInput(both)
+        local lib = StaticFindObject(V.INPUT_LIBRARY)
+        if not valid(lib) then
+            return
+        end
+        local controllers = { state.p2Controller, both and (getPlayer1()) or nil }
+        for i = 1, 2 do
+            local c = controllers[i]
+            if valid(c) then
+                pcall(function() lib:FlushPlayerInput(c) end)
+            end
+        end
+    end
+    function V.flushInputSoon(both)
+        game.after(V.FLUSH_AFTER_S, function() pcall(V.flushInput, both) end)
+    end
+
     -- main.dll's pad_route.hpp: the device named here is player 1's, and the other joystick reaches player 2. It's given
     -- the viewport and the offset setting once, and both live as long as the game.
     local function routePads(device)
@@ -1722,6 +1772,7 @@ return function(api)
         gs:SetPlayerControllerID(p2pc, config.p2 == "kbm" and 0 or 1)
         log(string.format("Local co-op: %s%s, player 1 %s, player 2 %s.", V.layout(), V.spread() and " over two monitors" or "",
             config.p1, config.p2))
+        V.flushInputSoon(true)
         return true
     end
 
@@ -1790,6 +1841,7 @@ return function(api)
         pcall(V.player1Back)          -- (and none of them left blind to player 1)
         api.setGamepadOffset(false)
         routePads(nil)
+        V.flushInputSoon(true)
         if valid(pc) then
             api.gs():SetPlayerControllerID(pc, 0)
         end
@@ -2072,6 +2124,7 @@ return function(api)
             if menu then
                 api.setGamepadOffset(false)
                 routePads(ALL_TO_PLAYER_1)
+                V.flushInputSoon(false)
             else
                 applyConfig()
             end
@@ -3715,6 +3768,9 @@ return function(api)
         local _, p1 = getPlayer1()
         if valid(p1) and valid(state.p2Pawn) then
             watchHeal(pc, p2pc, p1, state.p2Pawn)
+        end
+        if valid(p1) then
+            pcall(V.keepPlayer1Moving, p1)
         end
         local pressed = p2pc:IsInputKeyDown({ KeyName = FName("Gamepad_Special_Right") })
         -- (Pad 2's press, kept from the game by main.dll; not while their menu is on its way.)

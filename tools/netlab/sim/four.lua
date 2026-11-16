@@ -8493,6 +8493,46 @@ local function localScreen()
     allErrors(h)
 end
 
+-- A menu gives every pad to player 1 and shares them out again as it closes, and a player hears a stick only as it moves: player 1
+-- ran on for good in the direction player 2's stick held as a menu closed (a player report on 1.7.3, keyboard on player 1). What
+-- each player holds is let go as the pads change hands.
+local function localSticks()
+    part("player 2's stick through a menu")
+    local s, pc, state = localGame()
+    s:run(1.5)
+    local function flushed(c) return field(c, "flushed") or 0 end
+    local p1, p2 = flushed(pc.controller), flushed(state.p2Controller)
+    pc.paused = true
+    s:run(0.5)
+    check(flushed(state.p2Controller) == p2 + 1 and flushed(pc.controller) == p1,
+        "a menu up: player 2's stick and keys let go, player 1's own left as they are")
+    pc.paused = false
+    s:run(0.5)
+    check(flushed(pc.controller) == p1 + 1 and flushed(state.p2Controller) == p2 + 2,
+        "the menu closed: both players' let go, so player 1 doesn't run on with player 2's push")
+    allErrors(s)
+end
+
+-- The game's rise-up for a Soul back from down turns "cancel the player controller" on in player 1's input whichever Soul rises: player
+-- 1 stood frozen through all of player 2's (a player report on 1.7.3). It's put back while player 2 rises.
+local function localRise()
+    part("player 2's rise-up, player 1 free")
+    local s, pc, state = localGame()
+    s:run(1.5)
+    local input = field(pc.pawn, "PBZNBInput")
+    local resets = field(input, "resets") or 0
+    Fake.setHealth(state.p2Pawn, 1)
+    s:run(1.5)
+    check(field(input, "bCurrentCancelPlayerController") ~= true, "player 2 down: player 1's input as it was")
+    s:run(5.5)
+    check(field(state.p2Pawn, "used") == pc.riseClass, "player 2 back, rising the game's way")
+    s:run(0.3)
+    check(field(input, "bCurrentCancelPlayerController") == false and (field(input, "resets") or 0) > resets,
+        "and player 1's input not left cancelled by it: player 1 can move")
+    check(count(pc.logs, "held player 1 still") == 1, "said once")
+    allErrors(s)
+end
+
 -- Player 2's Options (BUGHUNT 248): the game's menu layer takes every joystick's as player 1's, so main.dll keeps pad 2's
 -- from it while the mod asks, every frame in play, and the mod opens player 2's menu for each press kept.
 -- Player 2's Cross and Circle do what player 1's do, by the game's own sets and its own rule for a climb spot (11-12).
@@ -11529,6 +11569,8 @@ return function(print_, scripts)
     localPlay()
     padHold()
     localScreen()
+    localSticks()
+    localRise()
     localButtons()
     localFight()
     localOptions()

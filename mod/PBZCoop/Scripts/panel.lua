@@ -416,7 +416,8 @@ return function(api)
         -- Paused, as the game's own menus are. (Turning the Soul's input off instead left it stuck at walking speed.) Not
         -- with a partner linked: their game goes on, so this one must too.
         if api.coop.linked() then
-            pcall(function() pc:FlushPressedKeys() end)
+            -- (By the input library: a controller's own FlushPressedKeys isn't one the game lets be called, bench 11-16.)
+            pcall(function() StaticFindObject("/Script/EnhancedInput.Default__EnhancedInputLibrary"):FlushPlayerInput(pc) end)
         else
             api.gs():SetGamePaused(pc, on)
         end

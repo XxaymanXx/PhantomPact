@@ -79,8 +79,20 @@ freeze for a moment. It's the setup two DualSense pads were tested with.
 5. **Start the game, then press F4.** Hold a button on each pad to light up its card, drag the cards onto the players
    and press APPLY.
 
-Xbox pads shouldn't need any of this, but they haven't been tested. Keyboard and mouse for player 1 with a pad for
-player 2 also works: drag the Keyboard & Mouse card onto player 1 in the same panel.
+Two layouts work: a pad for each player, or the keyboard and mouse for player 1 with a pad for player 2 (drag the
+Keyboard & Mouse card onto player 1 in the same panel). The keyboard and mouse can't be player 2's: the game ties its
+menus, its map and the F4 panel to player 1's keyboard, so a pad on player 1 with the keyboard on player 2 leaves
+some of each player's controls on the other.
+
+If both pads move player 1, or one pad moves both players, the game is still seeing the real PlayStation pads:
+
+- In HidHide, both pads ticked on the Devices tab, Enable device hiding on, and `DS4Windows.exe` under Applications.
+- In DS4Windows, a tick in the Ex column for each pad.
+- Steam Input off for the game.
+- Then restart the game. In F4, holding a button on a pad lights up its own card; a pad that lights no card isn't
+  reaching the game as an Xbox pad, and one that lights the other's card is the other one.
+
+Xbox pads shouldn't need any of this, but they haven't been tested.
 
 Online co-op needs none of this. If your pads stop working in other games, turn off Enable device hiding in HidHide. A
 game update can break two-pad play until the mod is updated, because it depends on the game's exact build.
