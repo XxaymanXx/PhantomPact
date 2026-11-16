@@ -44,7 +44,7 @@
 
 namespace relay {
 
-constexpr int PROTOCOL = 4;   // 4: parties of up to 6 (1.6.5): a 1.6.3 guest took a 6-player hello for two players
+constexpr int PROTOCOL = 5;   // 5: a party's enemy line says asleep, a boss's win goes out whole (1.7.4): a 1.7.3 guest took a boss's 3 for a thug's
 constexpr unsigned char MARKER = 0xA3;     // first byte of every packet: never '{' (protocol 2) or 'P' (a signed packet)
 constexpr double TICK = 0.005;             // how often the relay looks at its timers when nothing else wakes it
 constexpr double KEEPALIVE_EVERY = 0.25;   // the game thread can stand still (a load): the relay still says it's here

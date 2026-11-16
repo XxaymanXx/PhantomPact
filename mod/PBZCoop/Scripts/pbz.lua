@@ -617,20 +617,36 @@ return function(api)
         if not (okL and okP and type(at) == "table" and type(me) == "table" and at.X and me.X) then
             return false
         end
-        local held = false
-        for _, class in ipairs(game.SPAWN_AREAS) do
-            for _, area in ipairs(FindAllOf(class) or {}) do
-                local okI, inside = pcall(function()
-                    return area:CheckIfPointLiesInsideArea({ X = at.X, Y = at.Y, Z = at.Z })
-                end)
-                if okI and inside == true then
-                    held = true
-                    local okM, mine = pcall(function()
-                        return area:CheckIfPointLiesInsideArea({ X = me.X, Y = me.Y, Z = me.Z })
-                    end)
-                    if okM and mine == true then
-                        return false
+        -- (The areas searched once a batch, as the spawners are: a round of a guest's asks comes together, and two
+        -- searches of every object for each one hitched the host, every 10 s for as long as a camp stood so. Valid
+        -- ones only, let go with the batch. The review of 11-16.)
+        local batch = game.batch
+        local areas = batch and batch.areas
+        if not areas then
+            areas = {}
+            for _, class in ipairs(game.SPAWN_AREAS) do
+                for _, area in ipairs(FindAllOf(class) or {}) do
+                    if valid(area) then
+                        areas[#areas + 1] = area
                     end
+                end
+            end
+            if batch then
+                batch.areas = areas
+            end
+        end
+        local held = false
+        for _, area in ipairs(areas) do
+            local okI, inside = pcall(function()
+                return valid(area) and area:CheckIfPointLiesInsideArea({ X = at.X, Y = at.Y, Z = at.Z })
+            end)
+            if okI and inside == true then
+                held = true
+                local okM, mine = pcall(function()
+                    return area:CheckIfPointLiesInsideArea({ X = me.X, Y = me.Y, Z = me.Z })
+                end)
+                if okM and mine == true then
+                    return false
                 end
             end
         end
@@ -1371,9 +1387,13 @@ return function(api)
             forgetBoss(actor)
             -- (A copy's own death can pay this player its dust all the same, its level at 0 or not: on the bench a guest
             -- had its copy's own on top of the share of the host's. The death was the partner's, and their share of it
-            -- comes by C: a rise in the wallet within COPY_PAY_S is taken back, up to this much, once: watchCurrency.)
+            -- comes by C: a rise in the wallet within COPY_PAY_S of the last such death is taken back, up to what
+            -- those copies roll all told: watchCurrency. One at a time, two dead within the pay's delay paid twice and
+            -- only the last was taken back, the other going out as this player's earnings: the review of 11-16.)
             if type(ownDust) == "number" and ownDust > 0 then
-                game.copyPay = { dust = ownDust, untilAt = os.clock() + game.COPY_PAY_S }
+                local pay, now = game.copyPay, os.clock()
+                local left = pay and now <= pay.untilAt and pay.dust or 0
+                game.copyPay = { dust = left + ownDust, untilAt = now + game.COPY_PAY_S }
             end
             return true
         end
@@ -4151,7 +4171,7 @@ return function(api)
         for slot = 1, 2 do
             swung[slot] = now - (localAim.movedAt[slot] or -1e9) <= aim.OWN_HIT_S
         end
-        local list, addrs = game.listEnemies()
+        local list, addrs = game.listEnemies(true)     -- (afresh: a list a second old can be the map before a load's)
         local seen = {}
         for i, e in ipairs(list) do
             local addr = addrs[i]
@@ -5081,7 +5101,7 @@ return function(api)
     -- the saved amount back) or while down isn't, and the count starts again from there. Each was sent whole
     -- as a gain and paid to everyone, over and over (player report 11-09: three players, an hour, 600k and 1.5m).
     game.dustWatch = { addr = nil, quietUntil = 0, bodyUntil = 0, QUIET_S = 10, AFTER_DOWN_S = 5 }
-    game.COPY_PAY_S = 5
+    game.COPY_PAY_S = 8         -- (a copy's pay came 1.1-1.3 s after its death for the elite, 2.7-5.7 s for thugs: the bench)
     function game.watchCurrency(pawn, sendEvent)
         local d = dust(pawn)
         if d == nil then
@@ -5115,8 +5135,16 @@ return function(api)
             end
             if pay and gained > 0 and now >= w.bodyUntil then
                 local back = math.min(gained, pay.dust)
-                game.copyPay = nil
-                if pcall(function() pawn:ChangeDustNumInternal(-back) end) then
+                pay.dust = pay.dust - back      -- (spent down: killForReal adds each copy's to it)
+                if pay.dust <= 0 then
+                    game.copyPay = nil
+                end
+                if pay.hostDownAt and now - pay.hostDownAt < w.AFTER_DOWN_S then
+                    -- (No share of it comes: the host down, or up within its quiet after, its dust watch holding back
+                    -- what the game paid it. This player's own then: kept, and not shared on. coop's handlers.K.)
+                    gained = gained - back
+                    log("A copy's own dust for the partner's kill kept: " .. math.floor(back) .. " (the host down: no share comes).")
+                elseif pcall(function() pawn:ChangeDustNumInternal(-back) end) then
                     gained, d = gained - back, d - back
                     log("A copy's own dust for the partner's kill taken back: " .. math.floor(back) .. " (their share of it comes).")
                 end

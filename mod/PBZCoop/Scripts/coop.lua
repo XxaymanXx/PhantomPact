@@ -439,6 +439,9 @@ return function(api)
             p.zeroSince = nil
         end
         local dead = zero and (os.clock() - p.zeroSince) >= 1.0
+        if dead then
+            p.downSeenAt = os.clock()       -- (handlers.K: their dust watch holds back what the game pays them a while after)
+        end
         local gone = p.partnerGone == true       -- see watchPartner
         -- In a cutscene the partner isn't really playing: their ghost would stand idle in your world. And in one of yours it
         -- stood in the shot, which a player asked to be rid of. Short sequences are part of play, and a ghost hidden for each
@@ -998,8 +1001,9 @@ return function(api)
         end
         local paidThere = false
         -- (Not one the guest's game ran: the floor on its copy here is the handover's own, and its death ran its whole
-        -- script there. Nor, in a party, one asleep here that a guest's game ran a copy of: handover.asleepHere.)
-        if not dead and net.guestKilled[name] and not net.guestRuns[name] and not handover.asleep[name]
+        -- script there. One asleep here in a party is held by nothing: a floor on it is the game's own, and it's fought
+        -- here like any other on one. The review of 11-16.)
+        if not dead and net.guestKilled[name] and not net.guestRuns[name]
             and game.healthFloor and game.healthFloor(actor) >= 1 and game.isBoss and game.isBoss(actor, addr) then
             -- A boss held up by its own floor (its phase ends in a scene) isn't the guest's kill to make: killed from here it
             -- died outside its script, with no scene after, its body left, and the story stuck in the host's save. It's
@@ -1584,6 +1588,11 @@ return function(api)
                 if asleep and not handover.woken[addr] then
                     handover.wake(name, addr)
                 end
+                if asleep then
+                    -- (Its death here is told, GK, with no blow before it too: a sneak kill, an execution. Told only
+                    -- for one this player had hurt, it died here, was told to nobody, and came back. The review of 11-16.)
+                    net.hitHere[name] = true
+                end
                 if game.setMinHealth and not asleep then
                     game.setMinHealth(actor, HELD_HP)
                 end
@@ -1739,12 +1748,15 @@ return function(api)
         if net.party and not net.pvp and net.localLoc and name:sub(1, 3) == "sp:" then
             local dh = handover.dist(x, y, z, net.localLoc)
             local theirs = net.partnerBosses[name] ~= nil
-            if (boss or theirs) and (net.toldFighting or handover.hostIn(name, addr, dh)) then
+            -- (For this player's own fight only one within its reach: a guest's boss further off, as this player fought
+            -- another, stood asleep and held for nobody. And never one held up by a floor of the game's own: its end is
+            -- its script's here, 193. The review of 11-16.)
+            if (boss or theirs) and ((net.toldFighting and dh <= ENEMY_RADIUS_CM) or handover.hostIn(name, addr, dh)
+                or (game.healthFloor and game.healthFloor(actor) >= 1)) then
                 yes = false
             elseif theirs then
                 yes = true
-            elseif (was or not net.toldFighting)
-                and not (dh <= handover.FIGHT_CM and game.enemyAfterSlot and game.enemyAfterSlot(actor, net.ghostSlots) == 1) then
+            elseif was or not net.toldFighting then
                 for _, p in ipairs(partners()) do
                     local t = p.target
                     if t ~= nil and not p.ghostHidden and not p.partnerGone and sameMap(t)
@@ -1756,6 +1768,11 @@ return function(api)
                             break
                         end
                     end
+                end
+                -- (Never one after this player from within 30 m: asked last and of a candidate alone, a call into the game.)
+                if yes and dh <= handover.FIGHT_CM and game.enemyAfterSlot
+                    and game.enemyAfterSlot(actor, net.ghostSlots) == 1 then
+                    yes = false
                 end
             end
         end
@@ -1786,8 +1803,13 @@ return function(api)
         local want = false
         local boss = game.isBoss and game.isBoss(actor, addr)
         local dh = net.localLoc and handover.dist(x, y, z, net.localLoc) or 0
-        -- (In its fight, or in a fight with it still this game's: it stays, whatever the guest does.)
-        if boss and (handover.hostIn(name, addr, dh) or (not runs and net.toldFighting)) then
+        -- (In its fight, or by this player in a fight of theirs with it still this game's: it stays, whatever the guest
+        -- does. One further off is in no fight here: a guest's at another boss, as this player fought their own, stood
+        -- held, asleep here, till that fight was over. And one held up by a floor of the game's own stays, its fight this
+        -- world's to finish (193): not handed over yet, a floor on it here is the game's; handed over it lost it, and a
+        -- guest's kill was then its death outside its script here. The review of 11-16.)
+        if boss and (handover.hostIn(name, addr, dh) or (not runs and ((net.toldFighting and dh <= ENEMY_RADIUS_CM)
+            or (game.healthFloor and game.healthFloor(actor) >= 1)))) then
             want = false
         elseif boss and handover.bossGoes(name, actor, runs) then
             want = true
@@ -1823,6 +1845,17 @@ return function(api)
     -- move: the game stops a tree itself for those.
     handover.WAKE_S = 600
     handover.woken = {}         -- enemy address -> { name, untilAt, stopped }
+    -- A montage up on it: a move, a flinch. (puppets.inMove knows only what this PC sends of an enemy, and a party's guest
+    -- sends nothing of one asleep on the host, which its game runs all the same: its tree was started again in the
+    -- middle of its own moves. The review of 11-16.)
+    function handover.moving(actor)
+        local on = false
+        pcall(function()
+            local ai = api.moves and api.moves.animOf(actor)
+            on = ai ~= nil and valid(ai:GetCurrentActiveMontage())
+        end)
+        return on
+    end
     function handover.wake(name, addr)
         handover.woken[addr] = { name = name, untilAt = os.clock() + handover.WAKE_S, stopped = 0 }
     end
@@ -1841,7 +1874,8 @@ return function(api)
             else
                 local state = game.aiState and game.aiState(actor)
                 if game.aiStopped and game.aiStopped(actor) and (state == nil or state:find("Combat", 1, true))
-                    and not (api.puppets and api.puppets.inMove(w.name)) and not (game.inCutscene and game.inCutscene()) then
+                    and not (api.puppets and api.puppets.inMove(w.name)) and not handover.moving(actor)
+                    and not (game.inCutscene and game.inCutscene()) then
                     w.stopped = w.stopped + 1
                     if w.stopped >= 2 then
                         w.stopped = 0
@@ -1890,7 +1924,8 @@ return function(api)
         net.guestRuns[name], net.guestLines[name], handover.seen[name] = nil, nil, nil
         if net.heldAlive[addr] then
             net.heldAlive[addr] = nil
-            if valid(actor) and game.setMinHealth then
+            -- (The hold's own floor alone: one the game set meanwhile, a phase's, is its script's to keep. 193.)
+            if valid(actor) and game.setMinHealth and (not game.healthFloor or game.healthFloor(actor) == HELD_HP) then
                 game.setMinHealth(actor, 0)
             end
         end
@@ -1906,6 +1941,31 @@ return function(api)
         net.heldAlive[addr] = nil
         if api.puppets then
             api.puppets.drop(actor)
+        end
+    end
+
+    -- Host: a partner's fight that this player isn't in is over with its boss alive: they died in it, or left it. It
+    -- starts over, as a lost fight does in the game: the boss back to full health here, and this game's to run again
+    -- first (one the guest's game still ran had its next line take it down again). Left as it was, the guest's world
+    -- brought its boss back at full and this world's line took the new copy down to where the last try ended: a retry
+    -- begun at 30%, easier than the game, and to be had by dying. Since a boss the guest went in to first is the guest's
+    -- game's to run (263), and in a party one asleep here (277), that was the ordinary case. Not with PvP on or in a
+    -- match, as a sit's; in a party not while another's fight is on. The review of 11-16.
+    function handover.lost(name)
+        local actor = enemyByName[name]
+        if not valid(actor) and game.liveBossesWithId then
+            actor = game.liveBossesWithId(name)[1]      -- (out of this round's reach: its guest back at a far bell)
+        end
+        if not isHost() or net.pvp or net.arena or (net.party and net.partnerFighting) or not valid(actor)
+            or (game.isDead and game.isDead(actor)) then
+            return
+        end
+        if net.guestRuns[name] then
+            handover.retryAt[name] = os.clock() + handover.RETRY_S
+            handover.give(name, actor, actor:GetAddress(), false)
+        end
+        if net.bossFull(actor) then
+            log("The other player's fight with " .. name .. " is over with the boss alive: it starts over at full health.")
         end
     end
 
@@ -2006,7 +2066,8 @@ return function(api)
     function handover.reset()
         if isHost() then
             for _, actor in pairs(net.heldAlive) do
-                if valid(actor) and game.setMinHealth then
+                -- (The hold's own floor alone, as release's.)
+                if valid(actor) and game.setMinHealth and (not game.healthFloor or game.healthFloor(actor) == HELD_HP) then
                     game.setMinHealth(actor, 0)
                 end
             end
@@ -2582,6 +2643,8 @@ return function(api)
             -- (The host's death settles a kill of this player's still to tell: a hit left here kept the dead body paired
             -- under its id, and a boss up again on the host never came back here.)
             net.hitHere[name] = nil
+            -- (Another guest's kill, told by GK: its share comes from them, not the host.)
+            local byGuest = net.guestKillSent and net.guestKillSent[name]
             if net.guestKillSent then
                 net.guestKillSent[name] = nil
             end
@@ -2629,6 +2692,12 @@ return function(api)
                     -- a reload.
                     if net.killWatched(actor, down) then
                         log("Host says " .. name .. " died; it dies here too.")
+                        -- (Nothing of it is owed: with the host down, or up within its quiet after, no share of it
+                        -- comes, and its copy's own pay taken back left this player nothing for the kill. When the host
+                        -- was last seen down goes with the copy's pay: pbz.lua's watchCurrency. The review of 11-16.)
+                        if game.copyPay and not byGuest then
+                            game.copyPay.hostDownAt = net.downSeenAt
+                        end
                     else
                         log("Host says " .. name .. " died; its death was refused here: tried again, then dissolved.")
                     end
@@ -4781,6 +4850,9 @@ return function(api)
                 return
             end
             hostWorld = os.time()
+            -- (Nor is what that world adds a boss's win: one fallen in the last world let another save's flags and flow
+            -- steps out, up to flowsync.lua's 1000 at once. The review of 11-16.)
+            net.bossFellAt = nil
             -- (Put-backs still owed were that world's: in another save, or a new game, they'd kill an enemy it has alive.)
             if game.owed then
                 game.owed.ids = {}
@@ -5109,9 +5181,20 @@ return function(api)
             for name in pairs(net.partnerBosses) do
                 if whose == nil or net.fightOf[name] == whose then
                     log("The other player's fight with " .. name .. " is over there: over here too.")
-                    endBossFight(name, enemyByName[name])
+                    -- (Asked before its end here: whether this player is in it is known till then. handover.lost.)
+                    local boss = enemyByName[name]
+                    local alone = isHost() and net.joinedBoss ~= name and not net.struck[name]
+                    if alone and valid(boss) then
+                        local at = boss:K2_GetActorLocation()
+                        alone = not handover.hostIn(name, boss:GetAddress(),
+                            net.localLoc and handover.dist(at.X, at.Y, at.Z, net.localLoc) or 0)
+                    end
+                    endBossFight(name, boss)
                     net.fightOf[name] = nil
                     over[name] = true
+                    if alone then
+                        handover.lost(name)     -- (a lost fight starts over, as the game has it)
+                    end
                 end
             end
             if from == nil and isClient() then

@@ -51,7 +51,7 @@ for people and tools to read.
 
 Little-endian, at most 1100 bytes before signing (`MAX_PACKET`), so a signed packet stays under Tailscale's 1280.
 
-Header: marker 0xA3, protocol 4, flags (1 = from the host), session, the partner's session as we know it, sequence, sender's
+Header: marker 0xA3, protocol 5, flags (1 = from the host), session, the partner's session as we know it, sequence, sender's
 time in ms, the partner's time echoed back, how long we held it, sure-lane acknowledgement (next id expected, plus a bitmap
 of the 32 after it). Round trip comes from the echo, so no ping packets are needed.
 
@@ -355,9 +355,12 @@ asks for the copies last, after everything else a packet carries, so a copy take
 packet while it rides, and holds nothing up (`SureSender::for_each_copy`). Only an event of 400 bytes or less has copies
 (`SURE_COPY_BYTES`): a guest's hit with the flinch it made (`D`: the montage's path and the hit state) is 190-280 bytes, and
 a long one is a list told at a join, whose copies would be packets of their own. (At 200, till 11-16, that hit had none.) A long queue (a join, a re-tell) goes once each as before: its gaps show in the acknowledgements at once.
-An older version drops a copy as it drops any event it has had, so the two mix, and there's no new protocol. What a 1.7.3
-partner does do is hurry an acknowledgement for each copy, as for any sure event (4 ms, a bare packet if none goes): the
-review of 11-13 counted 3.5-8.8% more packets from the 1.7.3 side of a mixed pair. Two players on this version don't.
+An older version drops a copy as it drops any event it has had, so copies alone would mix with 1.7.3. The protocol is 5
+all the same from this version on: a party's enemy line says "asleep" in its boss field (2, and 3 for a boss), which a
+1.7.3 guest read as a thug's and brought a beaten boss back by, and a boss's win goes out whole, which a 1.7.3 guest on
+another level marked done where it stood (BUGHUNT 302). So 1.7.3 and this version don't link: each is told that both PCs
+need the same version. (While they did, the review of 11-13 counted 3.5-8.8% more packets from the 1.7.3 side of a mixed
+pair: a 1.7.3 partner hurries an acknowledgement for each copy.)
 
 Two players, an hour of simulated play on each connection, 1.7.3 against this (sure events, host to guest):
 

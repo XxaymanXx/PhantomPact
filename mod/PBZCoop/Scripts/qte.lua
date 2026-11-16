@@ -65,17 +65,17 @@ return function(api)
 
     local function look()
         if not (net.enabled and api.coop.isHost and not api.coop.isHost()) then
-            qte.since, qte.active = nil, false
+            qte.since, qte.active, qte.fight = nil, false, nil
             return
         end
         local pc, pawn = api.getPlayer1()
         if not (valid(pc) and valid(pawn)) or game.isDead(pawn) then
-            qte.since, qte.active = nil, false
+            qte.since, qte.active, qte.fight = nil, false, nil
             return
         end
         local objs, names = running(pc)
         if #objs == 0 and #names == 0 then
-            qte.since, qte.active = nil, false
+            qte.since, qte.active, qte.fight = nil, false, nil
             return
         end
         qte.active = true
@@ -83,8 +83,11 @@ return function(api)
         qte.since = qte.since or now
         local inScene = game.inCutscene and game.inCutscene()
         local fight = (game.bossFightActive and game.bossFightActive()) or (net.enemyNear and net.enemyNear(qte.NEAR_CM))
-        if now - qte.since >= (not fight and qte.CALM_STUCK_S or inScene and qte.SCENE_STUCK_S or qte.STUCK_S) then
-            qte.ran, qte.since = now - qte.since, nil
+        -- (Or one seen at any look of this QTE: a copy's grab whose grabber the host killed meanwhile had no fight by it
+        -- any more, and held the guest a story's 60 s, not 12.)
+        qte.fight = qte.fight or fight or nil
+        if now - qte.since >= (not qte.fight and qte.CALM_STUCK_S or inScene and qte.SCENE_STUCK_S or qte.STUCK_S) then
+            qte.ran, qte.since, qte.fight = now - qte.since, nil, nil
             free(pc, pawn, objs, names)
         end
     end

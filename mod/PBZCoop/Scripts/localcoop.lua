@@ -3496,12 +3496,15 @@ return function(api)
             V.gourdKeep = info.CurrentTime + 1
             V.keepSerial = (V.keepSerial or 0) + 1
             local serial = V.keepSerial
+            -- (Worked out now, with the body in hand, and only the number kept: by a timer's time the body may be gone,
+            -- F4's single player or a rest, and a gone one handed to the game is a crash no pcall catches.)
+            local most = game.gourdMost and game.gourdMost(pawn, info)
             local function refund()
                 if not V.gourdKeep or not valid(info) then
                     return                  -- a map change: pcall can't catch touching what it took away
                 end
                 pcall(function()
-                    local max = (game.gourdMost and game.gourdMost(pawn, info)) or info.MaxTime
+                    local max = most or info.MaxTime
                     local want = math.min(V.gourdKeep, type(max) == "number" and max or V.gourdKeep)
                     if info.CurrentTime < want then
                         info:SetCurrentTime(want)
