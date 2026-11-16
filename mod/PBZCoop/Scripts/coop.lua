@@ -1882,10 +1882,20 @@ return function(api)
     -- A held copy left in a fight's state from before is put back to idle, the game's own way (game.calmCopy): the game
     -- starts a stopped AI again by itself, and in that moment such a copy took its own player on, bar and all, 42 m off
     -- (the bench: the elite's three, who had fought each other as the world loaded). And its own bar here says "in its
-    -- fight" for a copy that's this game's already, or with no partner's fight on (this player's own, begun by the game
-    -- from further off): not for a watcher's.
+    -- fight" for a copy that's this game's already, or for the player nearest it (their own fight, begun by the game from
+    -- further off): not for a watcher's, whose bar comes of such a moment. Nearest by where each was last told to be,
+    -- shown or not; whether a partner's fight is told yet is no test (the watcher's bar came first, on the bench).
     handover.BY_CM, handover.BY_FAR_CM = 3000, 4500
     handover.live = {}          -- guest: enemy address -> its name, while this game runs its own copy of it
+    function handover.nobodyNearer(at, gap)
+        for _, p in ipairs(partners()) do
+            local t = p.target
+            if t ~= nil and not p.partnerGone and sameMap(t) and handover.dist(at.X, at.Y, at.Z, t) < gap then
+                return false
+            end
+        end
+        return true
+    end
     handover.calm = {}          -- guest: enemy address -> { at: when a held copy's state is looked at next, n: times calmed }
     function handover.byHere(name, actor, addr)
         local was = handover.live[addr] == name
@@ -1894,10 +1904,24 @@ return function(api)
         if near and net.localLoc then
             local at = near.loc
             local gap = handover.dist(at.X, at.Y, at.Z, net.localLoc)
+            local own = handover.hostIn(name, addr, gap)
             yes = gap <= (was and handover.BY_FAR_CM or handover.BY_CM) or net.joinedBoss == name
-                or ((was or net.partnerBosses[name] == nil) and handover.hostIn(name, addr, gap))
+                or (own and (was or handover.nobodyNearer(at, gap)))
             local now, c = os.clock(), handover.calm[addr]
-            if not yes and (was or now >= (c and c.at or 0)) then
+            -- (A partner's fight with it shown here: its copy isn't calmed meanwhile. Calmed, the game ended "its fight"
+            -- and took the bar down, the mirror with it: the watcher saw no bar for the fight. The bench.)
+            local theirs = not yes and not was and net.partnerBosses[name] ~= nil
+            if not yes and own and game.mirrorBar then
+                -- (The game's own bar on a copy that isn't this game's to run: the stray of an AI started for a moment.
+                -- A partner's fight's mirror again; or, no such fight on, taken down and the copy calmed now.)
+                game.mirrorBar(actor, theirs)
+                if not theirs then
+                    c = nil
+                end
+            elseif theirs and not handover.barOn(addr) then
+                mirrorBossFight(name, actor)    -- (their fight's bar, gone with a stray before the fight was told)
+            end
+            if not yes and not theirs and (was or now >= (c and c.at or 0)) then
                 local state = game.aiState and game.aiState(actor)
                 local fighting = state ~= nil and state:find("Combat", 1, true) ~= nil
                 if was then
@@ -5343,15 +5367,14 @@ return function(api)
         for _, boss in ipairs(game.bossActors()) do
             local addr = boss:GetAddress()
             local mirror = game.isMirrorBar and game.isMirrorBar(boss)
-            -- (A party guest's held copy of one asleep on the host, in a partner's fight, its bar the game's own: no
+            -- (A party guest's copy of one asleep on the host that this game doesn't run, its bar the game's own: no
             -- fight of this player's. The game starts a stopped AI again by itself, a partner's figure beside the copy
             -- rouses it in that moment, and the game puts its bar up for it; the copy is stopped again, its player 42 m
-            -- off, and they were told as in the fight for as long as that bar stood. The bench, three copies. One with
-            -- no partner's fight on is this player's own, begun by the game wherever they stood. handover.byHere.)
+            -- off, and they were told as in the fight for as long as that bar stood. The bench, three copies. Whose it
+            -- is to run, and so whose fight: handover.byHere.)
             if not mirror and net.party and isClient() and handover.live[addr] == nil then
-                local name = enemyName(boss, addr)
-                local r = net.remoteEnemies[name]
-                mirror = r ~= nil and r.Asleep == true and net.partnerBosses[name] ~= nil
+                local r = net.remoteEnemies[enemyName(boss, addr)]
+                mirror = r ~= nil and r.Asleep == true
             end
             if not mirror then
                 return true
