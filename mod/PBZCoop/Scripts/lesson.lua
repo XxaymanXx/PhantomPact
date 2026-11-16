@@ -103,8 +103,8 @@ return function(api)
     local function takeOff(pawn)
         local tags = combatTags(pawn)
         local n = 0
-        if tags then
-            local lib = StaticFindObject("/Script/GameplayAbilities.Default__AbilitySystemBlueprintLibrary")
+        local lib = tags and StaticFindObject("/Script/GameplayAbilities.Default__AbilitySystemBlueprintLibrary")
+        if tags and valid(lib) then
             while n < lesson.MOST and game.inCombat(pawn) do
                 lib:RemoveLooseGameplayTags(pawn, tags, false)
                 n = n + 1
@@ -146,6 +146,10 @@ return function(api)
     local function look()
         if not net.enabled then
             lesson.up = false
+            return
+        end
+        -- (The quiet after a load or a trip, as every other slow job's: the enemies in hand may be the old area's.)
+        if os.clock() < (net.quietUntil or 0) then
             return
         end
         local pc, pawn = api.getPlayer1()
