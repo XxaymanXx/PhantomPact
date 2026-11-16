@@ -1730,6 +1730,11 @@ return function(api)
         if net.joinedBoss == name or (net.struck[name] and dh <= handover.FIGHT_CM) then
             return true
         end
+        -- (No bar marked at this address, a table's look: nothing to walk. A party's guest asks this of each copy asleep
+        -- on the host at each of its turns, and each walk read a name and a death for every bar up. The third review.)
+        if game.bossAt and not game.bossAt(addr) then
+            return false
+        end
         for _, boss in ipairs(game.bossActors and game.bossActors() or {}) do
             if boss:GetAddress() == addr and not (game.isMirrorBar and game.isMirrorBar(boss)) then
                 return true
@@ -1887,10 +1892,14 @@ return function(api)
     -- shown or not; whether a partner's fight is told yet is no test (the watcher's bar came first, on the bench).
     handover.BY_CM, handover.BY_FAR_CM = 3000, 4500
     handover.live = {}          -- guest: enemy address -> its name, while this game runs its own copy of it
-    function handover.nobodyNearer(at, gap)
+    -- (Nearer, and beside it (within BY_CM) or in a fight with it: what rouses a copy. One merely nearer, in no fight,
+    -- took a guest's own fight begun from 30-45 m away from them. The third review.)
+    function handover.nobodyNearer(at, gap, name)
+        local whose = net.fightOf[name]
         for _, p in ipairs(partners()) do
             local t = p.target
-            if t ~= nil and not p.partnerGone and sameMap(t) and handover.dist(at.X, at.Y, at.Z, t) < gap then
+            local d = t ~= nil and not p.partnerGone and sameMap(t) and handover.dist(at.X, at.Y, at.Z, t)
+            if d and d < gap and (d <= handover.BY_CM or (whose ~= nil and whose == p.number) or p.fights) then
                 return false
             end
         end
@@ -1900,13 +1909,16 @@ return function(api)
     function handover.byHere(name, actor, addr)
         local was = handover.live[addr] == name
         local near = reach.near[addr]
-        local yes = was
+        local yes, own = was, false
         if near and net.localLoc then
             local at = near.loc
             local gap = handover.dist(at.X, at.Y, at.Z, net.localLoc)
-            local own = handover.hostIn(name, addr, gap)
+            own = handover.hostIn(name, addr, gap)
+            -- (Nearest, for the race it was made for: no partner's fight told yet. With one told, a stray bar is that
+            -- fight's mirror again whoever is nearest: the fight had moved away from where the boss sleeps on the host,
+            -- where a held copy stays, and the watcher 43 m off was the nearest to theirs. The third review.)
             yes = gap <= (was and handover.BY_FAR_CM or handover.BY_CM) or net.joinedBoss == name
-                or (own and (was or handover.nobodyNearer(at, gap)))
+                or (own and (was or (net.partnerBosses[name] == nil and handover.nobodyNearer(at, gap, name))))
             local now, c = os.clock(), handover.calm[addr]
             -- (A partner's fight with it shown here: its copy isn't calmed meanwhile. Calmed, the game ended "its fight"
             -- and took the bar down, the mirror with it: the watcher saw no bar for the fight. The bench.)
@@ -1918,8 +1930,13 @@ return function(api)
                 if not theirs then
                     c = nil
                 end
-            elseif theirs and not handover.barOn(addr) then
-                mirrorBossFight(name, actor)    -- (their fight's bar, gone with a stray before the fight was told)
+            elseif theirs and not handover.barOn(addr) and now >= (net.quietUntil or 0)
+                and now >= (handover.reshownAt or 0) then
+                -- (Their fight's bar, gone with a stray before the fight was told. Once a second at most, and not in
+                -- the quiet after a load: each is a search of the HUD and of every fog wall, and with no HUD to put it
+                -- on, mid-load, it went again at every turn. The third review.)
+                handover.reshownAt = now + 1.0
+                mirrorBossFight(name, actor)
             end
             if not yes and not theirs and (was or now >= (c and c.at or 0)) then
                 local state = game.aiState and game.aiState(actor)
@@ -1943,6 +1960,9 @@ return function(api)
             end
         end
         handover.live[addr] = yes and name or nil
+        if yes and not was and own and not (net.ownAnnounced or {})[name] and api.coop and api.coop.announceBoss then
+            api.coop.announceBoss(actor)    -- (its fight, held back while the copy wasn't this game's: announceBoss)
+        end
         return yes
     end
     function handover.stayAwake()
@@ -2797,8 +2817,15 @@ return function(api)
                         -- (Nothing of it is owed: with the host down, or up within its quiet after, no share of it
                         -- comes, and its copy's own pay taken back left this player nothing for the kill. When the host
                         -- was last seen down goes with the copy's pay: pbz.lua's watchCurrency. The review of 11-16.)
-                        if game.copyPay and not byGuest then
-                            game.copyPay.hostDownAt = net.downSeenAt
+                        -- (This kill's own roll alone: a boss's in the same pay is owed, its share comes once the host
+                        -- is up. The third review.)
+                        -- (The host at 0 now counts: seen down only after a second, a kill in that second was taken
+                        -- back with no share to come.)
+                        local downAt = net.zeroSince and os.clock() or net.downSeenAt
+                        if game.copyPay and not byGuest and downAt
+                            and os.clock() - downAt < game.dustWatch.AFTER_DOWN_S then
+                            game.copyPay.hostDownAt = downAt
+                            game.copyPay.keep = (game.copyPay.keep or 0) + (game.copyPay.last or 0)
                         end
                     else
                         log("Host says " .. name .. " died; its death was refused here: tried again, then dissolved.")
@@ -4348,6 +4375,14 @@ return function(api)
                     game.markBeaten(name)
                 end
             end)
+            return
+        end
+        -- (A party guest's copy of one asleep on the host that this game doesn't run: the game's own bar on it is the stray
+        -- of an AI started for a moment, no fight of this player's (net.fightingHere). Told, it filed the fight as theirs
+        -- everywhere, ahead of the fighter's own, whose lost fight then never started over: the next try began where the
+        -- last ended, and the walls stayed shut for a fight nobody was in. One that's theirs after all is told as
+        -- handover.byHere makes the copy this game's. The third review.)
+        if net.party and isClient() and handover.live[addr] == nil and (net.remoteEnemies[name] or {}).Asleep == true then
             return
         end
         -- (On the host, a bar the game put up itself is this game's own fight, whatever actor it's on: the host's own scene

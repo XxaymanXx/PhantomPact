@@ -23,7 +23,7 @@ share loot and dust, and regroup at bells. The host's world leads, and your part
 - Boss fights wait for everyone: die and you watch your partner until it's over; join during one and you watch, then go to them
 - Shared loot and dust: what either player picks up or earns goes to both
 - Bells bring you together: sit at one and a partner who's dead or watching a fight comes to you. Each player rests at their own sit, as in the game; a partner fighting a boss when you sit starts the fight over, rested, with the boss back to full health
-- Elden Ring–style co-op difficulty: enemies and bosses get more health and posture while you play together
+- Elden Ring–style co-op difficulty: enemies and bosses get more health and posture while you play together online
 - PvP matches (F6, new in 1.7.0): duels (best of three) and death matches, one on one or two teams of up to six, in four
   of the game's own boss arenas or where the host stands. Fair for everyone: the same body and level-30 weapons of your own
   choosing, three drinks of one gourd, a brush-stroke countdown, each foe on the game's own boss health bar, a clock or none, and a boss's move to finish
@@ -55,7 +55,7 @@ share loot and dust, and regroup at bells. The host's world leads, and your part
 
 Early release, 2 players (4 in beta). Tailscale or any virtual LAN; Steam joining is in beta (see INSTALL.md).
 
-Both players must use the same version: 1.5.0 has a new connection, and 1.4.1 or older can't connect to it. No Python
+Both players must use the same version: this version has a new connection, and 1.7.3 or older can't connect to it. No Python
 needed: the connection runs inside the game. Can't connect, or it feels laggy? See Connection problems in
 [INSTALL.md](INSTALL.md#connection-problems).
 

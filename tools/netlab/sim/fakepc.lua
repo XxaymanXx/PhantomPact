@@ -1072,6 +1072,16 @@ function Fake.pile(pc, id, x, y, z, flags)
     return p
 end
 
+-- The flags a thing's own flow raises once it's used (its flow preset's AddTagWhenSuccess), as a pile's above.
+function Fake.flags(thing, flags)
+    local tags = {}
+    for _, t in ipairs(flags or {}) do
+        tags[#tags + 1] = { TagName = name(t) }
+    end
+    put(thing, "BP_PBZFlowComponent", { FlowPresetDataList = { { IsValid = function() return true end,
+        AddTagWhenSuccess = { GameplayTags = list(tags) } } } })
+end
+
 -- This player searches a pile: the game's own step on it, as pbz.lua's hookPiles watches it. (The flags its flow raises
 -- in this world are the game's: not raised here.)
 function Fake.search(pc, pile)

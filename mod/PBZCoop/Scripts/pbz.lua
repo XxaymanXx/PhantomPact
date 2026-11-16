@@ -1390,10 +1390,15 @@ return function(api)
             -- comes by C: a rise in the wallet within COPY_PAY_S of the last such death is taken back, up to what
             -- those copies roll all told: watchCurrency. One at a time, two dead within the pay's delay paid twice and
             -- only the last was taken back, the other going out as this player's earnings: the review of 11-16.)
+            -- (last: this death's own roll. keep, hostDownAt: what of the pay is this player's to keep, kills told with
+            -- the host down, each its own part: coop's handlers.K. Kept or taken back as one pool on one stamp, a boss
+            -- and its guard within the pay's delay, or another guest's kill, paid a guest twice or took dust of theirs:
+            -- the third review.)
             if type(ownDust) == "number" and ownDust > 0 then
                 local pay, now = game.copyPay, os.clock()
-                local left = pay and now <= pay.untilAt and pay.dust or 0
-                game.copyPay = { dust = left + ownDust, untilAt = now + game.COPY_PAY_S }
+                local live = pay and now <= pay.untilAt
+                game.copyPay = { dust = (live and pay.dust or 0) + ownDust, untilAt = now + game.COPY_PAY_S, last = ownDust,
+                    keep = live and pay.keep or nil, hostDownAt = live and pay.hostDownAt or nil }
             end
             return true
         end
@@ -4222,6 +4227,13 @@ return function(api)
         -- as online's turns let go at a death and with nobody near. Kept, it waited with its body and picker for player
         -- 2's next down, past the body's end or a load, its picker's wait stayed ours, and a later enemy at its address
         -- took what it was hit for. The main session's second review, 11-16.)
+        -- (By its damage record: every steered one has one, and one player 2 fought alone, never steered, kept its own
+        -- after it died, for a later enemy at its address. The third review.)
+        for addr in pairs(aim.dmg) do
+            if not seen[addr] then
+                game.unfocus(addr)
+            end
+        end
         for addr in pairs(aim.steered) do
             if not seen[addr] then
                 game.unfocus(addr)
@@ -5176,12 +5188,16 @@ return function(api)
                 if pay.dust <= 0 then
                     game.copyPay = nil
                 end
-                if pay.hostDownAt and now - pay.hostDownAt < w.AFTER_DOWN_S then
-                    -- (No share of it comes: the host down, or up within its quiet after, its dust watch holding back
-                    -- what the game paid it. This player's own then: kept, and not shared on. coop's handlers.K.)
-                    gained = gained - back
-                    log("A copy's own dust for the partner's kill kept: " .. math.floor(back) .. " (the host down: no share comes).")
-                elseif pcall(function() pawn:ChangeDustNumInternal(-back) end) then
+                -- (No share comes of a kill told with the host down, or up within its quiet after, its dust watch holding
+                -- back what the game paid it. That kill's own part is this player's then: kept, and not shared on. The
+                -- rest of the pay is taken back as ever. coop's handlers.K.)
+                local keep = pay.hostDownAt and now - pay.hostDownAt < w.AFTER_DOWN_S and math.min(back, pay.keep or 0) or 0
+                if keep > 0 then
+                    pay.keep = pay.keep - keep
+                    gained, back = gained - keep, back - keep
+                    log("A copy's own dust for the partner's kill kept: " .. math.floor(keep) .. " (the host down: no share comes).")
+                end
+                if back > 0 and pcall(function() pawn:ChangeDustNumInternal(-back) end) then
                     gained, d = gained - back, d - back
                     log("A copy's own dust for the partner's kill taken back: " .. math.floor(back) .. " (their share of it comes).")
                 end

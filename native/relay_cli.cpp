@@ -962,6 +962,47 @@ void test_hello() {
     run(old, {&host2}, 0.1);
     check(host2.field("partner_version") == "other-protocol", "another protocol is reported too");
 
+    // A host answers another protocol's knock with a header of its own, once a second at most: with nothing back, a
+    // guest on another version heard only silence, and was told to check the address. (The third review.)
+    {
+        FakeNet door;
+        End host3(door, "host", 1);
+        RawHeader h4;
+        std::string knock = raw_packet(h4);
+        knock[1] = relay::PROTOCOL - 1;
+        door.send(at(2), host3.addr, knock);
+        run(door, {&host3}, 0.1);
+        auto& back = door.wires[at(2).ip];
+        check(back.size() == 1 && back.top().data.size() == 3
+            && static_cast<uint8_t>(back.top().data[1]) == relay::PROTOCOL
+            && (static_cast<uint8_t>(back.top().data[2]) & relay::FLAG_FROM_HOST) != 0,
+            "a host answers another protocol's knock with a header of its own");
+        for (int i = 0; i < 10; i++) {
+            door.send(at(2), host3.addr, knock);
+            run(door, {&host3}, 0.05);
+        }
+        check(back.size() == 1, "once a second at most");
+        run(door, {&host3}, 1.0);
+        door.send(at(2), host3.addr, knock);
+        run(door, {&host3}, 0.1);
+        check(back.size() == 2, "and again a second on");
+
+        // A guest takes another protocol's word from a host alone: on Steam it hears every friend in the game.
+        FakeNet friends;
+        End lone(friends, "client", 3, at(1));
+        friends.send(at(5), lone.addr, knock);      // (another guest's knock, at other doors)
+        run(friends, {&lone}, 0.1);
+        check(lone.field("partner_version") != "other-protocol", "another guest's knock on another protocol says nothing of this guest's host");
+        check(friends.wires[at(5).ip].empty(), "and a guest answers no knock");
+        RawHeader from_host;
+        from_host.flags = relay::FLAG_FROM_HOST;
+        std::string host_word = raw_packet(from_host);
+        host_word[1] = relay::PROTOCOL - 1;
+        friends.send(at(1), lone.addr, host_word);
+        run(friends, {&lone}, 0.1);
+        check(lone.field("partner_version") == "other-protocol", "its host's does");
+    }
+
     End guest2(old, "client", 3, at(1));
     run(old, {&host2, &guest2}, 2.5);
     old.send(at(9), host2.addr, json);

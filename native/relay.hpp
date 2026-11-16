@@ -968,7 +968,21 @@ public:
         const auto protocol = r.get<uint8_t>();
         if (!r.ok || marker != MARKER) return;
         if (protocol != PROTOCOL) {
-            if (!stranger) partner_version_ = "other-protocol";
+            // (The flags byte is where it has been since protocol 3: a host takes another version's word from a guest
+            // alone, and a guest from a host. On Steam a guest hears every friend in the game, and a 1.7.3 guest's knock
+            // at other doors read as its host on another version. The third review.)
+            const auto other_flags = r.get<uint8_t>();
+            const bool other_role = r.ok && ((other_flags & FLAG_FROM_HOST) != 0) != (role_ == "host");
+            if (!stranger && other_role) {
+                partner_version_ = "other-protocol";
+                // (A host says so back, once a second at most, with a header of its own protocol: with nothing back, a
+                // guest on another version heard only silence, and was told to check the host's address and port.)
+                if (role_ == "host" && now - told_other_at_ >= 1.0) {
+                    told_other_at_ = now;
+                    const std::string p{static_cast<char>(MARKER), static_cast<char>(PROTOCOL), static_cast<char>(FLAG_FROM_HOST)};
+                    link_->send(addr, auth_ ? auth_->seal(p) : p);
+                }
+            }
             return;
         }
         const auto flags = r.get<uint8_t>();
@@ -1445,6 +1459,7 @@ private:
     size_t header_bytes_ = 0;
     double last_send_ = 0, last_heard_ = 0, last_hello_ = 0, last_probe_ = -1e9;
     double ack_by_ = -1;            // a sure event came: a packet with its acknowledgement goes by then, bare if need be
+    double told_other_at_ = -1e9;   // host: when another protocol's knock was last answered
     long long rejected_ = 0, received_ = 0, sent_ = 0, lost_ = 0, received_mark_ = 0, lost_mark_ = 0;
     // A party. As a host's relay for one guest:
     static constexpr size_t SAMPLE_BYTES = 40;

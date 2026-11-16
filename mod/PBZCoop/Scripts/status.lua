@@ -254,8 +254,15 @@ return function(api)
         -- A host's guests, each: only the first of them speaks for the connection above.
         if s.other_versions and s.other_versions ~= last.other_versions then
             for slot, version in s.other_versions:gmatch("(%d):([^,]+)") do
-                notify("version" .. slot, "player " .. slot .. " is on Phantom Pact " .. version .. " and you're on " .. tostring(api.version)
-                    .. ": use the same version, or enemies won't stay in step.")
+                -- (One turned away for its protocol isn't in the game at all: a 1.7.3 guest at a party's door, since
+                -- protocol 5. Told as in the game and out of step. The third review.)
+                if version == "1.4.1-or-older" or version == "other-protocol" then
+                    notify("version" .. slot, "your partner's Phantom Pact (" .. version .. ") can't connect to "
+                        .. tostring(api.version) .. ": both PCs need the same version.")
+                else
+                    notify("version" .. slot, "player " .. slot .. " is on Phantom Pact " .. version .. " and you're on "
+                        .. tostring(api.version) .. ": use the same version, or enemies won't stay in step.")
+                end
             end
         end
 

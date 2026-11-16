@@ -18,7 +18,8 @@ the nearest: an enemy on the player dealing the damage turned to a nearer one, t
 ## The rule now
 
 The host, once a second, for each enemy near two players or more (within 25 m), the same code for 2, 4 and 6 players
-(`game.steerTarget` in pbz.lua):
+(`game.steerTarget` in pbz.lua). The same rule runs for two players on one PC (local co-op, since BUGHUNT 288): it looks
+once a second, and a blow counts for whoever was swinging then:
 
 - **Near**: 1 within 3 m, 0 at 25 m, in a line between.
 - **Damage**: the health that player took from it lately, counting half after 12 s. 1 for whoever took the most, the others
