@@ -100,11 +100,56 @@ return function(api)
     if api.story then
         api.story.follow = (settings.followhoststory or "on"):lower() ~= "off"
     end
+    -- The co-op difficulty's numbers as the ini has them: enemies' health and posture, a boss's poise and armour (first),
+    -- then bosses' own health and posture and how hard enemies and bosses hit. Read as co-op starts, linked or on one PC.
+    -- (Whole numbers: %d throws on 150.5, and the throw skipped what came after. And finite, in range: 1e999 threw too.)
+    local function coopNumbers(s, first)
+        local function pct(v, default)
+            v = tonumber(v)
+            if not v or v ~= v then
+                return default
+            end
+            return math.floor(math.max(1, math.min(1000, v)))
+        end
+        if not api.scaling then
+            return
+        end
+        if first then
+            if tonumber(s.coopenemyhealth) or tonumber(s.coopenemyposture) then
+                api.scaling.command(string.format("%d %d", pct(s.coopenemyhealth, 150), pct(s.coopenemyposture, 130)))
+            end
+            if tonumber(s.coopbosspoise) then
+                api.scaling.bossPoiseCommand(tostring(math.floor(math.max(100, math.min(1000, tonumber(s.coopbosspoise))))))
+            end
+            if api.scaling.bossArmorCommand and s.coopbossarmor and s.coopbossarmor ~= "" then
+                api.scaling.bossArmorCommand(s.coopbossarmor)
+            end
+            return
+        end
+        -- (Bosses' own health and posture, and how hard enemies and bosses hit: a player report on 1.6.9. Left out, as
+        -- before: bosses take the enemies' numbers, and everything hits as the game has it.)
+        if api.scaling.bossCommand and (tonumber(s.coopbosshealth) or tonumber(s.coopbossposture)) then
+            api.scaling.bossCommand(string.format("%d %d", pct(s.coopbosshealth, pct(s.coopenemyhealth, 150)),
+                pct(s.coopbossposture, pct(s.coopenemyposture, 130))))
+        end
+        if api.scaling.damageCommand and (tonumber(s.coopenemydamage) or tonumber(s.coopbossdamage)) then
+            api.scaling.damageCommand(string.format("%d %d", pct(s.coopenemydamage, 100),
+                pct(s.coopbossdamage, pct(s.coopenemydamage, 100))))
+        end
+    end
+
     local role = (settings.role or "off"):lower()
     os.remove(modDir() .. "pads_watch.txt")
     os.remove(modDir() .. "pads_want.txt")      -- left by a crash with a panel open: main.dll would think one still is
     if role == "local" then
         api.localcoop.start(tonumber(settings.joysticks) or 2, tonumber(settings.monitors) or 1)
+        -- (The co-op difficulty's numbers, as the online roles read them once linked: unread here, two players on one PC
+        -- fought everything at the game's own numbers.)
+        coopNumbers(settings, true)
+        coopNumbers(settings, false)
+        if api.scaling and api.scaling.startLocal then
+            api.scaling.startLocal()
+        end
         -- (The co-op difficulty, as the online roles read it once linked: unread here, local co-op was Hellwalker whatever
         -- the ini said, Off too.)
         if api.difficulty and settings.coopdifficulty and settings.coopdifficulty ~= "" then
@@ -215,44 +260,11 @@ return function(api)
                 if api.twins and s.ghosttwins and s.ghosttwins ~= "" then
                     api.twins.setFrom(s.ghosttwins)
                 end
-                if api.scaling and (tonumber(s.coopenemyhealth) or tonumber(s.coopenemyposture)) then
-                    -- (Whole numbers: %d throws on 150.5, and the throw skipped the PvP settings below too.)
-                    -- (And finite, in range: 1e999 threw the same way.)
-                    local function whole(v, default)
-                        v = tonumber(v)
-                        if not v or v ~= v then
-                            return default
-                        end
-                        return math.floor(math.max(1, math.min(1000, v)))
-                    end
-                    api.scaling.command(string.format("%d %d", whole(s.coopenemyhealth, 150), whole(s.coopenemyposture, 130)))
-                end
-                if api.scaling and tonumber(s.coopbosspoise) then
-                    api.scaling.bossPoiseCommand(tostring(math.floor(math.max(100, math.min(1000, tonumber(s.coopbosspoise))))))
-                end
-                if api.scaling and api.scaling.bossArmorCommand and s.coopbossarmor and s.coopbossarmor ~= "" then
-                    api.scaling.bossArmorCommand(s.coopbossarmor)
-                end
+                coopNumbers(s, true)
                 if api.hitfx and s.partnerhitsounds and s.partnerhitsounds ~= "" then
                     api.hitfx.command(s.partnerhitsounds)
                 end
-                -- (Bosses' own health and posture, and how hard enemies and bosses hit: a player report on 1.6.9. Left out,
-                -- as before: bosses take the enemies' numbers, and everything hits as the game has it.)
-                local function pct(v, default)
-                    v = tonumber(v)
-                    if not v or v ~= v then
-                        return default
-                    end
-                    return math.floor(math.max(1, math.min(1000, v)))
-                end
-                if api.scaling and api.scaling.bossCommand and (tonumber(s.coopbosshealth) or tonumber(s.coopbossposture)) then
-                    api.scaling.bossCommand(string.format("%d %d", pct(s.coopbosshealth, pct(s.coopenemyhealth, 150)),
-                        pct(s.coopbossposture, pct(s.coopenemyposture, 130))))
-                end
-                if api.scaling and api.scaling.damageCommand and (tonumber(s.coopenemydamage) or tonumber(s.coopbossdamage)) then
-                    api.scaling.damageCommand(string.format("%d %d", pct(s.coopenemydamage, 100),
-                        pct(s.coopbossdamage, pct(s.coopenemydamage, 100))))
-                end
+                coopNumbers(s, false)
                 if api.difficulty and s.coopdifficulty and s.coopdifficulty ~= "" then
                     api.difficulty.command(s.coopdifficulty)
                 end

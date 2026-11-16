@@ -827,14 +827,21 @@ local function asleepOnTheHost()
     Session.moveTo(h, 0, 0)
     Session.moveTo(a, 11000, 0)        -- 110 m off, by one the host's game has asleep
     Session.moveTo(b, 500, 500)
-    Session.moveTo(c, 3300, 0)         -- by one 30 m from the host: awake there
+    Session.moveTo(c, 3300, 0)         -- by one 30 m from the host, which is after the host
+    local midH = Session.enemyOn(h, "mid")
+    Fake.put(field(midH, "picker"), "SwitchTargetCooldown", 1e9)
+    Fake.put(midH, "target", h.pawn)
     s:run(3)
     local onH, onA = Session.enemyOn(h, "byguest"), Session.enemyOn(a, "byguest")
-    check(line(a, "byguest").Asleep == true, "one by a guest 110 m from the host: its line says it's asleep there")
+    check(line(a, "byguest").Asleep == true, "one by a guest away from the host: its line says it's asleep there")
     check(brain(onA) == true and floor(onA) == 0, "that guest's game runs its own copy: awake, and not held")
     check(count(h.sent, "RUN sp:") == 0, "handed to nobody: a party has no handing over")
     check(line(c, "mid").X ~= nil and line(c, "mid").Asleep ~= true and brain(Session.enemyOn(c, "mid")) == false,
-        "one 30 m from the host with a guest by it: awake there, the host's to run as ever")
+        "one after the host from within 30 m, a guest by it: the host's to run, as ever")
+    Fake.put(midH, "target", nil)
+    s:run(2)
+    check(line(c, "mid").Asleep == true and brain(Session.enemyOn(c, "mid")) == true,
+        "after nobody, the guest by it 33 m from the host: asleep there, that guest's own (two players' distances)")
     check(brain(Session.enemyOn(b, "byhost")) == false and floor(Session.enemyOn(b, "byhost")) == 1, "and one by the host")
     -- Its health is the host's world's: the guest's blow goes there, and comes to every other copy.
     local full = select(1, Fake.health(onH))
@@ -849,10 +856,10 @@ local function asleepOnTheHost()
     check(brain(onC) == true and select(1, Fake.health(onC)) == full - 50,
         "a second guest by it: a copy of its own, awake, with what the host's has left")
     -- The host walks up: awake there, and everyone's copy follows the host's again.
-    Session.moveTo(h, 8000, 0)
+    Session.moveTo(h, 10900, 100)
     s:run(3)
     check(line(a, "byguest").Asleep ~= true and brain(onA) == false and floor(onA) == 1,
-        "the host within 40 m of it: awake there, the guests' copies held and following the host's again")
+        "the host comes up to the guests by it: awake there, their copies held and following the host's again")
     Session.moveTo(h, 0, 0)
     s:run(3)
     check(line(a, "byguest").Asleep == true and brain(onA) == true, "the host away again: asleep there, each guest's own again")
@@ -864,12 +871,13 @@ local function asleepOnTheHost()
     check(field(onH, "dead") == true and field(onC, "dead") == true, "and it's dead on the host and for the other guest by it")
     check(count(h.sent, "^E K sp:byguest$") == 1 and count(c.sent, "^E GK ") == 0, "told once")
 
-    -- A boss a guest goes in to first, the host 36 m off and not in the fight: asleep there wherever the host stands.
+    -- A boss a guest goes in to first, the host beside them and not in the fight: asleep there wherever the host stands.
+    Session.moveTo(h, 1500, 2200)
     Session.moveTo(b, 2100, 2900)
     s:run(3)
     local bossH, bossB = Session.enemyOn(h, "boss"), Session.enemyOn(b, "boss")
     check(line(b, "boss").Boss == true and line(b, "boss").Asleep ~= true and brain(bossB) == false,
-        "a boss 36 m from the host, in no fight: the host's to run")
+        "a boss in no fight, the host 9 m from the guest by it: the host's to run")
     b.hudLayout:RegisterBossHPBar(bossB)
     s:run(3)
     check(net(h).partnerBosses["sp:boss"] == true and line(b, "boss").Asleep == true and line(b, "boss").Boss == true,
@@ -2315,12 +2323,23 @@ local function mindsEyeLesson()
         return pc.env.PBZ.game.inCombat(pc.pawn)
     end
     local said = "The Mind's Eye lesson holds your controls"
+    -- (A copy standing in a fight with this player, as the game has it: its AI's state, and the game's own way to idle.)
+    local function inFight(pc, id)
+        local ai = field(field(Session.enemyOn(pc, id), "Controller"), "SGameAIComponent")
+        ai.state, ai.idled = "AI.State.Combat", 0
+        ai.CurrentStateTag = { TagName = { ToString = function() return ai.state end } }
+        ai.StopAI = function() ai.idled = ai.idled + 1 end
+        ai.StartAI = function() ai.state = "AI.State.Idle" end
+        return ai
+    end
+    local copy, hers = inFight(g, "near"), inFight(h, "near")
     g.inCombat = 2
     s:run(2)
-    check(counted(g) and g.inCombat == 2, "in a fight with no lesson up: the game's count is the game's")
+    check(counted(g) and g.inCombat == 2 and copy.idled == 0, "in a fight with no lesson up: the game's count is the game's, a copy's fight its own")
     g.inputSets[0][g.senseSet] = 100       -- (the lesson: the sense-only set on the guest's input)
     s:run(1)
-    check(not counted(g) and g.inCombat == 0, "the lesson holds the guest's controls to the sense: counted out of the fight, so it can start")
+    check(copy.idled == 1 and copy.state == "AI.State.Idle", "the lesson holds the guest's controls to the sense: a copy by them standing in a fight is put back to idle, once")
+    check(not counted(g) and g.inCombat == 0, "and what the game still counted is taken off, so the sense can start")
     g.inCombat = 1                          -- (the next enemy into a fight with them, the lesson still up)
     s:run(1)
     check(not counted(g) and count(g.logs, said) == 1, "and again while the lesson's up, said once")
@@ -2331,7 +2350,8 @@ local function mindsEyeLesson()
     h.inCombat = 1
     h.inputSets[0][h.senseSet] = 100
     s:run(1)
-    check(not counted(h) and count(h.logs, said) == 1, "the host's own lesson the same")
+    check(not counted(h) and count(h.logs, said) == 1, "the host's own lesson: the count taken off the same")
+    check(hers.idled == 0 and hers.state == "AI.State.Combat", "but an enemy the host's game runs is left in its fight")
     h.inputSets[0][h.senseSet] = nil
     Session.command(g, "netoff")
     s:run(1)
@@ -2340,6 +2360,42 @@ local function mindsEyeLesson()
     s:run(2)
     check(counted(g), "with co-op off the lesson is the game's own business")
     allErrors(s)
+
+    -- No lesson: a guest counted in a fight that nobody is fighting. The copies around them stand in fights they never
+    -- fight, so never end, and the game counted the guest in one for as long as those enemies lived (the bench, 11-16:
+    -- 60 m from a fight long over, a count of 3, the sense's key dead).
+    local t, th, tg = pair()
+    local tcopy, thers = inFight(tg, "near"), inFight(th, "near")
+    tcopy.StartAI = function()             -- (the game takes the player out of that copy's fight itself)
+        tcopy.state, tg.inCombat = "AI.State.Idle", tg.inCombat - 1
+    end
+    tg.inCombat, th.inCombat = 2, 1
+    t:run(5)
+    check(tcopy.idled == 0 and counted(tg), "a guest counted in a fight: left alone for a while")
+    t:run(6)
+    check(tcopy.idled == 1 and tg.inCombat == 1,
+        "8 s with nothing going for them: a copy the host steers that stands in a fight is put back to idle")
+    t:run(9)
+    check(not counted(tg), "and a count no copy holds is taken off")
+    check(thers.idled == 0 and counted(th), "never on the host: its enemies' fights are real")
+    allErrors(t)
+    local u, _, ug = pair()
+    local ucopy = inFight(ug, "near")
+    ug.inCombat = 1
+    u:run(20, function()
+        Fake.setHealth(ug.pawn, select(1, Fake.health(ug.pawn)) - 0.6)     -- (something keeps hitting them)
+    end)
+    check(ucopy.idled == 0 and counted(ug), "a guest who goes on losing health is in a fight: nothing is touched")
+    allErrors(u)
+    -- (An enemy the guest's own game runs, past the host's reach, standing in a fight by them: that fight is real.)
+    local w, _, wg = pair()
+    Session.moveTo(wg, 39800, 0)
+    w:run(3)
+    local own = inFight(wg, "toofar")
+    wg.inCombat = 1
+    w:run(20)
+    check(own.idled == 0 and counted(wg), "an enemy the guest's own game runs standing in a fight by them: the count stays the game's")
+    allErrors(w)
 end
 
 local function bossItemsOnce()
@@ -8718,6 +8774,24 @@ local function localDifficulty()
     t:run(3)
     check(tpc.difficulty == 2, "CoopDifficulty = Off: the player's own Pathbreaker stays (" .. tostring(tpc.difficulty) .. ")")
     allErrors(t)
+
+    -- Its numbers too. Two players on one PC fought everything at the game's own: the ticks that set them hang on the
+    -- online loop, which doesn't run without a link.
+    local function most(pc, id)
+        local _, hp, posture = Fake.health(Session.enemyOn(pc, id))
+        return hp, posture
+    end
+    local u, upc, ustate = localGame()
+    u:run(8)
+    local hp, posture = most(upc, "near")
+    check(upc.env.PBZ.valid(ustate.p2Pawn) and hp == 900 and math.abs(posture - 130) < 0.01,
+        string.format("two on one PC: an enemy at 150%% health and 130%% posture, as online (%s, %s)", tostring(hp), tostring(posture)))
+    check(select(1, most(upc, "boss")) == 7500, "and a boss")
+    allErrors(u)
+    local v, vpc = localGame("CoopEnemyHealth = 100\nCoopEnemyPosture = 100\n")
+    v:run(8)
+    check(select(1, most(vpc, "near")) == 600, "CoopEnemyHealth = 100: the game's own numbers")
+    allErrors(v)
 end
 
 -- Player 2 sees what player 1 sees, by the game's own rules and widgets.
@@ -10013,6 +10087,17 @@ local function stuckQte()
     check(not tq.active and tq.finished == 1, "but one that runs on there is, at 30 s")
     Session.scene(tg, false)
     allErrors(t)
+    -- (Out of any fight, none of the host's enemies near: a story's own QTE, waiting on the player. It's given a minute.)
+    local c, ch, cg = pair()
+    Session.moveTo(ch, 60000, 60000)
+    Session.moveTo(cg, 60300, 60000)
+    c:run(3)
+    local cq = grab(cg)
+    c:run(40)
+    check(cq.active and cq.finished == 0, "a QTE with no fight on and no enemy near isn't ended at 12 s, nor at 30")
+    c:run(25)
+    check(not cq.active and cq.finished == 1, "but at a minute")
+    allErrors(c)
 end
 
 

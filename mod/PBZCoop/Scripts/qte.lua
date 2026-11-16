@@ -14,7 +14,10 @@ return function(api)
 
     -- (SCENE_STUCK_S: inside a scene. One that held the player through a scene was never let go, the watch blind there; a
     -- real QTE can run inside a long scene, so it's given longer. active: a QTE is running here, for story.lua's skips.)
-    local qte = { STUCK_S = 12, SCENE_STUCK_S = 30, LOOK_MS = 1000, since = nil, freed = 0, active = false }
+    -- (CALM_STUCK_S: out of any fight, no boss bar up here and none of the host's enemies within NEAR_CM: a story's own
+    -- QTE, waiting on the player. Cut at 12 s as a boss's grab is, a slow answer lost it. It's given a minute.)
+    local qte = { STUCK_S = 12, SCENE_STUCK_S = 30, CALM_STUCK_S = 60, NEAR_CM = 3000, LOOK_MS = 1000, since = nil, freed = 0,
+        active = false }
 
     -- The controller's running QTEs: { objects } (the map's values that are objects; its keys too, for the log).
     local function running(pc)
@@ -79,7 +82,8 @@ return function(api)
         local now = os.clock()
         qte.since = qte.since or now
         local inScene = game.inCutscene and game.inCutscene()
-        if now - qte.since >= (inScene and qte.SCENE_STUCK_S or qte.STUCK_S) then
+        local fight = (game.bossFightActive and game.bossFightActive()) or (net.enemyNear and net.enemyNear(qte.NEAR_CM))
+        if now - qte.since >= (not fight and qte.CALM_STUCK_S or inScene and qte.SCENE_STUCK_S or qte.STUCK_S) then
             qte.ran, qte.since = now - qte.since, nil
             free(pc, pawn, objs, names)
         end

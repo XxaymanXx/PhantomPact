@@ -418,6 +418,21 @@ return function(api)
         end)
         return ok and type(tag) == "string" and tag or nil
     end
+    -- A copy put back to idle, the game's own way: its fight with this player is over in this world, and the game takes
+    -- them out of that fight itself. (The bench, 11-16: StopAI then StartAI leaves it in AI.State.Idle with its fight
+    -- ended. So never an enemy this game runs: that ends its fight for everyone.) True if it was in one.
+    function game.calmCopy(actor)
+        local ok, was = pcall(function()
+            local ai = actor:GetController().SGameAIComponent
+            if ai.CurrentStateTag.TagName:ToString():find("Idle", 1, true) then
+                return false
+            end
+            ai:StopAI()
+            ai:StartAI()
+            return true
+        end)
+        return ok and was == true
+    end
     -- Whether its AI is stopped: it has a brain, and that isn't running.
     function game.aiStopped(actor)
         local ok, stopped = pcall(function()
@@ -4932,7 +4947,7 @@ return function(api)
     -- the saved amount back) or while down isn't, and the count starts again from there. Each was sent whole
     -- as a gain and paid to everyone, over and over (player report 11-09: three players, an hour, 600k and 1.5m).
     game.dustWatch = { addr = nil, quietUntil = 0, QUIET_S = 10, AFTER_DOWN_S = 5 }
-    game.COPY_PAY_S = 8
+    game.COPY_PAY_S = 5
     function game.watchCurrency(pawn, sendEvent)
         local d = dust(pawn)
         if d == nil then

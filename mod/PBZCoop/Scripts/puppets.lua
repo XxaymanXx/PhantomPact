@@ -311,6 +311,9 @@ return function(api)
             if me and net.partnerBosses[name] then
                 net.struck[name] = true
             end
+            if me then
+                net.aimedAt = os.clock()        -- (something of the host's is going for this player: lesson.lua)
+            end
         end
         local m = path ~= "-" and api.moves.allowedPath(path) and api.moves.montage(path)
         local left = BUSY_S

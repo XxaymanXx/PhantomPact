@@ -931,8 +931,6 @@ return function(api)
         seen = {},              -- host: id -> { hp, posture, addr } of a copy the guest's game runs, as left last turn
         since = {},             -- host: id -> net.frameNow when it was handed over
         retryAt = {},           -- host: id -> os.clock() before which it isn't handed over again
-        ASLEEP_CM = 4500,       -- a party's host: an enemy further than this from its player sleeps in its game
-        AWAKE_CM = 4000,        -- and is awake there again within this
         asleep = {},            -- a party's host: id -> true while it sleeps here with a guest by it (asleepHere)
     }
 
@@ -1730,9 +1728,11 @@ return function(api)
     -- (GK) and is its death everywhere. Its health is still this world's: every guest's blows come here, and its line
     -- takes each copy down with it. What it does is each guest's own to see: two guests by the same one, away from the
     -- host, fight a copy each.
-    -- Asleep: over 45 m from this player (the optimizer's third wave; awake again within 40 m), a guest within their own
-    -- 60 m of it and 10 m nearer, and none new while this player's own boss bar is up. And one in a guest's boss fight
-    -- that this player isn't in, wherever they stand.
+    -- Asleep by the two players' rule (104): a guest over 25 m from this player (together again within 15), the enemy
+    -- within that guest's 60 m and 10 m nearer them; never one after this player from within 30 m, and none new while this
+    -- player's own boss bar is up. And one in a guest's boss fight that this player isn't in, wherever they stand. (By
+    -- the optimizer's own 45 m first: on the bench, 11-16, the elite of Xigu stood 44.9 m from the host, the guest beside
+    -- it: never woken there, never called asleep, and no blow at the guest in 40 s.)
     function handover.asleepHere(name, actor, addr, x, y, z, boss)
         local was = handover.asleep[name] == true
         local yes = false
@@ -1743,12 +1743,15 @@ return function(api)
                 yes = false
             elseif theirs then
                 yes = true
-            elseif dh > (was and handover.AWAKE_CM or handover.ASLEEP_CM) and (was or not net.toldFighting) then
+            elseif (was or not net.toldFighting)
+                and not (dh <= handover.FIGHT_CM and game.enemyAfterSlot and game.enemyAfterSlot(actor, net.ghostSlots) == 1) then
                 for _, p in ipairs(partners()) do
                     local t = p.target
-                    if t ~= nil and not p.ghostHidden and not p.partnerGone and sameMap(t) then
+                    if t ~= nil and not p.ghostHidden and not p.partnerGone and sameMap(t)
+                        and gap3d(net.localLoc, t) > (was and handover.TOGETHER_CM or handover.APART_CM) then
                         local dg = handover.dist(x, y, z, t)
-                        if dg <= ENEMY_RADIUS_CM and dg + handover.NEARER_CM < dh then
+                        if (was and dh + handover.NEARER_CM >= dg)
+                            or (not was and dg <= ENEMY_RADIUS_CM and dg + handover.NEARER_CM < dh) then
                             yes = true
                             break
                         end
