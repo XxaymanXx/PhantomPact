@@ -1314,6 +1314,10 @@ private:
         // place has a budget of its own that fills 60 times a second (PLAYERS_EVERY) and holds PLAYERS_SAVED: one with
         // none left waits here, the newest in its place, for the next packet once there is.
         if (players_waiting_ && partner_here && (p.size() > header_bytes_ || now - last_players_ >= PLAYERS_EVERY)) {
+            // (A packet goes: a place held for its budget waits for the next one, not a packet of its own. Set only as a
+            // place was sent, one held went alone a few ms before the host's next frame: a fifth more places by themselves
+            // for three players above 60 FPS. The check of 2fe828c.)
+            last_players_ = now;
             players_waiting_ = false;
             for (size_t i = 0; i < players_out_.size(); i++) {
                 if (!players_out_[i]) continue;
@@ -1328,7 +1332,6 @@ private:
                     break;
                 }
                 player_budget_[i] -= 1;
-                last_players_ = now;
                 w.put<uint8_t>(SEC_PLAYER);
                 w.put<uint8_t>(static_cast<uint8_t>(FIRST_GUEST_SLOT + i));
                 put_sample(w, *players_out_[i]);

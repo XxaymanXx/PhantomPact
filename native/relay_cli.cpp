@@ -2058,6 +2058,42 @@ void test_sockets(int port) {
     check(status.find(" filtered=1 ") != std::string::npos && status.find(" received=0 ") != std::string::npos, "a stranger's packet to a guest's real socket is filtered");
 }
 
+// Copies go last, in the room a packet that goes anyway has left: they never start a packet, and what's due goes ahead of
+// them (the check of 2fe828c: copies first, or through room(), passed every other check). The game's place every 5 ms,
+// seven events of 190 bytes at once (their first sends are two packets) and an eighth as long when their copies are due;
+// the confirmations are back in 25 ms, before anything is due again.
+void test_copies_last() {
+    std::puts("copies, last in a packet:");
+    FakeNet net;
+    net.delay = 0.01;
+    End host(net, "host", 1), guest(net, "client", 2, at(1));
+    run(net, {&host, &guest}, 0.5);
+    const auto sent = [&] { return std::stoll(host.field("sent")); };
+    const auto frame = [&] {
+        host.box.post_sample(at_x(1));
+        net.now += 0.005;
+        host.step();
+        guest.step();
+    };
+    frame();
+    for (int i = 0; i < 7; i++) host.box.post_sure(padded("c", i, 190));
+    long long was = sent();
+    frame();
+    const long long first = sent() - was;
+    long long most = 0;
+    for (int i = 0; i < 24; i++) {
+        if (i == 2) host.box.post_sure(padded("c", 7, 190));
+        was = sent();
+        frame();
+        most = std::max(most, sent() - was);
+    }
+    const std::string copied = host.field("copied"), resent = host.field("resent");
+    run(net, {&host, &guest}, 0.5);
+    char what[220];
+    std::snprintf(what, sizeof what, "a copy takes what room a frame's packet has left, after what's due: %lld packets for the first sends, then at most %lld a frame (%s copies)", first, most, copied.c_str());
+    check(first == 2 && most == 1 && copied != "0" && resent == "0" && in_order(guest.events, "c", 8), what);
+}
+
 // Where the other guests are goes to a guest in a packet that goes anyway, the host's own place: by itself only when none
 // of them has gone for PLAYERS_EVERY. And each guest's place goes on 60 times a second at most, however often it comes: a
 // guest above 60 FPS sends up to 125, and all of them passed on were a fifth more upload for a party's host (the review
@@ -2128,6 +2164,7 @@ int run_tests(int argc, wchar_t** argv) {
     test_hostile();
     test_party();
     test_party_riding();
+    test_copies_last();
     test_six();
     test_party_edges();
     if (opt_number(argc, argv, L"--sockets", 1) != 0) {

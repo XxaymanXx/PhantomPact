@@ -22,8 +22,10 @@ constexpr size_t MAX_SURE_PENDING = 8192;     // events waiting for a partner wh
 constexpr int SURE_COPIES = 3;                // a sure event goes again this many times before any loss is known...
 constexpr size_t SURE_COPIES_UP_TO = 8;       // ...while this few wait: a long queue (a join, a re-tell) shows its gaps in the
                                               // acknowledgements at once, and copies would only make it four times as long
-constexpr size_t SURE_COPY_BYTES = 200;       // ...and only one this short: a fight's events are under 100 bytes, and a long one
-                                              // is a list told at a join (a bag's 600), whose copies would be packets of their own
+constexpr size_t SURE_COPY_BYTES = 400;       // ...and only one this short: a guest's hit with the flinch it made (D: a montage's
+                                              // path, up to 256, and the hit state) is 190-280 bytes, and a long one is a list
+                                              // told at a join (a bag's 600), whose copies would fill the packets they ride in.
+                                              // (At 200 that hit had no copies: the fight's event they were built for.)
 
 // In order or not at all: a lost event would hold back everything behind it forever. So once the queue has really dropped
 // one, overflowed stays set, and the relay starts both sides over when the partner is back (Relay::flush).

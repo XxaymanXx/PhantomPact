@@ -352,9 +352,9 @@ rides in a packet that goes anyway (alone it waits 20 ms more), and the acknowle
 for the next frame's packet too (`ACK_WAIT_AGAIN`), so the copies add no packets, only their 47 bytes. They are on top of
 what was there and change none of it: when an event is taken for lost still counts from when it was sent, and the relay
 asks for the copies last, after everything else a packet carries, so a copy takes only the room that's left, never starts a
-packet while it rides, and holds nothing up (`SureSender::for_each_copy`). Only an event of 200 bytes or less has copies
-(`SURE_COPY_BYTES`): a fight's are under 100, and a long one is a list told at a join, whose copies would be packets of their
-own. A long queue (a join, a re-tell) goes once each as before: its gaps show in the acknowledgements at once.
+packet while it rides, and holds nothing up (`SureSender::for_each_copy`). Only an event of 400 bytes or less has copies
+(`SURE_COPY_BYTES`): a guest's hit with the flinch it made (`D`: the montage's path and the hit state) is 190-280 bytes, and
+a long one is a list told at a join, whose copies would be packets of their own. (At 200, till 11-16, that hit had none.) A long queue (a join, a re-tell) goes once each as before: its gaps show in the acknowledgements at once.
 An older version drops a copy as it drops any event it has had, so the two mix, and there's no new protocol. What a 1.7.3
 partner does do is hurry an acknowledgement for each copy, as for any sure event (4 ms, a bare packet if none goes): the
 review of 11-13 counted 3.5-8.8% more packets from the 1.7.3 side of a mixed pair. Two players on this version don't.
