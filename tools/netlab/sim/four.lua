@@ -2505,6 +2505,47 @@ local function copyCooldown()
     allErrors(s)
 end
 
+-- The host goes on to another map and the guest is left behind (the story plan, 11-15; "could not travel on to Lu Family
+-- Village", a report on 1.6.x). With TP > PARTNER off, the host's choice for everyone, F3 said only that it's off, the tip
+-- only "on another map", and there was no way after the host but to leave and join again.
+local function followToAnotherMap()
+    part("the host goes on to another map")
+    local s, h, g = pair()
+    local asked = {}
+    local gcoop = g.env.PBZ.coop
+    local join = gcoop.joinPartner
+    gcoop.joinPartner = function(p)
+        asked[#asked + 1] = p == nil and "the host" or "someone named"
+        return join(p)
+    end
+    check(g.env.PBZ.partner.teleport == false, "TP > PARTNER is off, as it is unless chosen")
+    g.env.PBZ.partner.go()
+    s:run(1)
+    check(#asked == 0 and count(g.logs, "TP > PARTNER is off") == 1, "F3 with the host beside you: off is off")
+    h.map = "Map_Other"
+    s:run(6)
+    check(count(g.logs, "your partner is on another map%. F3 takes you there%.") == 1,
+        "the host goes on to another map: the guest's tip says F3 takes them there")
+    g.env.PBZ.partner.go()
+    s:run(1)
+    check(#asked == 1 and asked[1] == "the host" and count(g.logs, "TP > PARTNER is off") == 1,
+        "and F3 asks for the trip to the host, as joining does (" .. #asked .. ")")
+    -- The other way round a host stays: its story is its own to walk.
+    local hasked = 0
+    local hcoop = h.env.PBZ.coop
+    local hjoin = hcoop.joinPartner
+    hcoop.joinPartner = function(p)
+        hasked = hasked + 1
+        return hjoin(p)
+    end
+    h.env.PBZ.partner.go()
+    s:run(1)
+    check(hasked == 0 and count(h.logs, "TP > PARTNER is off") == 1, "a host isn't taken to a guest on another map")
+    check(count(h.logs, "your partner is on another map%.") == 1 and count(h.logs, "F3 takes you there") == 0,
+        "and its tip doesn't say so")
+    allErrors(s)
+end
+
 local function hostDiesFirst()
     part("the host dies first in a boss fight")
     local s, h, g = pair()
@@ -12191,6 +12232,7 @@ return function(print_, scripts)
     hostDiesFirst()
     bossItemsOnce()
     copyCooldown()
+    followToAnotherMap()
     hostDownAtBossDeath()
     guestDownAtBossDeath()
     doorsOpenedBefore()

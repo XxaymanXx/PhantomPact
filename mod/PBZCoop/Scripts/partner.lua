@@ -1,7 +1,8 @@
 -- How your partner is doing, as short tips (the game's ink-bar tip, see status.lua): partner down, partner back,
 -- partner watching a cutscene, and the two of you far apart in the same area.
 -- (From appdoze's PR #5.) A guest goes to the host once, on joining. After that F3 goes to the partner, if TP > PARTNER
--- is on (PartnerTeleport, off unless chosen: it's a lot of power to have on one key).
+-- is on (PartnerTeleport, off unless chosen: it's a lot of power to have on one key); off, it still takes a guest to a
+-- host who's on another map (hostElsewhere).
 -- Each player's death and respawn stay their own game's; there is no revive. Spectating is in coop.lua.
 -- With more than two players each one is watched the same way (EXACG's, PR #11), and the tips say who. F3 goes to the nearest
 -- partner who's up, and a guest's first trip is still to the host.
@@ -34,6 +35,15 @@ return function(api)
     local function fresh()
         return net.enabled and not net.partnerGone and net.target ~= nil and net.lastRemoteAt ~= nil
             and os.clock() - net.lastRemoteAt <= FRESH_S
+    end
+
+    -- The host on another map than this guest: F3 takes a guest there whatever TP > PARTNER says, as joining does. (Off,
+    -- which is the host's choice for everyone, a guest left behind as the host went on in the story had no way after it
+    -- but to leave and join again, and the tip only said "on another map". A host isn't taken to a guest's map: its story
+    -- is its own to walk. On one map off stays off.)
+    local function hostElsewhere()
+        local t = net.target
+        return not coop.isHost() and fresh() and t.Map ~= nil and net.localMap ~= nil and t.Map ~= net.localMap
     end
 
     local function checkPlayer(p)
@@ -161,7 +171,8 @@ return function(api)
         -- Another map: the ghost hides, so this says why. (Two saves can be far apart in the story.)
         local otherMap = t.Map ~= nil and net.localMap ~= nil and t.Map ~= net.localMap
         if otherMap and not partner.otherMap then
-            tip("map", "your partner is on another map." .. (partner.teleport and " F3 takes you there." or ""))
+            tip("map", "your partner is on another map."
+                .. ((partner.teleport or hostElsewhere()) and " F3 takes you there." or ""))
         end
         partner.otherMap = otherMap
         -- Far apart in the same area: one tip each time you drift apart.
@@ -211,6 +222,14 @@ return function(api)
             return
         end
         if not partner.teleport then
+            if hostElsewhere() then
+                local why = coop.joinPartner(nil)       -- (nobody named: the host)
+                if why then
+                    api.status.lastShown.join = nil
+                    tip("join", why)
+                end
+                return
+            end
             tip("join", "TP > PARTNER is off. Turn it on in MORE (F5).")
             return
         end
