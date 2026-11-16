@@ -3056,6 +3056,45 @@ local function doorsOpenedBefore()
     allErrors(s)
 end
 
+-- A door of the game's own kind (BP_BlockBase: single and double doors, block gates) as the bench found it, 11-16: open
+-- is its own DoorOpen, and neither a player's opening nor the word's own call (SwitchWithoutPlaySequence) sets the
+-- switch's CurSwitchState, the one thing the mod looked at. The key door of Xigu, opened by the guest with its key, the
+-- host 4 m off: never told, and shut in the host's world.
+local function doorsOfTheGames()
+    part("a door of the game's own kind")
+    local s, h, g = pair()
+    local function door(pc, name)
+        local d = Fake.switch(pc, name, 330.0, 0.0, 100.0)
+        Fake.put(d, "DoorOpen", false)
+        Fake.put(d, "SwitchWithoutPlaySequence", function(self) Fake.put(self, "DoorOpen", true) end)
+        return d
+    end
+    local KEY, GATE = "BP_SingleDoor_Poverty_C_UAID_3", "BP_Block_Gate_C_UAID_4"
+    local hostDoor, guestDoor = door(h, KEY), door(g, KEY)
+    local hostGate, guestGate = door(h, GATE), door(g, GATE)
+    s:run(3)
+    Fake.put(guestDoor, "DoorOpen", true)           -- (the guest opens it with its key)
+    s:run(3)
+    check(count(g.sent, "^E SWO " .. KEY .. "$") == 1, "a door the guest opens with its key is told ("
+        .. count(g.sent, "^E SWO " .. KEY .. "$") .. ")")
+    check(field(hostDoor, "DoorOpen") == true and field(hostDoor, "CurSwitchState") == false,
+        "and opens in the host's world, its CurSwitchState false there as in the game")
+    check(count(h.sent, "^E SWO " .. KEY .. "$") == 0, "which doesn't take that for an opening of its own")
+    Fake.put(hostGate, "DoorOpen", true)            -- (and a gate the host opens)
+    s:run(3)
+    check(field(guestGate, "DoorOpen") == true and count(h.sent, "^E SWO " .. GATE .. "$") == 1,
+        "a gate the host opens is open in the guest's world")
+    s:run(22)
+    local named = 0
+    for _, line in ipairs(h.sent) do
+        if line:find("^E SWO ") and line:find(KEY, 1, true) and line:find(GATE, 1, true) then
+            named = named + 1
+        end
+    end
+    check(named >= 1, "and the host names both again now and then, the one opened by word too, for one who comes later")
+    allErrors(s)
+end
+
 -- Point 6 of a report on 1.7.1 (three players): "unless we're near each other (like within 75m), bells and certain things
 -- don't sync". The game loads a level's things only around the player: a chain or a lever another player opened far off
 -- wasn't there to open at the word. The chain was let go at once, the lever two minutes on, and a guest on another map at
@@ -12328,6 +12367,7 @@ return function(print_, scripts)
     hostDownAtBossDeath()
     guestDownAtBossDeath()
     doorsOpenedBefore()
+    doorsOfTheGames()
     farThings()
     farThingsKept()
     guestBells()
