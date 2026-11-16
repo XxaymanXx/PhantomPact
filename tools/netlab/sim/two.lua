@@ -152,10 +152,17 @@ local function story(scripts, extraIni)
     return s
 end
 
--- Where each version sits on disk is the one thing allowed to differ.
+-- Where each version sits on disk is the one thing allowed to differ, and what's meant to: each such line is taken out of
+-- both versions before they're compared, with its reason. (Left to differ, the comparison stopped at it and the rest of
+-- that log went unread.)
+--   299: a guest whose host is on another map is told F3 takes them there, TP > PARTNER on or off.
+local MEANT = { { " is on another map%. F3 takes you there%.$", " is on another map." } }
 local function same(a, b, oldRoot, newRoot)
     if a == nil or b == nil then
         return a == b
+    end
+    for _, m in ipairs(MEANT) do
+        a, b = a:gsub(m[1], m[2]), b:gsub(m[1], m[2])
     end
     return a:gsub(oldRoot, "ROOT", 1) == b:gsub(newRoot, "ROOT", 1)
 end
