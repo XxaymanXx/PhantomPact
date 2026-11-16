@@ -752,6 +752,12 @@ local function guestRunsItsBoss()
     check(brain(onH) == true and brain(onG) == false, "its AI back on the host, the guest's copy following again")
     check(math.abs(select(1, Fake.health(onH)) - (left - 600)) < 2,
         "with the health the guest's game had left, the host's blow off it: " .. tostring(select(1, Fake.health(onH))))
+    -- (Scaled once: the copy the host held had the guest's numbers, scaled there, and the host scaled it again as it took
+    -- it back: on the bench the elite of Xigu went from 12420 to 18630 at that moment, 225% of its own.)
+    s:run(3)
+    check(select(2, Fake.health(onH)) == 7500 and select(2, Fake.health(onG)) == 7500,
+        string.format("and the most health it had: scaled once, in both worlds (%s, %s)", tostring(select(2, Fake.health(onH))),
+            tostring(select(2, Fake.health(onG)))))
     -- (On the bench the fight's own start and the mod's crossed as it changed hands, and the boss stood beside the host with
     -- its brain stopped till it was started by hand: looked at for a while after.)
     field(field(onH, "Controller"), "BrainComponent"):StopLogic("the fight's own start")
@@ -2174,6 +2180,58 @@ end
 
 -- A player report (11-08): with two players, a host who dies in a boss fight before the guest doesn't watch the guest and
 -- wait, as a guest who dies first does.
+-- A boss's items reach each player once, whoever's blow it was. (The host's game pays the host and shares what it gave
+-- (T); a boss's items were told to the guest by name as well (I), from the days before shares: one from each.)
+local function bossItemsOnce()
+    part("a boss's items, once each")
+    local ITEM = "Weapon_Material_09"
+    local s, h, g = pair()
+    bossStart(s)
+    Fake.put(Session.enemyOn(h, "boss"), "lootItems", { { ITEM, 1 } })
+    Fake.put(Session.enemyOn(g, "boss"), "lootItems", { { ITEM, 1 } })
+    s:run(2)
+    local h0, g0 = Session.items(h, ITEM), Session.items(g, ITEM)
+    swing(g, Session.enemyOn(g, "boss"), 1)         -- (onto its floor: the guest's killing blow)
+    s:run(25)
+    check(field(Session.enemyOn(h, "boss"), "dead") == true and Session.items(h, ITEM) - h0 == 1 and Session.items(g, ITEM) - g0 == 1,
+        string.format("the guest's killing blow on the host's boss: its item once each (host %d, guest %d)",
+            Session.items(h, ITEM) - h0, Session.items(g, ITEM) - g0))
+    allErrors(s)
+    local t, th, tg = pair()
+    bossStart(t)
+    Fake.put(Session.enemyOn(th, "boss"), "lootItems", { { ITEM, 1 } })
+    Fake.put(Session.enemyOn(tg, "boss"), "lootItems", { { ITEM, 1 } })
+    t:run(2)
+    local th0, tg0 = Session.items(th, ITEM), Session.items(tg, ITEM)
+    local own = Session.enemyOn(th, "boss")
+    swing(th, own, 0)                                -- (the host's own killing blow, and what the game gives for it)
+    Fake.put(own, "dead", true)
+    th.bag:AddPropsToBackPack(1, th.env.FName(ITEM), true)
+    t:run(25)
+    check(Session.items(th, ITEM) - th0 == 1 and Session.items(tg, ITEM) - tg0 == 1,
+        string.format("the host's own kill of its boss: its item once each (host %d, guest %d)",
+            Session.items(th, ITEM) - th0, Session.items(tg, ITEM) - tg0))
+    allErrors(t)
+    -- Its dust too: the guest's copy dies the game's own death at the host's K, and that paid the guest the copy's own on
+    -- top of the share of the host's (the bench, 11-15), which then went back to the host as the guest's earnings.
+    local u, uh, ug = pair()
+    bossStart(u)
+    Fake.put(Session.enemyOn(uh, "boss"), "dustLoot", 700)
+    Fake.put(Session.enemyOn(ug, "boss"), "dustLoot", 700)
+    ug.paysAtLevelZero = true
+    u:run(2)
+    local uh0, ug0 = Session.dust(uh), Session.dust(ug)
+    local theirs = Session.enemyOn(uh, "boss")
+    swing(uh, theirs, 0)
+    Fake.put(theirs, "dead", true)
+    uh.pawn:ChangeDustNumInternal(700)              -- (what the game pays the host for its kill)
+    u:run(25)
+    check(Session.dust(uh) - uh0 == 700 and Session.dust(ug) - ug0 == 700,
+        string.format("the host's kill of its boss: its dust once each (host %d, guest %d)",
+            Session.dust(uh) - uh0, Session.dust(ug) - ug0))
+    allErrors(u)
+end
+
 local function hostDiesFirst()
     part("the host dies first in a boss fight")
     local s, h, g = pair()
@@ -11684,6 +11742,7 @@ return function(print_, scripts)
     holding()
     holdingForTwo()
     hostDiesFirst()
+    bossItemsOnce()
     hostDownAtBossDeath()
     doorsOpenedBefore()
     farThings()

@@ -2114,7 +2114,8 @@ function Fake.new(id, scripts, ini, link)
                     if down and pc.deathPaysDown == false then
                         return
                     end
-                    if dust > 0 and level > 0 and pc.pawn then
+                    -- (pc.paysAtLevelZero: as the real game did on the bench, 11-15, a boss's copy paying its dust all the same.)
+                    if dust > 0 and (level > 0 or pc.paysAtLevelZero) and pc.pawn then
                         pc.pawn:ChangeDustNumInternal(dust)
                     end
                     -- Its items (lootItems: { { id, count } }, with the card) and the bell its death brings (bellOnDeath).

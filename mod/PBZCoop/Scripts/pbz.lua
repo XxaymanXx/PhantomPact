@@ -1337,6 +1337,9 @@ return function(api)
         -- floor, bar or boss record, it fought on unknown as a boss, and its real death later paid nothing.)
         local level0, floor0 = nil, game.healthFloor(actor)
         pcall(function() level0 = actor.AttributeSetBase.Level.CurrentValue end)
+        -- (What its own death would pay at its own level: game.copyPay, below.)
+        local ownDust = nil
+        pcall(function() ownDust = (game.rollLoot(actor)) end)
         game.hideHealthBar(actor)
         pcall(function()
             local level = actor.AttributeSetBase.Level
@@ -1351,6 +1354,12 @@ return function(api)
         local hp = game.getHealth(actor)
         if ok and hp ~= nil and hp <= 0 then
             forgetBoss(actor)
+            -- (A copy's own death can pay this player its dust all the same, its level at 0 or not: on the bench a guest
+            -- had its copy's own on top of the share of the host's. The death was the partner's, and their share of it
+            -- comes by C: a rise in the wallet within COPY_PAY_S is taken back, up to this much, once: watchCurrency.)
+            if type(ownDust) == "number" and ownDust > 0 then
+                game.copyPay = { dust = ownDust, untilAt = os.clock() + game.COPY_PAY_S }
+            end
             return true
         end
         if boss then
@@ -4923,6 +4932,7 @@ return function(api)
     -- the saved amount back) or while down isn't, and the count starts again from there. Each was sent whole
     -- as a gain and paid to everyone, over and over (player report 11-09: three players, an hour, 600k and 1.5m).
     game.dustWatch = { addr = nil, quietUntil = 0, QUIET_S = 10, AFTER_DOWN_S = 5 }
+    game.COPY_PAY_S = 8
     function game.watchCurrency(pawn, sendEvent)
         local d = dust(pawn)
         if d == nil then
@@ -4943,6 +4953,19 @@ return function(api)
         local still = down or now < w.quietUntil
         if lastDust ~= nil and not still then
             local gained = d - lastDust - syncedDust
+            -- (A copy's own pay for a death that was the partner's: back out of the wallet, and not shared on. killForReal.)
+            local pay = game.copyPay
+            if pay and now > pay.untilAt then
+                game.copyPay, pay = nil, nil
+            end
+            if pay and gained > 0 then
+                local back = math.min(gained, pay.dust)
+                game.copyPay = nil
+                if pcall(function() pawn:ChangeDustNumInternal(-back) end) then
+                    gained, d = gained - back, d - back
+                    log("A copy's own dust for the partner's kill taken back: " .. math.floor(back) .. " (their share of it comes).")
+                end
+            end
             if gained > 0 then
                 sendEvent("C", gained)
             end

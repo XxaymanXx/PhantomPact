@@ -96,15 +96,18 @@ return function(api)
     end
     -- (Only a body below what it was given: one the game raises itself is still the one scaled.)
     local function same(e, addr, name)
+        -- (Never, on the host, one the guest's game runs: its copy here takes the guest's numbers, scaled there. Read as a new
+        -- body it was made tougher again each pass while the bar jumped, the log saying "1 enemy at 150% health" every second
+        -- (the bench, 11-16); and one that came to this world already the guest's to run, a boss brought out as the host
+        -- walked up, was scaled here on top and stood at 225% once the host took it back (12420 to 18630 on the bench).
+        -- Known by its hold here (coop's heldAlive: on a host, only ever a copy the guest's game runs), and kept as scaled
+        -- at what it has: by the guest's list it never was, that goes by the enemy's id and this file by the actor's name.)
+        if api.coop.isHost() and net.heldAlive and net.heldAlive[addr] then
+            scaled[addr], scaledMax[addr] = name, maxOf(e)
+            return true
+        end
         if scaled[addr] ~= name then
             return false
-        end
-        -- (Nor, on the host, one the guest's game runs: its copy here takes the guest's Health_Max, and read as a new body it
-        -- was made tougher again each pass while the bar jumped. Known by its hold here (coop's heldAlive: on a host, only ever
-        -- a copy the guest's game runs). By the guest's list it never was: that goes by the enemy's id and this file by
-        -- the actor's name, and the log said "1 enemy at 150% health" every second: the bench, 11-16.)
-        if api.coop.isHost() and net.heldAlive and net.heldAlive[addr] then
-            return true
         end
         local was, now = scaledMax[addr], maxOf(e)
         return not (was and now and now < was * 0.99)

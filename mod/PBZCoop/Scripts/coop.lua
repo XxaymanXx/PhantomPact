@@ -1072,10 +1072,13 @@ return function(api)
                 local owed = net.deadSince ~= nil and game.downBoss and game.downBoss(name, boss)
                 if (boss or owed) and not paidThere and game.rollLoot and net.bossPaid[addr] ~= body then
                     net.bossPaid[addr] = body
-                    -- The game paid the host. A boss's items are the client's too.
+                    -- The game paid the host. A boss's items are the client's too: by the share of what the game gave
+                    -- (T). Told by name as well only when owed, this player down (see handlers.D).
                     local bossDust, items = game.rollLoot(actor)
                     local paid = {}
-                    sendItems(name, items, paid)
+                    if owed then
+                        sendItems(name, items, paid)
+                    end
                     if #paid > 0 then
                         log("Boss items for your partner too: " .. table.concat(paid, ", ") .. ".")
                     end
@@ -2727,10 +2730,14 @@ return function(api)
                     local owed = net.deadSince ~= nil and game.downBoss and game.downBoss(name, boss)
                     if real and (boss or owed) and game.rollLoot then
                         -- The game ran the whole death and paid this player, as for their own blow. A boss's items are
-                        -- the client's too.
+                        -- the client's too: by the share of what the game gave here (T), as any kill's since 1.6.7. Told
+                        -- by name as well (I), as before there were shares, the guest had each twice. Only one owed,
+                        -- this player down, is still told: its pay is kept here till they're up.
                         local bossDust, items = game.rollLoot(actor)
                         local paid = {}
-                        sendItems(name, items, paid)
+                        if owed then
+                            sendItems(name, items, paid)
+                        end
                         if #paid > 0 then
                             log("Boss items for your partner too: " .. table.concat(paid, ", ") .. ".")
                         end
