@@ -4270,20 +4270,32 @@ return function(api)
         local gourd = game.gourdInfo(pawn)
         if gourd then
             pcall(function()
-                local max = gourd.MaxTime
-                local bp = game.backpackOf(pawn)
-                local okT, total = pcall(function()
-                    return bp:GetMedicineTotalMaxUsage(FName(bp.BottomMedicineID:ToString()))
-                end)
-                if okT and type(total) == "number" and type(max) == "number" and total > max then
-                    max = total
-                end
+                local max = game.gourdMost(pawn, gourd)
                 if type(max) == "number" and gourd.CurrentTime < max then
                     gourd:SetCurrentTime(max)
                     gourd:SetDisplayTime(max)
                 end
             end)
         end
+    end
+
+    -- The most the gourd holds as the game counts it: its own size, or with the extra drinks a skill node or a talisman
+    -- gives (GetMedicineTotalMaxUsage), whichever is more. nil if it can't be read. (Local co-op's player 2 has that many
+    -- charges of their own: by the gourd's own size they had fewer than player 1 after every rest.)
+    function game.gourdMost(pawn, gourd)
+        gourd = gourd or game.gourdInfo(pawn)
+        local okM, max = pcall(function() return gourd.MaxTime end)
+        if not (okM and type(max) == "number") then
+            return nil
+        end
+        local okT, total = pcall(function()
+            local bp = game.backpackOf(pawn)
+            return bp:GetMedicineTotalMaxUsage(FName(bp.BottomMedicineID:ToString()))
+        end)
+        if okT and type(total) == "number" and total > max then
+            max = total
+        end
+        return max
     end
 
     -- This player's own health bar, told by hand what the health is now and shown a moment, as for a real change (the HUD's

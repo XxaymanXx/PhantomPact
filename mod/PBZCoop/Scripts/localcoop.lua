@@ -3472,11 +3472,17 @@ return function(api)
     end
     -- Player 2 has gourd charges of its own, as many as the gourd holds, back to full at every bell rest. The game
     -- takes each drink out of the one shared gourd, so that charge is put back and one of player 2's is spent.
+    -- (As many as the gourd holds as the game counts it, the extra drinks a skill node or a talisman gives counted in
+    -- (game.gourdMost): by the gourd's own size, player 2 had fewer than player 1 after every rest.)
     local function refillPlayer2(pawn)
         local info = gourdInfo(pawn)
         if info then
-            local okM, max = pcall(function() return info.MaxTime end)
-            p2Charges = okM and type(max) == "number" and max or p2Charges
+            local max = game.gourdMost and game.gourdMost(pawn, info)
+            if max == nil then
+                local okM, own = pcall(function() return info.MaxTime end)
+                max = okM and own or nil
+            end
+            p2Charges = type(max) == "number" and max or p2Charges
         end
     end
     local function spendPlayer2Charge(pawn)
@@ -3495,7 +3501,7 @@ return function(api)
                     return                  -- a map change: pcall can't catch touching what it took away
                 end
                 pcall(function()
-                    local max = info.MaxTime
+                    local max = (game.gourdMost and game.gourdMost(pawn, info)) or info.MaxTime
                     local want = math.min(V.gourdKeep, type(max) == "number" and max or V.gourdKeep)
                     if info.CurrentTime < want then
                         info:SetCurrentTime(want)

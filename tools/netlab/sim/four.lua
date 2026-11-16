@@ -8379,6 +8379,19 @@ local function localGame(extra)
     return s, pc, pc.env.PBZ.state
 end
 
+-- Local co-op reads the co-op difficulty as the online roles do: unread, it was Hellwalker whatever the ini said.
+local function localDifficulty()
+    part("local co-op: the co-op difficulty")
+    local s, pc = localGame()
+    s:run(3)
+    check(pc.difficulty == 3, "as the ini ships: Hellwalker while the two play (" .. tostring(pc.difficulty) .. ")")
+    allErrors(s)
+    local t, tpc = localGame("CoopDifficulty = Off\n")
+    t:run(3)
+    check(tpc.difficulty == 2, "CoopDifficulty = Off: the player's own Pathbreaker stays (" .. tostring(tpc.difficulty) .. ")")
+    allErrors(t)
+end
+
 -- Player 2 sees what player 1 sees, by the game's own rules and widgets.
 local function localScreen()
     part("player 2's screen")
@@ -8482,7 +8495,10 @@ local function localScreen()
     d:run(5)
     check(Fake.health(body2) == 700 and field(dpc.gourd, "CurrentTime") == 1, "the D-pad's other item isn't the gourd: nothing's put back")
     Fake.drink(dpc, body2)
+    -- (The gourd holds 2 and a skill node adds a drink: 3 as the game counts it, and so many are player 2's own.)
+    Fake.setHealth(body2, 300)
     Fake.drink(dpc, body2)
+    check(Fake.health(body2) == 700, "player 2 has as many charges as the gourd holds with its extra drinks: a third")
     Fake.setHealth(body2, 300)
     Fake.drink(dpc, body2)
     check(Fake.health(body2) == 300, "their own charges gone, there's no drink")
@@ -11646,6 +11662,7 @@ return function(print_, scripts)
     whatsLeftOfAPartner()
     offAndBack()
     localPlay()
+    localDifficulty()
     padHold()
     localScreen()
     localButtons()

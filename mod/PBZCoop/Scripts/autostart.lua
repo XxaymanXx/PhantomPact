@@ -105,6 +105,11 @@ return function(api)
     os.remove(modDir() .. "pads_want.txt")      -- left by a crash with a panel open: main.dll would think one still is
     if role == "local" then
         api.localcoop.start(tonumber(settings.joysticks) or 2, tonumber(settings.monitors) or 1)
+        -- (The co-op difficulty, as the online roles read it once linked: unread here, local co-op was Hellwalker whatever
+        -- the ini said, Off too.)
+        if api.difficulty and settings.coopdifficulty and settings.coopdifficulty ~= "" then
+            api.difficulty.command(settings.coopdifficulty)
+        end
         return
     end
     -- What stops co-op from starting. The player reads it in the game, once in the world: a log line is easy to miss.
