@@ -970,6 +970,8 @@ local function aPartysBystander()
     s:run(6)
     check(brain(bossC) == false and net(c).toldFighting ~= true and count(c.sent, "^E F 1") == 0,
         "the game's own bar on their held copy: still held, and still in no fight")
+    check(c.env.PBZ.game.isMirrorBar(bossC) == true,
+        "and that bar is the mirror of the partner's fight again (left the game's own, the copy was theirs the moment they stood nearest)")
     c.hudLayout:UnRegisterBossHPBar(bossC)          -- (and takes it down again, the copy stopped once more)
     s:run(1)
     local left = select(1, Fake.health(bossB))
@@ -1005,6 +1007,25 @@ local function aPartysBystander()
     s:run(3)
     check(brain(thugC) == true, "(a partner comes by it and they step back to 42 m: theirs still)")
     allErrors(s)
+
+    -- The same bar before the fighter's own fight is told (the bench: the watcher's came first, the second time round):
+    -- no partner's fight to go by yet, and the watcher's copy woke as "their own fight". Whose it is goes by who's
+    -- nearest it.
+    local t = party(list)
+    local th, tb, tc = t.pcs[1], t.pcs[3], t.pcs[4]
+    Session.moveTo(th, -6000, 0)
+    Session.moveTo(t.pcs[2], -5800, 100)
+    Session.moveTo(tb, 2100, 2900)     -- by the boss, its fight not begun
+    Session.moveTo(tc, 6300, 3000)     -- the watcher, 43 m off
+    t:run(3)
+    local early = Session.enemyOn(tc, "boss")
+    tc.hudLayout:RegisterBossHPBar(early)
+    t:run(6)
+    check(line(tc, "boss").Asleep == true and brain(early) == false and floor(early) == 1
+        and net(tc).toldFighting ~= true and count(tc.sent, "^E F 1") == 0,
+        "the game's own bar on the watcher's copy before the fighter's fight is told: held all the same, in no fight")
+    check(not tc.env.PBZ.game.bossFightActive(), "and with no partner's fight to mirror, that bar is taken down")
+    allErrors(t)
 end
 
 -- A party's guest far from an enemy the host's lines tell of (another guest is by it) and that its own world hasn't:

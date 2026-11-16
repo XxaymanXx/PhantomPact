@@ -2134,6 +2134,21 @@ return function(api)
         return valid(boss) and mirroredAt[boss:GetAddress()] == true
     end
 
+    -- A bar the game put up itself on a copy this game doesn't run (a party guest's, of one asleep on the host: coop.lua's
+    -- handover.byHere). The game starts a stopped AI again by itself, and roused in that moment the copy has a fight of
+    -- the game's own begun for it. The mirror of a partner's fight again, or with no such fight on, taken down. Left up,
+    -- it made the copy that player's own the moment they stood nearest it (the fighter down, back at a bell): the bench.
+    function game.mirrorBar(boss, partners)
+        if not valid(boss) or not game.bossAt(boss:GetAddress(), boss) then
+            return
+        end
+        if partners then
+            mirroredAt[boss:GetAddress()] = true
+        else
+            game.hideBossBar(boss)
+        end
+    end
+
     -- This world's enemies are all new ones (this player's own respawn): no bar here is one shown for another's fight. The
     -- marks go by address and only a bar's own end took one off, so a later boss on a marked address, in a fight of this
     -- player's own, was taken for a copy: no fight told, and the partner's game ended its side.
