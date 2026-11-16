@@ -198,9 +198,18 @@ return function(api)
         return true
     end
 
+    -- (A door of the game's, BP_BlockBase and what's made of it: single and double doors, block gates. Open is its own
+    -- DoorOpen: a player's opening never sets the switch's CurSwitchState, and neither does the word's own call. So a
+    -- door one player opened was never told, and stayed shut in the partner's world: on the bench, 11-16, the key door
+    -- of Xigu opened by the guest with its key, the host 4 m off and its door shut; and one opened here by word read
+    -- shut, so the host never named it again to a guest who came later.)
     local function isOpen(s)
         local ok, v = pcall(function() return s.CurSwitchState end)
-        return ok and v == true
+        if ok and v == true then
+            return true
+        end
+        local okDoor, door = pcall(function() return s.DoorOpen end)
+        return okDoor and door == true
     end
 
     -- What's open in the host's world goes out again now and then, not only as it opens (player report 11-09): a door the
