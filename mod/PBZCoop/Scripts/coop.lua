@@ -1879,8 +1879,13 @@ return function(api)
     -- game's own 45 m, and past them while it's still fighting here. Any other copy is held and follows the host's, as
     -- before 277. (No "within 45 m with nobody nearer it": tried, and on the bench the copy of a watcher 42 m off woke
     -- all the same as the fighter stepped in, their figure hidden for that moment.)
+    -- A held copy left in a fight's state from before is put back to idle, the game's own way (game.calmCopy): the game
+    -- starts a stopped AI again by itself, and in that moment such a copy took its own player on, bar and all, 42 m off
+    -- (the bench: the elite's three, who had fought each other as the world loaded). And its own bar here says "in its
+    -- fight" only for a copy that's this game's already.
     handover.BY_CM, handover.BY_FAR_CM = 3000, 4500
     handover.live = {}          -- guest: enemy address -> its name, while this game runs its own copy of it
+    handover.calm = {}          -- guest: enemy address -> { at: when a held copy's state is looked at next, n: times calmed }
     function handover.byHere(name, actor, addr)
         local was = handover.live[addr] == name
         local near = reach.near[addr]
@@ -1888,10 +1893,28 @@ return function(api)
         if near and net.localLoc then
             local at = near.loc
             local gap = handover.dist(at.X, at.Y, at.Z, net.localLoc)
-            yes = gap <= (was and handover.BY_FAR_CM or handover.BY_CM) or handover.hostIn(name, addr, gap)
-            if not yes and was then
+            yes = gap <= (was and handover.BY_FAR_CM or handover.BY_CM) or net.joinedBoss == name
+                or (was and handover.hostIn(name, addr, gap))
+            local now, c = os.clock(), handover.calm[addr]
+            if not yes and (was or now >= (c and c.at or 0)) then
                 local state = game.aiState and game.aiState(actor)
-                yes = state ~= nil and state:find("Combat", 1, true) ~= nil
+                local fighting = state ~= nil and state:find("Combat", 1, true) ~= nil
+                if was then
+                    yes = fighting      -- (past the 45 m and still fighting here: the game's to end)
+                else
+                    c = c or { n = 0 }
+                    handover.calm[addr] = c
+                    c.at = now + 1.0
+                    if fighting and game.calmCopy and game.calmCopy(actor) then
+                        -- (Less and less often: one with a fight of its own in this world, its fellows', is in it again
+                        -- at once, and was calmed and said so every second.)
+                        c.n = c.n + 1
+                        c.at = now + math.min(30, 2 ^ c.n)
+                        if c.n == 1 then
+                            log(name .. " is held here in a fight's state from before: put back to idle.")
+                        end
+                    end
+                end
             end
         end
         handover.live[addr] = yes and name or nil
@@ -2116,7 +2139,7 @@ return function(api)
         end
         net.guestRuns, net.guestLines, net.mine = {}, {}, {}
         handover.seen, handover.since, handover.retryAt, handover.on, handover.woken = {}, {}, {}, false, {}
-        handover.asleep, handover.live = {}, {}
+        handover.asleep, handover.live, handover.calm = {}, {}, {}
     end
 
     local function startHostRound(now)
