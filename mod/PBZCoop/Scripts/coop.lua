@@ -1583,8 +1583,8 @@ return function(api)
                 -- (Not one asleep in the host's world with a guest by it, in a party: this game runs its own copy of
                 -- that meanwhile, awake for this player as the game means it, neither held nor steered, and its death
                 -- here is this game's own to have and to tell (GK). The next round lets go of the hold and the steering
-                -- it had. handover.asleepHere.)
-                local asleep = r.Asleep == true
+                -- it had. handover.asleepHere. And only for a player who's by it: handover.byHere.)
+                local asleep = r.Asleep == true and handover.byHere(name, actor, addr)
                 if asleep and not handover.woken[addr] then
                     handover.wake(name, addr)
                 end
@@ -1628,8 +1628,12 @@ return function(api)
                     game.setHealth(actor, want)
                     hp = want
                 end
+                -- (Or full there and not here, by less than that: a lost fight started over, 305, with a blow or two of
+                -- this player's on its copy, which stood 3% down for good while the host's was whole. The bench of 11-16.
+                -- Not while a killing blow of theirs waits for its answer.)
                 if game.setHealth and not own and r.Hp ~= nil and hp ~= nil and r.MaxHp
-                    and r.Hp > hp + math.max(1, r.MaxHp * 0.05) then
+                    and (r.Hp > hp + math.max(1, r.MaxHp * 0.05)
+                        or (r.Hp >= r.MaxHp - 0.5 and r.Hp > hp + 1 and not net.lethalPending[name])) then
                     net.healTicks[name] = net.healTicks[name] or os.clock()
                     if os.clock() - net.healTicks[name] >= HEAL_TICKS then
                         log(string.format("%s healed on the host (%.0f -> %.0f): following.", name, hp, r.Hp))
@@ -1679,7 +1683,7 @@ return function(api)
             -- by it fights a copy of its own, as a guest alone does, and the first to kill it kills it for everyone.
             -- (Only one this player hit: a copy can read as dead for other reasons, and this would kill it everywhere. Or one
             -- this game ran for the host: its death was this game's own.)
-            net.guestKillSent[name] = true
+            net.guestKillSent[name] = "own"     -- (this game's own kill: see handlers.K)
             sendEvent("GK", name)
         end
     end
@@ -1858,6 +1862,43 @@ return function(api)
     end
     function handover.wake(name, addr)
         handover.woken[addr] = { name = name, untilAt = os.clock() + handover.WAKE_S, stopped = 0 }
+    end
+
+    -- Guest of a party: one asleep on the host is this game's to run a copy of for a player who's by it. Every guest with
+    -- it loaded ran one, and a partner's figure beside a copy was enough to rouse it: a guest fought the elite of Xigu
+    -- alone, and the copy of a third player 43 m off at the bell was in a fight of the game's own with that player
+    -- within 3 s. They counted as in the boss fight (the fighter, down, waited on them to respawn, and the boss didn't
+    -- start over: 305), and five minutes on it had walked up to them. The bench of 11-16, three copies. By it: within 30 m;
+    -- or within the game's own 45 m with no partner nearer it, as a player alone has one that far wake; or in its fight
+    -- (walked in, its own bar here, a blow from near it). One this game runs stays its own within those 45 m, and past
+    -- them while it's still fighting here. Any other copy is held and follows the host's, as before 277.
+    handover.BY_CM, handover.BY_FAR_CM = 3000, 4500
+    handover.live = {}          -- guest: enemy address -> its name, while this game runs its own copy of it
+    function handover.byHere(name, actor, addr)
+        local was = handover.live[addr] == name
+        local near = reach.near[addr]
+        local yes = was
+        if near and net.localLoc then
+            local at = near.loc
+            local gap = handover.dist(at.X, at.Y, at.Z, net.localLoc)
+            yes = gap <= handover.BY_CM or handover.hostIn(name, addr, gap)
+            if not yes and gap <= handover.BY_FAR_CM then
+                yes = true
+                for _, p in ipairs(was and {} or partners()) do
+                    local t = p.target
+                    if t ~= nil and not p.ghostHidden and not p.partnerGone and sameMap(t)
+                        and handover.dist(at.X, at.Y, at.Z, t) < gap then
+                        yes = false         -- (a partner is the one by it)
+                        break
+                    end
+                end
+            elseif not yes and was then
+                local state = game.aiState and game.aiState(actor)
+                yes = state ~= nil and state:find("Combat", 1, true) ~= nil
+            end
+        end
+        handover.live[addr] = yes and name or nil
+        return yes
     end
     function handover.stayAwake()
         local now = os.clock()
@@ -2078,7 +2119,7 @@ return function(api)
         end
         net.guestRuns, net.guestLines, net.mine = {}, {}, {}
         handover.seen, handover.since, handover.retryAt, handover.on, handover.woken = {}, {}, {}, false, {}
-        handover.asleep = {}
+        handover.asleep, handover.live = {}, {}
     end
 
     local function startHostRound(now)
@@ -2133,7 +2174,8 @@ return function(api)
     -- fight (spawnBoss).
     local bring = {
         AFTER_S = 2.0,              -- unpaired this long first: a copy may just be loading in
-        AGAIN_S = 10.0,             -- and asked again at most this often
+        AGAIN_S = 10.0,             -- and asked again at most this often, twice as long each time
+        AGAIN_MOST = 30,            -- up to this many times as long (5 minutes)
         PER_ROUND = 2,              -- spawns cost a frame each
     }
     function bring.missing(now)
@@ -2214,17 +2256,25 @@ return function(api)
                 end
             end
         end
+        -- (Within this player's own reach only, where a copy is paired with the host's and held from its first turn. It was
+        -- 120 m: one further off than the 60 m a copy is paired within read as missing for good, and was asked for every
+        -- 10 s. In a party the host's lines reach every guest, so a guest had the camp another guest stood by, 95 m off,
+        -- brought back again and again; on the bench, 11-16, three copies, each one brought back there was dead a few
+        -- seconds on and paid that player its dust, shared on: 330 to everyone every 20 s, for ten minutes. And asked again
+        -- less and less often: whatever takes a copy away, it's no way to dust.)
         for name, r in pairs(net.remoteEnemies) do
             if enemyByName[name] == nil and not r.Boss and (r.Hp or 0) > 0 and name:sub(1, 3) == "sp:" and not net.hostKilled[name]
-                and distance(net.localLoc, r) <= PARTNER_REACH_CM then
-                local b = net.bringing[name] or { since = now, askedAt = -1e9 }
+                and r.X ~= nil and inReach(r.X, r.Y, r.Z, net.localLoc) then
+                local b = net.bringing[name] or { since = now, askedAt = -1e9, tries = 0 }
                 net.bringing[name] = b
-                if now - b.since >= bring.AFTER_S and now - b.askedAt >= bring.AGAIN_S and asked < bring.PER_ROUND then
+                local again = bring.AGAIN_S * math.min(2 ^ (b.tries or 0), bring.AGAIN_MOST)
+                if now - b.since >= bring.AFTER_S and now - b.askedAt >= again and asked < bring.PER_ROUND then
                     b.askedAt = now
                     asked = asked + 1
                     local ok, wasDead = game.bringBack(name)
                     if ok then
                         back = back + 1
+                        b.tries = (b.tries or 0) + 1
                         net.broughtBack[name] = wasDead or net.broughtBack[name]
                     end
                 end
@@ -2520,7 +2570,8 @@ return function(api)
         if isHost() and name then
             net.guestKilled[name] = true
         elseif name and net.party then
-            net.guestKillSent[name] = true          -- another guest's kill, of an enemy the host doesn't run: see syncEnemy
+            -- (Another guest's kill, of an enemy the host doesn't run: see syncEnemy. One this game told as well stays its own.)
+            net.guestKillSent[name] = net.guestKillSent[name] or true
             handlers.K(name)
         end
     end
@@ -2672,7 +2723,13 @@ return function(api)
                 end
                 -- (Dead by the game's own word, not only at 0 health: a copy written to 0 never had its death run.)
                 local gameDead = select(2, pcall(function() return actor:IsDead() end)) == true
-                if game.isDead and game.isDead(actor) and not (fought and not quiet and not gameDead and game.killForReal) then
+                -- (Or this game's own kill, told by GK: its death here is the game's own, by this player's blow. A boss
+                -- is a moment into its fall before the game calls it dead, and the host's word back found it "not dead
+                -- yet": its death was run a second time, and its pay, this player's earnings, taken back as a copy's own
+                -- like the host's copy's. Nobody had the boss's dust for a guest's kill: the bench of 11-16, three
+                -- copies, 6600 taken back on the killer's PC and on the host's.)
+                if game.isDead and game.isDead(actor)
+                    and (byGuest == "own" or not (fought and not quiet and not gameDead and game.killForReal)) then
                     -- (Dead here first, by its own death: one this game ran (handover), whose death cut short looked wrong.)
                     log("Host says " .. name .. " died; it's dead here already.")
                 elseif fought and not quiet and game.killForReal then
@@ -3359,6 +3416,7 @@ return function(api)
         restEvent(kind)
         if kind == "death" and net.role == "client" then
             log("You died and respawned: your world refreshed, the host's goes on. Enemies the host already killed stay dead.")
+            handover.live = {}      -- (every enemy here is a new one: none is this game's own to run yet, handover.byHere)
             local again = 0
             for name in pairs(net.hostKilled) do
                 net.pendingDeaths[name] = true

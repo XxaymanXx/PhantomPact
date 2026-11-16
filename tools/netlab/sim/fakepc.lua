@@ -2159,9 +2159,16 @@ function Fake.new(id, scripts, ini, link)
                     if rawget(actor, "__fields").locked then
                         return      -- (a boss between phases: the game won't let it die now)
                     end
+                    -- (One at 0 already and not yet dead is falling, its own death running: the effect starts no second
+                    -- one and pays nothing more. The bench, 11-16: a boss a guest's blow killed, "killed" again 0.1 s on at
+                    -- the host's word, paid once.)
+                    local falling = (Fake.health(actor)) <= 0 and not rawget(actor, "__fields").dead
                     Fake.setHealth(actor, 0)
                     put(actor, "dead", true)
                     put(actor, "realDeath", true)
+                    if falling then
+                        return
+                    end
                     -- (The loot is rolled at the enemy's level: 0 pays nothing.)
                     local set = rawget(actor, "__fields").AttributeSetBase
                     local level = rawget(rawget(set, "__fields").Level, "__fields").CurrentValue

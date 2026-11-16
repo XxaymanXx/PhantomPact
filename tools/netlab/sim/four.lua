@@ -931,6 +931,102 @@ local function asleepOnTheHost()
     allErrors(u)
 end
 
+-- A party's guest who isn't by one asleep on the host runs no copy of it: theirs stays held and follows the host's.
+-- Every guest with it loaded ran one, and a partner's figure beside a copy roused it: a guest fought the elite of Xigu
+-- alone, and a third player 43 m off at the bell was in a fight of the game's own with their copy 3 s on, counted as in
+-- that boss fight (the fighter, down, waited on them, and the boss didn't start over). The bench of 11-16, three copies.
+local function aPartysBystander()
+    part("a party: a guest who isn't by one asleep on the host")
+    local list = {
+        { "boss", "BP_Monster_Boss_C", 2000.0, 3000.0, 100.0, 5000, 400, true },
+        { "thug", THUG, 12000.0, 0.0, 100.0, 600, 100 },
+    }
+    local function brain(e)
+        return field(field(field(e, "Controller"), "BrainComponent"), "running")
+    end
+    local function floor(e)
+        return field(field(field(e, "AttributeSetBase"), "Health_Min"), "CurrentValue")
+    end
+    local function line(pc, name)
+        return net(pc).remoteEnemies["sp:" .. name] or {}
+    end
+    local s = party(list)
+    local h, a, b, c = s.pcs[1], s.pcs[2], s.pcs[3], s.pcs[4]
+    Session.moveTo(h, -6000, 0)        -- the host and a guest 85 m from the boss
+    Session.moveTo(a, -5800, 100)
+    Session.moveTo(b, 2100, 2900)      -- one guest by it
+    Session.moveTo(c, 6300, 3000)      -- and one 43 m from it, at a bell
+    s:run(3)
+    local bossH, bossB, bossC = Session.enemyOn(h, "boss"), Session.enemyOn(b, "boss"), Session.enemyOn(c, "boss")
+    b.hudLayout:RegisterBossHPBar(bossB)
+    s:run(3)
+    check(line(c, "boss").Asleep == true and brain(bossB) == true and floor(bossB) == 0,
+        "a guest's fight with a boss asleep on the host: the fighter's own copy, awake")
+    check(brain(bossC) == false and floor(bossC) == 1,
+        "a third player 43 m off, the fighter nearer it: their copy stays held")
+    check(net(c).toldFighting ~= true and count(c.sent, "^E F 1") == 0, "and they're in no fight")
+    local left = select(1, Fake.health(bossB))
+    swing(b, bossB, left - 400)
+    s:run(2)
+    check(math.abs(select(1, Fake.health(bossH)) - (left - 400)) < 2
+        and math.abs(select(1, Fake.health(bossC)) - (left - 400)) < 2,
+        "their copy has what the host's has left (" .. select(1, Fake.health(bossC)) .. ")")
+    Session.moveTo(c, 4500, 3000)
+    s:run(3)
+    check(brain(bossC) == true and floor(bossC) == 0, "they walk up to 25 m from it: a copy of their own, awake")
+    Session.moveTo(c, 6300, 3000)
+    s:run(3)
+    check(brain(bossC) == true and floor(bossC) == 0, "back at 43 m: theirs still (the game's own 45 m)")
+    Session.moveTo(c, 7200, 3000)
+    s:run(3)
+    check(brain(bossC) == false and floor(bossC) == 1, "at 52 m and in no fight with it: held again, following the host's")
+    -- Nobody nearer: a guest alone has one within the game's 45 m as their own, as a player alone has it wake.
+    Session.moveTo(h, 1000, 0)         -- (110 m from it: within the host's reach of a guest)
+    Session.moveTo(a, 1200, 100)
+    Session.moveTo(c, 8000, 0)
+    s:run(5)
+    local thugC = Session.enemyOn(c, "thug")
+    check(line(c, "thug").Asleep == true and brain(thugC) == true and floor(thugC) == 0,
+        "a guest alone 40 m from one asleep on the host, no partner nearer: their own copy ("
+        .. tostring(line(c, "thug").Asleep) .. " " .. tostring(brain(thugC)) .. " " .. tostring(floor(thugC)) .. ")")
+    Session.moveTo(b, 11800, 0)
+    Session.moveTo(c, 7800, 0)
+    s:run(3)
+    check(brain(thugC) == true, "(a partner comes by it after: theirs still)")
+    allErrors(s)
+end
+
+-- A party's guest far from an enemy the host's lines tell of (another guest is by it) and that its own world hasn't:
+-- not its to bring back. The host's lines reach every guest; a copy is paired within 60 m of its own player; the mod
+-- brought back what was missing within 120 m. So one 95 m off read as missing for good and was asked for every 10 s,
+-- and on the bench (11-16, three copies) each one brought back was dead seconds later and paid dust, shared on.
+local function farEnemiesStay()
+    part("a party: an enemy far from this guest isn't brought back")
+    local s = party({ { "byguest", THUG, 11500.0, 0.0, 100.0, 600, 100 } })
+    local h, a, c = s.pcs[1], s.pcs[2], s.pcs[4]
+    Session.moveTo(h, 0, 0)
+    Session.moveTo(a, 11000, 0)        -- one guest by it, 110 m from the host
+    Session.moveTo(s.pcs[3], 300, 200)
+    Session.moveTo(c, 2500, 0)         -- and one 90 m from it, whose world hasn't got it
+    local i = Session.indexOf(c, "byguest")
+    local mine, sp = c.enemies[i], c.spawners[i]
+    Fake.put(sp, "record", false)
+    Fake.put(sp, "SpawnedAI", nil)
+    table.remove(c.enemies, i)
+    s:run(35)
+    check(net(c).remoteEnemies["sp:byguest"] ~= nil and (field(sp, "claimed") or 0) == 0,
+        "the host's line of it reaches a guest 90 m off whose world hasn't got it: not brought back there ("
+        .. tostring(field(sp, "claimed") or 0) .. " times)")
+    Session.moveTo(c, 6500, 0)
+    s:run(8)
+    check((field(sp, "claimed") or 0) == 1 and count(c.logs, "brought back while you play together") == 1,
+        "that guest comes within 50 m of it: brought back, once")
+    s:run(52)
+    check((field(sp, "claimed") or 0) <= 3, "one that never comes is asked for less and less often ("
+        .. tostring(field(sp, "claimed")) .. " times in a minute)")
+    allErrors(s)
+end
+
 local function rests()
     part("bells and deaths")
     local s = party()
@@ -2476,6 +2572,62 @@ local function bossItemsOnce()
     allErrors(v)
 end
 
+-- A guest's own kill of a boss its game runs (263; in a party one asleep on the host, 277). Its death there is the game's
+-- own and pays that player, who shares it; the host's copy dies at the guest's word, its own pay taken back. But the
+-- host's K came back with the boss still falling, not yet dead by the game's word, and its death was run there a second
+-- time: the killer's pay, their earnings, was taken back as a copy's own too, and nobody had the boss's dust (the bench
+-- of 11-16, three copies: 6600 taken back on the killer's PC and on the host's, the three wallets as they were).
+local function guestsOwnBossKill()
+    part("a guest's own kill of a boss its game runs")
+    local list = { { "boss", "BP_Monster_Boss_C", 4200.0, 0.0, 100.0, 5000, 400, true } }
+    local function kill(three)
+        local s = three and party(list, nil, { "Host", "Guest", "Guest" })
+            or Session.new(SIM_SCRIPTS, { "Host", "Guest" }, false, list)
+        local h, g, c = s.pcs[1], s.pcs[2], s.pcs[3]
+        if not three then
+            s:run(4)
+        end
+        Session.moveTo(h, 0, 0)
+        Session.moveTo(g, 4000, 0)
+        if three then
+            Session.moveTo(c, -500, 300)
+        end
+        s:run(3)
+        for _, pc in ipairs(s.pcs) do
+            Fake.put(Session.enemyOn(pc, "boss"), "dustLoot", 700)
+            pc.paysAtLevelZero = true
+        end
+        local onG = Session.enemyOn(g, "boss")
+        g.hudLayout:RegisterBossHPBar(onG)
+        s:run(3)
+        local before = {}
+        for i, pc in ipairs(s.pcs) do
+            before[i] = Session.dust(pc)
+        end
+        swing(g, onG, select(1, Fake.health(onG)) - 300)
+        s:run(1)
+        swing(g, onG, 0)                    -- (its killing blow: at 0 and falling, not yet dead by the game's word)
+        s:run(0.6)
+        Fake.put(onG, "dead", true)
+        g.pawn:ChangeDustNumInternal(700)   -- (what the game pays the guest for its kill, a second into the fall)
+        s:run(25)
+        local got = {}
+        local once = field(Session.enemyOn(h, "boss"), "dead") == true
+        for i, pc in ipairs(s.pcs) do
+            got[i] = Session.dust(pc) - before[i]
+            once = once and got[i] == 700
+        end
+        return s, once, table.concat(got, ", ")
+    end
+    local s, once, text = kill(false)
+    check(once, "two players, the guest's kill of a boss its own game runs: its dust once each (" .. text .. ")")
+    check(count(s.pcs[2].logs, "its death runs here too") == 0, "and its death isn't run a second time on the guest's PC")
+    allErrors(s)
+    s, once, text = kill(true)
+    check(once, "a party of three, a guest's kill of a boss asleep on the host: its dust once each (" .. text .. ")")
+    allErrors(s)
+end
+
 -- A copy's own cooldown ("the boss can't hit me"; the bench, 11-16, at 75 ms and 5% loss: the mounted officer of Pangzhen's
 -- 7 s combo, refused on the guest's copy 6 times of 6, an animation that hit no one). The game's abilities keep a cooldown
 -- of their own, stamped as each copy starts the move for itself: a moment after the host's enemy did, over the link. The
@@ -2574,7 +2726,10 @@ local function reviewOfTheBuild()
     -- A guest loses a boss fight alone, the host 42 m back and never in it: the next try begins at full, as a lost fight
     -- does in the game. (The host's copy kept what the guest's game last said, and its line took the guest's new copy
     -- down to it: a retry begun at 30%.)
-    local function lost(three)
+    -- (share: what the fight leaves it. bell: where the guest comes back, 150 m off, or 40 m from it with its copy in
+    -- the host's reach all along: the host's line takes the new copy down before the fight is told over.)
+    local function lost(three, share, bell)
+        share = share or 0.3
         local s = three and party(list, nil, { "Host", "Guest", "Guest" })
             or Session.new(SIM_SCRIPTS, { "Host", "Guest" }, false, list)
         local h, g = s.pcs[1], s.pcs[2]
@@ -2591,7 +2746,7 @@ local function reviewOfTheBuild()
         g.hudLayout:RegisterBossHPBar(onG)
         s:run(3)
         local left, most = Fake.health(onG)
-        local target = math.floor(most * 0.3 + 0.5)
+        local target = math.floor(most * share + 0.5)
         while left > target + 1 do
             left = math.max(target, left - most * 0.1)
             swing(g, onG, left)
@@ -2602,7 +2757,7 @@ local function reviewOfTheBuild()
         Session.die(g)
         g.hudLayout:UnRegisterBossHPBar(onG)        -- (the game takes the bar down as its player dies)
         s:run(7)
-        Session.moveTo(g, 4200 - 15000, 0)          -- (back at a bell 150 m off, its world refreshed: its boss new, at full)
+        Session.moveTo(g, bell or 4200 - 15000, 0)  -- (back at a bell 150 m off, its world refreshed: its boss new, at full)
         Session.respawned(g)
         Fake.setHealth(onG, select(2, Fake.health(onG)))
         Session.revive(g)
@@ -2615,7 +2770,7 @@ local function reviewOfTheBuild()
         s:run(4)
         local hNow, hMost = Fake.health(onH)
         local gNow, gMost = Fake.health(onG)
-        return s, low < hMost * 0.4 and hNow >= hMost - 1 and gNow >= gMost - 1,
+        return s, low < hMost * (share + 0.1) and low < hMost - 1 and hNow >= hMost - 1 and gNow >= gMost - 1,
             string.format("it stood at %.0f; now host %.0f/%.0f, guest %.0f/%.0f", low, hNow, hMost, gNow, gMost)
     end
     local s, full, text = lost(false)
@@ -2623,6 +2778,13 @@ local function reviewOfTheBuild()
     allErrors(s)
     s, full, text = lost(true)
     check(full, "a party of three, the boss asleep on the host: the same (" .. text .. ")")
+    allErrors(s)
+    -- (A copy went back up with the host's only from 5% under it: one a blow or two down stayed so, the host's whole.)
+    s, full, text = lost(false, 0.97, 8200)
+    check(full, "a fight that took 3% off it, the guest back at a bell 40 m from it: full for both (" .. text .. ")")
+    allErrors(s)
+    s, full, text = lost(true, 0.97, 8200)
+    check(full, "and in a party of three (" .. text .. ")")
     allErrors(s)
     -- The host in that fight too: its own fight goes on, the boss as it was.
     local k = Session.new(SIM_SCRIPTS, { "Host", "Guest" }, false, list)
@@ -12571,6 +12733,8 @@ return function(print_, scripts)
     guestRunsWhatsNearIt()
     guestRunsItsBoss()
     asleepOnTheHost()
+    aPartysBystander()
+    farEnemiesStay()
     mindsEyeLesson()
     syncRaces()
     hitReactions()
@@ -12636,6 +12800,7 @@ return function(print_, scripts)
     holdingForTwo()
     hostDiesFirst()
     bossItemsOnce()
+    guestsOwnBossKill()
     copyCooldown()
     followToAnotherMap()
     reviewOfTheBuild()
