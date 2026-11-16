@@ -1728,6 +1728,50 @@ return function(api)
         return want
     end
 
+    -- One that just changed hands has its own AI back (puppets.release), and is looked at from then on. The game runs an
+    -- enemy's fight as one short tree after another, and a tree stopped while its copy followed the other game's can leave
+    -- that chain waiting for good: on the bench (11-16) a boss the host's game took back as its own fight with it began
+    -- stood beside the host in its fight, its tree stopped, till the tree was started by hand, and went still again after
+    -- each move. So one found in a fight with its tree stopped and no move playing, at two looks running a second apart,
+    -- has it started again (game.startAI), for as long as it lives and is this game's. Not in a scene, and never one in a
+    -- move: the game stops a tree itself for those.
+    handover.WAKE_S = 600
+    handover.woken = {}         -- enemy address -> { name, untilAt, stopped }
+    function handover.wake(name, addr)
+        handover.woken[addr] = { name = name, untilAt = os.clock() + handover.WAKE_S, stopped = 0 }
+    end
+    function handover.stayAwake()
+        local now = os.clock()
+        if now < (handover.wakeLookAt or 0) then
+            return
+        end
+        handover.wakeLookAt = now + 1.0
+        for addr, w in pairs(handover.woken) do
+            local e = reach.near[addr]
+            local actor = e and e.actor
+            if not valid(actor) or now > w.untilAt or enemyName(actor, addr) ~= w.name or (game.isDead and game.isDead(actor))
+                or (api.puppets and api.puppets.follows(addr)) then
+                handover.woken[addr] = nil
+            else
+                local state = game.aiState and game.aiState(actor)
+                if game.aiStopped and game.aiStopped(actor) and (state == nil or state:find("Combat", 1, true))
+                    and not (api.puppets and api.puppets.inMove(w.name)) and not (game.inCutscene and game.inCutscene()) then
+                    w.stopped = w.stopped + 1
+                    if w.stopped >= 2 then
+                        w.stopped = 0
+                        game.startAI(actor)
+                        w.starts = (w.starts or 0) + 1
+                        if w.starts == 1 then
+                            log(w.name .. " stood in its fight with its AI stopped after changing hands: started again.")
+                        end
+                    end
+                else
+                    w.stopped = 0
+                end
+            end
+        end
+    end
+
     -- Host: the guest's game runs it from now on (on), or this one does again.
     function handover.give(name, actor, addr, on)
         if on then
@@ -1767,6 +1811,7 @@ return function(api)
         if api.puppets then
             api.puppets.release(addr)
         end
+        handover.wake(name, addr)
     end
 
     -- Host: it died, whoever ran it. Nothing steers it now.
@@ -1885,13 +1930,14 @@ return function(api)
             end
         end
         net.guestRuns, net.guestLines, net.mine = {}, {}, {}
-        handover.seen, handover.since, handover.retryAt, handover.on = {}, {}, {}, false
+        handover.seen, handover.since, handover.retryAt, handover.on, handover.woken = {}, {}, {}, false, {}
     end
 
     local function startHostRound(now)
         if game.refreshEnemyIds then
             game.refreshEnemyIds()
         end
+        handover.stayAwake()
         handover.update()
         local queue, names = {}, {}
         for addr, e in pairs(reach.near) do
@@ -2122,6 +2168,7 @@ return function(api)
         if game.refreshEnemyIds then
             game.refreshEnemyIds()
         end
+        handover.stayAwake()
         -- (Not while the whole link is quiet: a second or two without packets, common over Radmin and the like, let every
         -- copy go to its own game at once, and they woke and fought this player by themselves until the host was heard
         -- again: "the enemy ... can still move, attack, and deal damage to me", issue #12. The partner gone is another way.)
@@ -2294,6 +2341,7 @@ return function(api)
             if api.puppets then
                 api.puppets.release(addr)   -- (its own AI back now, not when the host's lines run out)
             end
+            handover.wake(name, addr)
         end
     end
 

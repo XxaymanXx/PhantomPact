@@ -752,6 +752,12 @@ local function guestRunsItsBoss()
     check(brain(onH) == true and brain(onG) == false, "its AI back on the host, the guest's copy following again")
     check(math.abs(select(1, Fake.health(onH)) - (left - 600)) < 2,
         "with the health the guest's game had left, the host's blow off it: " .. tostring(select(1, Fake.health(onH))))
+    -- (On the bench the fight's own start and the mod's crossed as it changed hands, and the boss stood beside the host with
+    -- its brain stopped till it was started by hand: looked at for a while after.)
+    field(field(onH, "Controller"), "BrainComponent"):StopLogic("the fight's own start")
+    s:run(3)
+    check(brain(onH) == true and count(h.logs, "with its AI stopped after changing hands") == 1,
+        "found in its fight with its AI stopped after changing hands, it's started again")
     allErrors(s)
 
     -- The guest kills a boss its game runs: the host's copy, held at its floor, dies by the game's own death all the same.

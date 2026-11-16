@@ -411,6 +411,21 @@ return function(api)
             end
         end)
     end
+    -- Its AI's state as the game names it ("AI.State.Combat", "AI.State.Idle"), or nil.
+    function game.aiState(actor)
+        local ok, tag = pcall(function()
+            return actor:GetController().SGameAIComponent.CurrentStateTag.TagName:ToString()
+        end)
+        return ok and type(tag) == "string" and tag or nil
+    end
+    -- Whether its AI is stopped: it has a brain, and that isn't running.
+    function game.aiStopped(actor)
+        local ok, stopped = pcall(function()
+            local brain = game.brainOf(actor)
+            return brain ~= nil and not brain:IsRunning()
+        end)
+        return ok and stopped == true
+    end
 
     -- Out of the way on this PC, and back: coop.lua, for an enemy the host's world doesn't have. home: where it stands, given
     -- with on and again with off. Hidden isn't enough: a live enemy within some 10-30 m keeps a bell from being rung, hidden or
