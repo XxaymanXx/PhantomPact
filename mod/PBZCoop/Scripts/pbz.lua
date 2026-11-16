@@ -4079,6 +4079,75 @@ return function(api)
         aim.turn(actor, f, best, near)
     end
 
+    -- Local co-op (Role = Local): the same rule for two players on one PC. There the game's own picker was all there
+    -- was: the nearest player on an enemy's list, looked for again every 1.5 s (AGGRO.md), so with two in one fight an
+    -- enemy went for whoever stood a step nearer, turned as they moved, and a player's blows drew nothing (a player's
+    -- report, 14 Nov: "enemies target and attack only player 1"). Whose blows an enemy took is told by who was swinging:
+    -- a body in a montage of its own, no hit reaction on it, at a look in the last OWN_HIT_S (both: half each). Once a
+    -- second, for each enemy with a player in reach; steerTarget itself only holds or turns one that's after a player
+    -- with both in reach.
+    local localAim = { seen = {}, movedAt = {}, lookAt = 0, moveAt = 0, on = false }
+    function game.steerLocal(p1, p2)
+        local now = os.clock()
+        if now >= localAim.moveAt then
+            localAim.moveAt = now + 0.1
+            for slot, body in ipairs({ p1, p2 }) do
+                local anim = api.moves and api.moves.animOf(body)
+                if anim and valid(anim:GetCurrentActiveMontage()) then
+                    local state = game.hitStateOf and game.hitStateOf(body)
+                    if state == nil or state == "None" then
+                        localAim.movedAt[slot] = now
+                    end
+                end
+            end
+        end
+        if now < localAim.lookAt then
+            return
+        end
+        localAim.lookAt, localAim.on = now + 1.0, true
+        local players = {
+            { body = p1, addr = p1:GetAddress(), at = p1:K2_GetActorLocation(), slot = 1 },
+            { body = p2, addr = p2:GetAddress(), at = p2:K2_GetActorLocation(), slot = 2 },
+        }
+        local swung = {}
+        for slot = 1, 2 do
+            swung[slot] = now - (localAim.movedAt[slot] or -1e9) <= aim.OWN_HIT_S
+        end
+        local list, addrs = game.listEnemies()
+        local seen = {}
+        for i, e in ipairs(list) do
+            local addr = addrs[i]
+            if valid(e) and not game.isDead(e) then
+                local x, y, z, _, _, _, _, _, hp = game.read(e, addr)
+                local at = x and x == x and { X = x, Y = y, Z = z }
+                if at and (distance(at, players[1].at) <= aim.REACH_CM or distance(at, players[2].at) <= aim.REACH_CM) then
+                    local was = localAim.seen[addr]
+                    if was and hp and was.hp and was.hp - hp > 0.5 and now - was.at <= aim.LOOK_S and (swung[1] or swung[2]) then
+                        local lost = was.hp - hp
+                        if swung[1] and swung[2] then
+                            game.partnerHit(addr, 1, lost / 2)
+                            game.partnerHit(addr, 2, lost / 2)
+                        else
+                            game.partnerHit(addr, swung[1] and 1 or 2, lost)
+                        end
+                    end
+                    seen[addr] = { hp = hp or (was and was.hp), at = now }
+                    local anim = api.moves and api.moves.animOf(e)
+                    game.steerTarget(e, addr, x, y, z, hp, players, game.isBoss(e, addr),
+                        anim ~= nil and valid(anim:GetCurrentActiveMontage()))
+                end
+            end
+        end
+        localAim.seen = seen
+    end
+    -- One of the two gone or down: every enemy's picker its own again, what each took forgotten.
+    function game.steerLocalOff()
+        if localAim.on then
+            localAim.on, localAim.seen, localAim.movedAt = false, {}, {}
+            game.forgetFocus()
+        end
+    end
+
     -- A hidden ghost is nobody to fight: the partner's down, gone or elsewhere, and enemies swung at thin air. It comes off
     -- every list, can't be put back, and each enemy that was after it looks again. With nobody else on its list that look finds
     -- no one and it keeps its target for good, swinging at the empty spot, so this player goes on the list first.

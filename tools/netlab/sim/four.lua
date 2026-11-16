@@ -8794,6 +8794,42 @@ local function localDifficulty()
     allErrors(v)
 end
 
+-- Local co-op: who an enemy goes for. The game's own picker was all there was (the nearest on its list, again and again):
+-- with two players in one fight every enemy went for whoever stood a step nearer, and a player's blows drew nothing.
+-- The online rule runs there too: how near, whose blows, and a hold.
+local function localTargets()
+    part("local co-op: who an enemy goes for")
+    local MOVE = "/PBZCombatAsset/ActorData/Move/E1.E1"
+    local s, pc, state = localGame()
+    s:run(2)
+    local p2 = state.p2Pawn
+    local e = Session.enemyOn(pc, "near")                       -- at 300, 300
+    local hm = field(e, "BP_PBZHatredManagerComponent")
+    Session.moveTo(pc, 100, 300)                                -- player 1 two metres from it
+    Fake.put(p2, "loc", { X = 600.0, Y = 300.0, Z = 100.0 })    -- player 2 three
+    hm:AddActorToHatredList(pc.pawn, {})
+    hm:AddActorToHatredList(p2, {})
+    s:run(4)
+    check(field(e, "target") == pc.pawn, "both by it, player 1 a step nearer: it's after player 1")
+    -- Player 2's blows land for 10 s, player 1 standing by.
+    local swing2 = pc.env.StaticFindObject(MOVE)
+    for _ = 1, 100 do
+        Fake.put(rawget(p2, "__fields").anim, "montage", swing2)
+        Fake.setHealth(e, select(1, Fake.health(e)) - 5)
+        s:run(0.1)
+    end
+    check(field(e, "target") == p2, "player 2's blows land, player 1 standing by: it turns to player 2, a step further off though they are")
+    local turns = field(e, "targetChanges") or 0
+    Fake.put(rawget(p2, "__fields").anim, "montage", nil)
+    s:run(5)
+    check(field(e, "target") == p2 and (field(e, "targetChanges") or 0) == turns, "and holds to them for a while after the last blow")
+    -- Player 2 down: nobody to steer between, the game's own picker again.
+    Fake.setHealth(p2, 1)
+    s:run(3)
+    check(field(e, "target") == pc.pawn, "player 2 down: it's after player 1")
+    allErrors(s)
+end
+
 -- Player 2 sees what player 1 sees, by the game's own rules and widgets.
 local function localScreen()
     part("player 2's screen")
@@ -12078,6 +12114,7 @@ return function(print_, scripts)
     offAndBack()
     localPlay()
     localDifficulty()
+    localTargets()
     padHold()
     localScreen()
     localButtons()

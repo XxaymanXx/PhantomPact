@@ -565,7 +565,8 @@ return function(api)
 
     -- Local co-op: the same ticks, as often, in a loop of this file's own (coop's don't run without a link), started with
     -- Role = Local. A boss's moves are noted as a host notes them for its guests (puppets.watchHost: nothing goes out),
-    -- so one a hit cut is taken up again where its armour let the flinch go.
+    -- so one a hit cut is taken up again where its armour let the flinch go. And who an enemy goes for, by the online
+    -- rule, while both are up (pbz.lua's game.steerLocal).
     function scaling.startLocal()
         if scaling.localLoop then
             return
@@ -573,9 +574,18 @@ return function(api)
         scaling.localLoop = true
         LoopInGameThreadWithDelay(25, function()
             if not scaling.localSoul() then
+                if game.steerLocalOff then
+                    pcall(game.steerLocalOff)
+                end
                 return false
             end
             local ok, err = pcall(function()
+                local _, p1 = api.getPlayer1()
+                if game.steerLocal and scaling.localTwo() and valid(p1) and not game.isDead(p1) then
+                    game.steerLocal(p1, api.state.p2Pawn)
+                elseif game.steerLocalOff then
+                    game.steerLocalOff()
+                end
                 if scaling.bossArmor and api.puppets and api.puppets.watchHost then
                     for _, boss in ipairs(game.bossActors()) do
                         local addr = boss:GetAddress()
