@@ -165,6 +165,10 @@ function Fake.character(pc, class, x, y, z, hp, posture)
         MaxAcceleration = 0, bRunPhysicsWithNoController = false, bOrientRotationToMovement = true })
     defs(pc, cmc, { SetMovementMode = function(self, mode) put(self, "MovementMode", mode) end, DisableMovement = false,
         IsFalling = function() return false end,
+        StopMovementImmediately = function(self)
+            put(self, "stopped", (rawget(self, "__fields").stopped or 0) + 1)
+            put(self, "Velocity", { X = 0.0, Y = 0.0, Z = 0.0 })
+        end,
         -- (From input alone, as the game's: someone steering the body. A test puts Acceleration.)
         GetCurrentAcceleration = function(self) return rawget(self, "__fields").Acceleration or { X = 0.0, Y = 0.0, Z = 0.0 } end })
     put(a, "CharacterMovement", cmc)
@@ -1224,6 +1228,31 @@ function Fake.volume(pc, class, x, y, z)
     return v
 end
 
+-- The engine's line traces (KismetSystemLibrary:LineTraceSingle), for a test that asks for them: floor 90 under a body's middle
+-- (Z 10) everywhere unless pc.noFloor says there's none at a spot, and a wall across a line where pc.wallAt says. Each trace is
+-- counted on the library. (Without this there's no such library, as before.)
+function Fake.traces(pc)
+    local lib = object(pc, "KismetSystemLibrary", { traced = 0 })
+    defs(pc, lib, { LineTraceSingle = function(self, _, from, to, _, _, _, _, hit)
+        put(self, "traced", rawget(self, "__fields").traced + 1)
+        if from.X == to.X and from.Y == to.Y then
+            local floor = 10.0
+            if floor > from.Z or floor < to.Z or (pc.noFloor and pc.noFloor({ X = from.X, Y = from.Y, Z = floor })) then
+                return false
+            end
+            hit.Location, hit.Distance = { X = from.X, Y = from.Y, Z = floor }, from.Z - floor
+            return true
+        end
+        if pc.wallAt and pc.wallAt(from, to) then
+            hit.Location, hit.Distance = { X = to.X, Y = to.Y, Z = to.Z }, 0
+            return true
+        end
+        return false
+    end })
+    pc.found["/Script/Engine.Default__KismetSystemLibrary"] = lib
+    return lib
+end
+
 -- A flow actor: a switch to the eye, but it isn't one of the game's switches.
 function Fake.flow(pc, class, x, y, z)
     local f = Fake.switch(pc, class, x, y, z)
@@ -1561,6 +1590,7 @@ function Fake.new(id, scripts, ini, link)
         local input = object(pc, "PBZNBInputComponent", { resets = 0 })
         put(input, "ResetToDefaultInputMode", function(self)
             put(self, "resets", rawget(self, "__fields").resets + 1)
+            put(self, "bCurrentCancelPlayerController", false)
             if p ~= pc.pawn then
                 for _, c in ipairs(pc.inputContexts) do
                     pc.inputSets[1][c] = 1
@@ -2098,7 +2128,13 @@ function Fake.new(id, scripts, ini, link)
         if asc == nil then
             local specs = rawget(actor, "__class") == "BP_Renewal_Hun_C" and { locomotion(actor) } or {}
             asc = object(pc, "ASC", { ActivatableAbilities = { Items = list(specs) } }, true)
-            put(asc, "TryActivateAbilityByClass", function(_, class) put(actor, "used", class) end)
+            put(asc, "TryActivateAbilityByClass", function(_, class)
+                put(actor, "used", class)
+                -- (The game's rise-up turns "cancel the player controller" on in player 1's input, whichever Soul rises: bench 11-16.)
+                if class == pc.riseClass and pc.pawn and rawget(pc.pawn, "__fields").PBZNBInput then
+                    put(rawget(pc.pawn, "__fields").PBZNBInput, "bCurrentCancelPlayerController", true)
+                end
+            end)
             put(asc, "K2_GiveAbility", function(_, class)
                 local given = rawget(actor, "__given") or {}
                 given[#given + 1] = class
@@ -2232,7 +2268,13 @@ function Fake.new(id, scripts, ini, link)
     pc.interactClass, pc.promptClass, pc.hudClass = object(pc, "Class"), object(pc, "WidgetClass"), object(pc, "WidgetClass")
     pc.bossBarClass, pc.bossBars = object(pc, "WidgetClass"), {}
     pc.riseClass = object(pc, "Class")
+    -- (Enhanced Input's library: what a controller holds let go, counted on the controller.)
+    local inputLibrary = object(pc, "EnhancedInputLibrary")
+    defs(pc, inputLibrary, { FlushPlayerInput = function(_, c)
+        put(c, "flushed", (rawget(c, "__fields").flushed or 0) + 1)
+    end })
     local found = {
+        ["/Script/EnhancedInput.Default__EnhancedInputLibrary"] = inputLibrary,
         ["/Game/PBZContent/UI/InGame/Dead/bg_dead.bg_dead"] = object(pc, "Texture", {}, true),
         ["/Game/PBZContent/UI/InGame/Dead/T_UI_blood_Combine.T_UI_blood_Combine"] = object(pc, "Texture", {}, true),
         ["/Game/PBZContent/UI/UINew/testplaceholder/yun.yun"] = object(pc, "Texture", {}, true),

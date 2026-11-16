@@ -325,14 +325,68 @@ return function(api)
         end
     end
 
-    local function besidePoint(p1, up)
+    -- Straight to player 1's right, at their height: where a body is held in the air on a far move, and beside them when the
+    -- floor can't be looked for.
+    function V.rightOf(p1, up)
         local q = p1:K2_GetActorLocation()
         local yaw = math.rad(p1:K2_GetActorRotation().Yaw) + math.pi / 2
         return { X = q.X + math.cos(yaw) * BESIDE_CM, Y = q.Y + math.sin(yaw) * BESIDE_CM, Z = q.Z + up }
     end
+
+    -- Beside player 1 is where there's floor: to their right, else their left, behind them, in front of them, the first with
+    -- floor from V.FLOOR_UP_CM above their feet to V.FLOOR_DOWN_CM below and a clear line to it at chest height (the game's
+    -- visibility channel, as the duel's start looks: the bodies left out); none, player 1's own spot. Straight to the right
+    -- put player 2 over the drop at a cliff's edge every time they came back: they fell, went down, and came back over it
+    -- again, every 8 s till player 1 moved (bench, 11-16: eleven rounds by a camp on a cliff top).
+    V.FLOOR_UP_CM, V.FLOOR_DOWN_CM = 150, 250
+    V.SIDES = { { turn = 90, name = "on the right" }, { turn = -90, name = "on the left" }, { turn = 180, name = "behind" },
+        { turn = 0, name = "in front" } }
+    local function besidePoint(p1, up, body)
+        local ksl = StaticFindObject("/Script/Engine.Default__KismetSystemLibrary")
+        if not valid(ksl) then
+            return V.rightOf(p1, up)
+        end
+        local q = p1:K2_GetActorLocation()
+        local yaw = math.rad(p1:K2_GetActorRotation().Yaw)
+        local got, half = pcall(function() return p1.CapsuleComponent:GetScaledCapsuleHalfHeight() end)
+        half = got and tonumber(half) or 90
+        local feet = q.Z - half
+        local skip, none, broken = { body }, { R = 0, G = 0, B = 0, A = 0 }, false
+        local function hitOf(from, to)
+            local hit = {}
+            local ok, blocked = pcall(function()
+                return ksl:LineTraceSingle(p1, from, to, 0, false, skip, 0, hit, true, none, none, 0)
+            end)
+            broken = broken or not ok
+            return ok and blocked and hit or nil
+        end
+        local chest = q.Z + 30
+        for _, side in ipairs(V.SIDES) do
+            local a = yaw + math.rad(side.turn)
+            local s = { X = q.X + math.cos(a) * BESIDE_CM, Y = q.Y + math.sin(a) * BESIDE_CM }
+            if not hitOf({ X = q.X, Y = q.Y, Z = chest }, { X = s.X, Y = s.Y, Z = chest }) then
+                local floor = hitOf({ X = s.X, Y = s.Y, Z = feet + V.FLOOR_UP_CM + 50 }, { X = s.X, Y = s.Y, Z = feet - V.FLOOR_DOWN_CM - 50 })
+                local z = floor and floor.Location and tonumber(floor.Location.Z)
+                if z and z <= feet + V.FLOOR_UP_CM and z >= feet - V.FLOOR_DOWN_CM then
+                    if side ~= V.SIDES[1] then
+                        log(string.format("No floor to the right: set down %s.", side.name))
+                    end
+                    return { X = s.X, Y = s.Y, Z = z + half + up }
+                end
+            end
+            if broken then              -- (the game wouldn't trace: beside them as before)
+                return V.rightOf(p1, up)
+            end
+        end
+        log("No floor beside: set down on the same spot.")
+        return { X = q.X, Y = q.Y, Z = q.Z + up }
+    end
     local function moveBeside(pawn, p1)
         local far = distance(pawn:K2_GetActorLocation(), p1:K2_GetActorLocation()) > V.FAR_MOVE_CM
-        pawn:K2_SetActorLocation(besidePoint(p1, far and 120 or 30), false, {}, true)
+        -- (Far, it's held in the air till player 1 lands, as the world streams in: the floor is looked for then.)
+        pawn:K2_SetActorLocation(far and V.rightOf(p1, 120) or besidePoint(p1, 30, pawn), false, {}, true)
+        -- (And it starts still: a fall's speed kept would land it hard, down from the fall it was brought back from.)
+        pcall(function() pawn.CharacterMovement:StopMovementImmediately() end)
         if far then
             pcall(function() pawn.CharacterMovement:SetMovementMode(5, 0) end)
             -- The world streams in around player 1: the Soul is set down once player 1 stands on the ground again
@@ -346,7 +400,7 @@ return function(api)
                 local grounded = mode == 1 or mode == 2
                 if grounded or os.clock() - started >= V.FAR_MOVE_MAX_S then
                     if grounded then
-                        pawn:K2_SetActorLocation(besidePoint(p1, 60), false, {}, true)
+                        pawn:K2_SetActorLocation(besidePoint(p1, 60, pawn), false, {}, true)
                     end
                     pcall(function() pawn.CharacterMovement:SetMovementMode(1, 0) end)
                 else
@@ -522,7 +576,32 @@ return function(api)
         end
     end
 
+    -- The game's rise-up for a Soul back from down (GA_PlayerRespawn) turns "cancel the player controller" on in the input of "the
+    -- player", player 1, whichever Soul is rising: player 1 stood frozen through all of player 2's (a player report on 1.7.3: "When player
+    -- 2 dies and respawn player 1 can't move until player 2 finishes their revive animation"; bench, 11-16: player 1's flag on from 0.9 s
+    -- to 5.2 s into player 2's rise-up, and pad 1 moved them 0 cm). So while player 2 rises, player 1's input goes back to its own mode
+    -- each time that comes on, unless player 1 is in the middle of a move of their own (relayButtons, every frame).
+    V.RISE_S = 7.0
+    function V.keepPlayer1Moving(p1)
+        if not V.risingUntil then
+            return
+        end
+        if os.clock() > V.risingUntil then
+            V.risingUntil = nil
+            return
+        end
+        local comp = p1.PBZNBInput
+        if valid(comp) and comp.bCurrentCancelPlayerController == true and not V.acting(p1) then
+            comp:ResetToDefaultInputMode()
+            if not V.riseFreed then
+                V.riseFreed = true
+                log("Player 2's rise-up held player 1 still: let go.")
+            end
+        end
+    end
+
     function V.riseUp()
+        V.risingUntil, V.riseFreed = os.clock() + V.RISE_S, nil
         local path = V.RISE_ABILITY .. ".GA_PlayerRespawn_C"
         local class = StaticFindObject(path)
         if not valid(class) and type(LoadAsset) == "function" then
@@ -568,7 +647,10 @@ return function(api)
         V.dropDeathCard()
         p2Dust = nil
         V.dropHud()
-        api.spawnPawnForPlayer2(p1:GetClass())
+        api.spawnPawnForPlayer2(p1:GetClass(), besidePoint(p1, 10))
+        -- (A fall the old Soul was in isn't the new one's: kept, a Soul back over a drop was "out of the world" the moment it
+        -- slipped, and was put straight back over it.)
+        fallingSince = nil
         V.watchControls()
         V.nextMenuKeep = 0
         if valid(state.p2Pawn) then
@@ -1686,6 +1768,31 @@ return function(api)
         end
     end
 
+    -- A player hears a stick only as it moves, so the player a pad reached keeps its last push when the pad goes to the other
+    -- one: a menu closing with player 2's stick held left player 1 running that way for good (a player report on 1.7.3,
+    -- keyboard on player 1: "player 1 will be stuck moving the same direction forever"). So once a change of where the pads
+    -- go has taken (main.dll reads pad_stay.txt every 40 ms), what each player holds is let go: player 2's as a menu opens,
+    -- both players' as the pads are shared out again. (By the input library's FlushPlayerInput: a controller's own
+    -- FlushPressedKeys isn't one the game lets be called, bench 11-16.)
+    V.FLUSH_AFTER_S = 0.15
+    V.INPUT_LIBRARY = "/Script/EnhancedInput.Default__EnhancedInputLibrary"
+    function V.flushInput(both)
+        local lib = StaticFindObject(V.INPUT_LIBRARY)
+        if not valid(lib) then
+            return
+        end
+        local controllers = { state.p2Controller, both and (getPlayer1()) or nil }
+        for i = 1, 2 do
+            local c = controllers[i]
+            if valid(c) then
+                pcall(function() lib:FlushPlayerInput(c) end)
+            end
+        end
+    end
+    function V.flushInputSoon(both)
+        game.after(V.FLUSH_AFTER_S, function() pcall(V.flushInput, both) end)
+    end
+
     -- main.dll's pad_route.hpp: the device named here is player 1's, and the other joystick reaches player 2. It's given
     -- the viewport and the offset setting once, and both live as long as the game.
     local function routePads(device)
@@ -1722,6 +1829,7 @@ return function(api)
         gs:SetPlayerControllerID(p2pc, config.p2 == "kbm" and 0 or 1)
         log(string.format("Local co-op: %s%s, player 1 %s, player 2 %s.", V.layout(), V.spread() and " over two monitors" or "",
             config.p1, config.p2))
+        V.flushInputSoon(true)
         return true
     end
 
@@ -1790,6 +1898,7 @@ return function(api)
         pcall(V.player1Back)          -- (and none of them left blind to player 1)
         api.setGamepadOffset(false)
         routePads(nil)
+        V.flushInputSoon(true)
         if valid(pc) then
             api.gs():SetPlayerControllerID(pc, 0)
         end
@@ -2072,6 +2181,7 @@ return function(api)
             if menu then
                 api.setGamepadOffset(false)
                 routePads(ALL_TO_PLAYER_1)
+                V.flushInputSoon(false)
             else
                 applyConfig()
             end
@@ -3721,6 +3831,9 @@ return function(api)
         local _, p1 = getPlayer1()
         if valid(p1) and valid(state.p2Pawn) then
             watchHeal(pc, p2pc, p1, state.p2Pawn)
+        end
+        if valid(p1) then
+            pcall(V.keepPlayer1Moving, p1)
         end
         local pressed = p2pc:IsInputKeyDown({ KeyName = FName("Gamepad_Special_Right") })
         -- (Pad 2's press, kept from the game by main.dll; not while their menu is on its way.)

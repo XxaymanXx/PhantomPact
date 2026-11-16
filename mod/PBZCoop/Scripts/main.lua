@@ -238,8 +238,9 @@ local function ensurePlayer2Controller()
     return p2pc
 end
 
--- Spawns pawnClass to player 1's right, facing the same way. Returns the actor or nil.
-local function spawnBesidePlayer1(pawnClass)
+-- Spawns pawnClass to player 1's right, facing the same way, or at `at` when given (local co-op's spot with floor under it).
+-- Returns the actor or nil.
+local function spawnBesidePlayer1(pawnClass, at)
     local pc, pawn = getPlayer1()
     if not valid(pawn) then
         log("No player 1 pawn to spawn beside.")
@@ -256,7 +257,7 @@ local function spawnBesidePlayer1(pawnClass)
     local side = yaw + math.pi / 2
     local transform = {
         Rotation = { X = 0.0, Y = 0.0, Z = math.sin(yaw / 2), W = math.cos(yaw / 2) },
-        Translation = {
+        Translation = at and { X = at.X, Y = at.Y, Z = at.Z } or {
             X = loc.X + math.cos(side) * P2_SPAWN_OFFSET,
             Y = loc.Y + math.sin(side) * P2_SPAWN_OFFSET,
             Z = loc.Z,
@@ -301,8 +302,8 @@ local function spawnBesidePlayer1(pawnClass)
     return actor
 end
 
--- Spawns pawnClass beside player 1 and hands it to player 2.
-local function spawnPawnForPlayer2(pawnClass)
+-- Spawns pawnClass beside player 1 (at `at` when given) and hands it to player 2.
+local function spawnPawnForPlayer2(pawnClass, at)
     if valid(state.p2Pawn) then
         log("Player 2 already has a character. Press F9 first.")
         return
@@ -311,7 +312,7 @@ local function spawnPawnForPlayer2(pawnClass)
     if not valid(p2pc) then
         return
     end
-    state.p2Pawn = spawnBesidePlayer1(pawnClass)
+    state.p2Pawn = spawnBesidePlayer1(pawnClass, at)
     if not valid(state.p2Pawn) then
         return
     end
