@@ -296,12 +296,20 @@ return function(api)
         end
         if after ~= "-" then
             local _, pawn = api.getPlayer1()
-            local aim = after == (coop.isHost() and "host" or "guest") and pawn or net.ghost
+            local me = after == (coop.isHost() and "host" or "guest")
+            local aim = me and pawn or net.ghost
             if net.party then
+                me = tonumber(after) == (net.slot or 1)
                 aim = coop.playerBody(tonumber(after))
             end
             if valid(aim) then
                 game.aimCopy(actor, actor:GetAddress(), aim)
+            end
+            -- (A partner's boss going for this player has them in its fight, a blow of their own landed or not. Their word of
+            -- that fight is what holds the partner's respawn: with none, a host who died as the boss swung at the guest
+            -- was back at once, the boss at full health again in both worlds. The bench, 11-16.)
+            if me and net.partnerBosses[name] then
+                net.struck[name] = true
             end
         end
         local m = path ~= "-" and api.moves.allowedPath(path) and api.moves.montage(path)

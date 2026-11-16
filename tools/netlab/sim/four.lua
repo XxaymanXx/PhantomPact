@@ -637,9 +637,13 @@ local function guestRunsWhatsNearIt()
     check(count(h.sent, "^E RUN sp:byguest 1$") == 1, "two players apart: an enemy clearly nearer the guest goes to the guest's game, once")
     check(net(g).mine["sp:byguest"] == true and brain(onG) == true, "where it has its own AI back")
     check(brain(onH) == false and count(g.sent, "^N ") > 0, "and the host's copy follows the guest's lines")
-    check(count(h.sent, "^E RUN sp:between ") == 0 and count(h.sent, "^E RUN sp:bossthere ") == 0
+    check(count(h.sent, "^E RUN sp:between ") == 0
         and count(h.sent, "^E RUN sp:byhost ") == 0 and count(h.sent, "^E RUN sp:chasing ") == 0,
-        "not one as near the host, nor a boss, nor one by the host or far from both")
+        "not one as near the host, nor one by the host or far from both")
+    -- (A boss asleep by the guest goes as a thug does: the host's game wakes one for its own player alone. guestRunsItsBoss.)
+    check(count(h.sent, "^E RUN sp:bossthere 1$") == 1 and net(g).mine["sp:bossthere"] == true
+        and brain(Session.enemyOn(g, "bossthere")) == true,
+        "a boss in no fight, clearly nearer the guest: the guest's game runs it too, awake")
     Fake.put(onG, "loc", { X = 13000.0, Y = 800.0, Z = 100.0 })
     s:run(2)
     check(gap(at(onH), at(onG)) < 200, "the host's copy goes where the guest's goes")
@@ -700,6 +704,89 @@ local function guestRunsWhatsNearIt()
     s:run(2)
     check(field(Session.enemyOn(h, "faraway"), "dead") == true, "and it's dead in the host's world once the host is near")
     allErrors(s)
+end
+
+-- A boss the guest goes to first. The host's game wakes a boss for its own player alone, once they're in its arena, and
+-- slows it to a stop or puts it away past some 45 m of them: with the host on its way, outside the wall or back at a bell,
+-- the guest's boss stood asleep with the host's, its bar up, and never swung ("my friend is host and i guest, the boss cant
+-- hit me", 11-15; on the bench, 11-16, 0 hits in 90 s where the host beside it made it 15 in 25 s). So the guest's game
+-- runs a boss the guest is at and the host isn't: asleep, and through the guest's fight, till the host is in that fight
+-- too (walked in, its own bar, or a blow of theirs from near it), when it's the host's with what health it had left.
+local function guestRunsItsBoss()
+    part("a boss the guest fights and the host doesn't")
+    local list = {
+        { "boss", "BP_Monster_Boss_C", 4200.0, 0.0, 100.0, 5000, 400, true },
+        { "thug", THUG, 300.0, 0.0, 100.0, 600, 100 },
+    }
+    local function brain(e)
+        return field(field(field(e, "Controller"), "BrainComponent"), "running")
+    end
+    local s = Session.new(SIM_SCRIPTS, { "Host", "Guest" }, false, list)
+    local h, g = s.pcs[1], s.pcs[2]
+    s:run(4)
+    Session.moveTo(h, 0, 0)
+    Session.moveTo(g, 4000, 0)         -- the guest by the boss, the host 40 m behind
+    s:run(3)
+    local onH, onG = Session.enemyOn(h, "boss"), Session.enemyOn(g, "boss")
+    check(count(h.sent, "^E RUN sp:boss 1$") == 1 and net(g).mine["sp:boss"] == true and brain(onG) == true,
+        "a boss asleep, the guest by it and the host 40 m behind: the guest's game runs it, awake")
+    check(brain(onH) == false, "and the host's copy follows the guest's")
+    -- The guest's fight begins, in its own game: told, shown on the host, and the guest's game's to run all through.
+    g.hudLayout:RegisterBossHPBar(onG)
+    s:run(3)
+    check(net(h).partnerBosses["sp:boss"] == true and net(h).guestRuns["sp:boss"] == true,
+        "the guest's fight with it: shown on the host, and still the guest's game's")
+    Session.moveTo(h, 3800, 300)       -- the host walks up beside the guest: together, and not in the fight
+    s:run(3)
+    check(net(h).guestRuns["sp:boss"] == true and count(h.sent, "^E RUN sp:boss 0$") == 0,
+        "the host beside the guest, not in the fight: still the guest's game's (together gave a thug back)")
+    local left = select(1, Fake.health(onG))
+    swing(g, onG, left - 500)
+    s:run(2)
+    check(math.abs(select(1, Fake.health(onH)) - (left - 500)) < 2, "the host's copy follows the health it has in the guest's game")
+    -- A blow of the host's from near it: the host is in the fight, and the boss is the host's game's from then on.
+    swing(h, onH, select(1, Fake.health(onH)) - 100)
+    s:run(3)
+    check(count(h.sent, "^E RUN sp:boss 0$") == 1 and net(g).mine["sp:boss"] == nil,
+        "a blow of the host's from near it: the host is in the fight, and the boss is the host's game's")
+    check(brain(onH) == true and brain(onG) == false, "its AI back on the host, the guest's copy following again")
+    check(math.abs(select(1, Fake.health(onH)) - (left - 600)) < 2,
+        "with the health the guest's game had left, the host's blow off it: " .. tostring(select(1, Fake.health(onH))))
+    allErrors(s)
+
+    -- The guest kills a boss its game runs: the host's copy, held at its floor, dies by the game's own death all the same.
+    local t = Session.new(SIM_SCRIPTS, { "Host", "Guest" }, false, list)
+    local th, tg = t.pcs[1], t.pcs[2]
+    t:run(4)
+    Session.moveTo(th, 0, 0)
+    Session.moveTo(tg, 4000, 0)
+    t:run(3)
+    local bossH, bossG = Session.enemyOn(th, "boss"), Session.enemyOn(tg, "boss")
+    tg.hudLayout:RegisterBossHPBar(bossG)
+    t:run(3)
+    swing(tg, bossG, 0)
+    Fake.put(bossG, "dead", true)
+    t:run(3)
+    check(count(tg.sent, "^E GK sp:boss$") == 1, "the guest kills a boss its game runs, and says so")
+    check(field(bossH, "dead") == true and field(bossH, "realDeath") == true,
+        "the host's copy, held at its floor, dies by the game's own death")
+    allErrors(t)
+
+    -- The host's own fight is the host's game's, the guest in it or not: nothing goes over while its bar is up.
+    local u = Session.new(SIM_SCRIPTS, { "Host", "Guest" }, false, list)
+    local uh, ug = u.pcs[1], u.pcs[2]
+    u:run(4)
+    Session.moveTo(uh, 4100, 300)
+    Session.moveTo(ug, 4000, -2800)
+    u:run(2)
+    uh.hudLayout:RegisterBossHPBar(Session.enemyOn(uh, "boss"))
+    u:run(2)
+    Session.moveTo(uh, 1000, 300)      -- the host backs 31 m off, its bar still up; the guest steps up to the boss
+    Session.moveTo(ug, 4100, -200)
+    u:run(3)
+    check(count(uh.sent, "^E RUN sp:boss ") == 0 and net(uh).guestRuns["sp:boss"] == nil,
+        "the host's own fight, the guest nearer the boss: it stays the host's game's")
+    allErrors(u)
 end
 
 local function rests()
@@ -1554,7 +1641,8 @@ local function sitBosses()
         s:run(2)
         return s, s.pcs[1], s.pcs[2]
     end
-    -- The guest's own fight on a boss near the host, the host's world running it; the host sits nearby.
+    -- The guest's own fight on a boss near the host, the host not in it; the host sits nearby. (The guest's game runs that
+    -- boss now, guestRunsItsBoss: its blows land there, and the host's copy follows.)
     do
         local s, h, g = two()
         Session.moveTo(g, 2700, 2700)
@@ -1564,16 +1652,17 @@ local function sitBosses()
         local hb, gb = Session.enemyOn(h, "boss"), Session.enemyOn(g, "boss")
         local _, hmax = Fake.health(hb)
         local _, gmax = Fake.health(gb)
-        Fake.setHealth(hb, hmax * 0.3)          -- (the guest's blows, as the host's world has them)
+        Fake.setHealth(gb, gmax * 0.3)          -- (the guest's blows, in the guest's game)
         Fake.setHealth(g.pawn, 100)
         s:run(2)
-        local before = hp(gb)
+        local before, hostBefore = hp(gb), hp(hb)
         Session.sit(h)
         s:run(3.3)
-        check(before < gmax and hp(hb) >= hmax - 1 and hp(gb) >= gmax - 1 and Fake.health(g.pawn) == 1000 and count(g.logs, TIP) == 1,
-            string.format("the guest's own fight on a boss the host's world runs: the host sits, and it's full in both worlds, the "
-                .. "guest rested and told (host %d of %d, guest %d of %d, from %d; guest %d)", hp(hb), hmax, hp(gb), gmax, before,
-                Fake.health(g.pawn)))
+        check(before < gmax and hostBefore < hmax and hp(hb) >= hmax - 1 and hp(gb) >= gmax - 1 and Fake.health(g.pawn) == 1000
+            and count(g.logs, TIP) == 1,
+            string.format("the guest's own fight on a boss by the host: the host sits, and it's full in both worlds, the "
+                .. "guest rested and told (host %d of %d from %d, guest %d of %d from %d; guest %d)", hp(hb), hmax, hostBefore,
+                hp(gb), gmax, before, Fake.health(g.pawn)))
         allErrors(s)
     end
     -- The same fight, the guest the one who sits (out of it, then back in): the host's boss full too, before the fight ends.
@@ -2124,6 +2213,23 @@ local function hostDiesFirst()
     check(field(uh.deathWidget, "NotTick") == false and field(ug.deathWidget, "NotTick") == false,
         "the guest goes down too: nobody's left to wait for, and both respawn")
     allErrors(u)
+
+    -- The guest never struck it, but it's the guest the boss is going for: in its fight all the same. (On the bench, 11-16,
+    -- the host died as the boss swung at a guest who hadn't hit it yet, and was back at once, the boss at full health in
+    -- both worlds.)
+    local v, vh, vg = pair()
+    bossStart(v)
+    local vboss = Session.enemyOn(vh, "boss")
+    Fake.put(field(vboss, "picker"), "SwitchTargetCooldown", 1e9)
+    Fake.put(vboss, "target", net(vh).ghost)
+    Session.enemyMove(vh, "boss", "/PBZCombatAsset/ActorData/Move/E1.E1")
+    v:run(5)
+    check(net(vg).struck["sp:boss"] == true, "a boss going for a guest who never struck it has them in its fight")
+    Session.die(vh)
+    vh.hudLayout:UnRegisterBossHPBar(vboss)
+    v:run(6)
+    check(field(vh.deathWidget, "NotTick") == true, "and the host, down first, waits for them")
+    allErrors(v)
     allErrors(s)
     allErrors(t)
 end
@@ -5012,6 +5118,18 @@ local function bossArmour()
     setState(theirs, FLINCH)
     s:run(0.3)
     check(state(theirs) == FLINCH, "the partner down: the same")
+    -- Up again and in the fight again, a blow of theirs landed: it wears its armour once more. (It stayed off for the rest
+    -- of the fight once the guest had died in it: the audit of 11-15.)
+    Session.revive(g)
+    s:run(4)
+    setState(theirs, "None")
+    local again = Session.enemyOn(g, "boss")
+    swing(g, again, select(1, Fake.health(again)) - 50)
+    s:run(3)
+    setState(theirs, FLINCH)
+    s:run(0.3)
+    check(state(theirs) == "None", "the partner up again and back in the fight: its flinch is let go once more ("
+        .. tostring(state(theirs)) .. ")")
     -- A fight begun alone that the partner then joins: they only watch it, and it keeps the game's flinches.
     s, h, g = pair("CoopBossArmor = On\n")
     g.map = "Map_Other"
@@ -11484,6 +11602,7 @@ return function(print_, scripts)
     enemiesAndHits()
     farEnemy()
     guestRunsWhatsNearIt()
+    guestRunsItsBoss()
     syncRaces()
     hitReactions()
     bossReactions()

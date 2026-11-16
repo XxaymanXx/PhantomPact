@@ -80,25 +80,33 @@ return function(api)
     -- Whether this is the actor scaled at that address: same name, and still the most health it was given. A placed enemy
     -- coming back (a rest, streaming in again) is a new actor with the old name, often on the old address, at base health:
     -- by name alone it was taken for done and fought at 100%.
-    local scaledMax = {}            -- enemy address -> the Health_Max it was scaled to
+    local scaledMax = {}            -- enemy address -> what it was scaled to: the most health on a host, posture on a guest
+    -- (The host goes by health, a guest by posture: a guest's copies take the host's Health_Max, which isn't theirs to judge
+    -- by, and nobody sets the most of their posture but this file. With no test of its own a guest took the new body on an
+    -- old address for the one it had scaled, at every respawn of its own: its posture stood at the base's from then on, and
+    -- one its game then ran for the host fought at the base's health. The audit of 11-15.)
     local function maxOf(e)
-        local ok, v = pcall(function() return e.AttributeSetBase.Health_Max.CurrentValue end)
+        local ok, v = pcall(function()
+            local set = e.AttributeSetBase
+            return api.coop.isHost() and set.Health_Max.CurrentValue or set.Shachi_Max.CurrentValue
+        end)
         -- (A number only: on some actors the read hands back an object, and the comparison with it threw every pass, seen on
         -- the bench beside the forest's YuCong.)
         return ok and type(v) == "number" and v or nil
     end
-    -- (The host's only: a guest's copies take the host's Health_Max, which isn't theirs to judge by. And only a body below
-    -- what it was given: one the game raises itself is still the one scaled.)
+    -- (Only a body below what it was given: one the game raises itself is still the one scaled.)
     local function same(e, addr, name)
         if scaled[addr] ~= name then
             return false
         end
-        -- (Nor one the guest's game runs: its copy here takes the guest's Health_Max, and read as a new body it was made
-        -- tougher again each pass while the bar jumped.)
-        if (net.guestRuns or {})[name] then
+        -- (Nor, on the host, one the guest's game runs: its copy here takes the guest's Health_Max, and read as a new body it
+        -- was made tougher again each pass while the bar jumped. Known by its hold here (coop's heldAlive: on a host, only ever
+        -- a copy the guest's game runs). By the guest's list it never was: that goes by the enemy's id and this file by
+        -- the actor's name, and the log said "1 enemy at 150% health" every second: the bench, 11-16.)
+        if api.coop.isHost() and net.heldAlive and net.heldAlive[addr] then
             return true
         end
-        local was, now = scaledMax[addr], api.coop.isHost() and maxOf(e)
+        local was, now = scaledMax[addr], maxOf(e)
         return not (was and now and now < was * 0.99)
     end
 
@@ -463,6 +471,13 @@ return function(api)
             elseif not (net.enabled and net.target and valid(net.ghost) and not net.ghostHidden) then
                 noteSoloFights()
                 return
+            end
+            -- (A fight marked as fought alone is the partner's too once they're in it: walked in, or a blow of theirs landed,
+            -- as their F 1 says. Any moment without their figure marks it, the second their health sat at 0 as well: a boss
+            -- lost its super armour for the rest of the fight once the guest had died in it and come back. The audit of 11-15.
+            -- One who only watches says no F 1, and the fight stays as it began.)
+            if not net.party and net.partnerFighting then
+                soloFights = {}
             end
             todo, addrs = game.enemiesSoFar()
             at = 1

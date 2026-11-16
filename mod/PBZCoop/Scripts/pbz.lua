@@ -568,6 +568,45 @@ return function(api)
         return not should
     end
 
+    -- True when this world has the enemy alive in its records and merely not out now. The game brings a camp's enemies out
+    -- as its own player walks into the camp's area (a spawn trigger volume) and puts them away again as they leave, whoever
+    -- else is in there. Not one whose area this player stands in: with them there and no enemy out, it died here.
+    game.SPAWN_AREAS = { "BP_AISpawnerTriggerVolume_C", "BP_PBZAISpawnerTriggerVolume_C" }
+    function game.sleepsHere(enemyId, pawn)
+        local s = spawnerOf(enemyId)
+        if not s then
+            return false
+        end
+        local ok, should = pcall(function() return s:IsShouldToSpawn() end)
+        local okA, out = pcall(function() return s.SpawnedAI end)
+        if not (ok and should == true) or (okA and valid(out)) then
+            return false            -- (beaten or between rests; or out, and not found alive: a body)
+        end
+        local okL, at = pcall(function() return s:K2_GetActorLocation() end)
+        local okP, me = pcall(function() return pawn:K2_GetActorLocation() end)
+        if not (okL and okP and type(at) == "table" and type(me) == "table" and at.X and me.X) then
+            return false
+        end
+        local held = false
+        for _, class in ipairs(game.SPAWN_AREAS) do
+            for _, area in ipairs(FindAllOf(class) or {}) do
+                local okI, inside = pcall(function()
+                    return area:CheckIfPointLiesInsideArea({ X = at.X, Y = at.Y, Z = at.Z })
+                end)
+                if okI and inside == true then
+                    held = true
+                    local okM, mine = pcall(function()
+                        return area:CheckIfPointLiesInsideArea({ X = me.X, Y = me.Y, Z = me.Z })
+                    end)
+                    if okM and mine == true then
+                        return false
+                    end
+                end
+            end
+        end
+        return held
+    end
+
     -- The other player's boss, on this PC too: a boss only spawns on the PC whose player started the fight. Returns
     -- its spawner's location, or nil for an enemy that doesn't come from a named spawner, and true if it was beaten in this
     -- save and turned back for the fight (the caller puts it back: see bringBack). revive false: one this save has beaten
@@ -1089,6 +1128,7 @@ return function(api)
             end
         end
         bosses, bossActors = {}, {}
+        barTries = {}       -- (by address: three tries failed on the old boss kept the next one there without a bar)
     end
 
     -- Health_Min: the floor native damage can't push health below. The client holds its copies of the host's
@@ -2033,6 +2073,13 @@ return function(api)
     -- above) makes it this game's fight too.
     function game.isMirrorBar(boss)
         return valid(boss) and mirroredAt[boss:GetAddress()] == true
+    end
+
+    -- This world's enemies are all new ones (this player's own respawn): no bar here is one shown for another's fight. The
+    -- marks go by address and only a bar's own end took one off, so a later boss on a marked address, in a fight of this
+    -- player's own, was taken for a copy: no fight told, and the partner's game ended its side.
+    function game.forgetMirrors()
+        mirroredAt = {}
     end
 
     -- A PvP foe's health on the game's own boss bar (arena.lua: the bars are the game's, not ours). Never a boss to the
@@ -3079,8 +3126,9 @@ return function(api)
 
     -- An ability by class path. False when it won't start. The game hands an enemy its moves as its AI goes along, and a
     -- guest's copy has its AI stopped, so more than half of what the host's enemy did wasn't there to replay: it's given
-    -- here, once per copy and move.
-    local movesLookedAt = {}      -- enemy address .. class path -> true
+    -- here, to a copy that hasn't got it. (Looked for each time it won't start, not once per address and move: an enemy that
+    -- comes back, after this player's own death say, is a new actor that often sits where the old one did, and it was never
+    -- given the old one's moves again. It swung, and hit no one.)
 
     -- Only an ability class goes to the ability system: any other class from a line off the wire, its default object
     -- taken for an ability inside the game, is a crash no pcall catches. Cached by class (a table field: this file is at
@@ -3113,16 +3161,7 @@ return function(api)
         if start() then
             return true
         end
-        local key = actor:GetAddress() .. classPath
-        if movesLookedAt[key] then
-            return false
-        end
-        movesLookedAt[key] = true
         return not hasAbility(asc, cls) and pcall(function() asc:K2_GiveAbility(cls, 1, -1) end) and start()
-    end
-
-    function game.forgetMoves()
-        movesLookedAt = {}
     end
 
     ------------------------------------------------------------------ hit reactions

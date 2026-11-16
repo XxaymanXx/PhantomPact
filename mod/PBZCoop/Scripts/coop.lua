@@ -916,8 +916,9 @@ return function(api)
     -- swinging. So with two players apart, an enemy clearly nearer the guest is run by the guest's game, where the guest is the
     -- player and it wakes as the game always does, and the host's copy follows the guest's lines and moves as a guest's copies
     -- follow the host's. It's the host's again once the two are together, once it's clearly nearer the host, or when the
-    -- guest's game goes quiet about it. Bosses, one fighting the host, and anything without a spawner's id (which the two PCs
+    -- guest's game goes quiet about it. One fighting the host, and anything without a spawner's id (which the two PCs
     -- might name apart) stay the host's. Two players only: a party's relay carries enemy lines from the host alone.
+    -- A boss goes by its fight (handover.bossGoes): the guest's game runs one the guest is fighting and the host isn't.
     local handover = {
         APART_CM = 2500,        -- the two players further apart than this are apart
         TOGETHER_CM = 1500,     -- and back within this, together
@@ -994,7 +995,9 @@ return function(api)
             dead = game.isDead(actor)
         end
         local paidThere = false
-        if not dead and net.guestKilled[name] and game.healthFloor and game.healthFloor(actor) >= 1
+        -- (Not one the guest's game ran: the floor on its copy here is the handover's own, and its death ran its whole
+        -- script there.)
+        if not dead and net.guestKilled[name] and not net.guestRuns[name] and game.healthFloor and game.healthFloor(actor) >= 1
             and game.isBoss and game.isBoss(actor, addr) then
             -- A boss held up by its own floor (its phase ends in a scene) isn't the guest's kill to make: killed from here it
             -- died outside its script, with no scene after, its body left, and the story stuck in the host's save. It's
@@ -1169,8 +1172,10 @@ return function(api)
             if isClient() and hpDamage > 0 then
                 net.hitHere[id] = true      -- (see GK in syncEnemy)
             end
-            -- (A guest in that boss's fight: see net.fightingHere. Any hit, a parry's posture too.)
-            if isClient() and (net.partnerBosses[id] or (game.isBoss and game.isBoss(enemy))) then
+            -- (A guest in that boss's fight: see net.fightingHere. Any hit, a parry's posture too. A host's on a boss of
+            -- the guest's fight, which the guest's game runs, the same: from near it, the boss is this game's from then on,
+            -- handover.hostIn.)
+            if net.partnerBosses[id] or (isClient() and game.isBoss and game.isBoss(enemy)) then
                 net.struck[id] = true
             end
         end
@@ -1656,6 +1661,36 @@ return function(api)
         return math.sqrt((x - o.X) ^ 2 + (y - o.Y) ^ 2 + (z - o.Z) ^ 2)
     end
 
+    -- Host: a boss the guest is fighting (its B) and this player isn't is the guest's game's to run, wherever the two stand.
+    -- This game wakes a boss for its own player alone, once they're in its arena, and past some 45 m of them slows it to a
+    -- stop or puts it away with its camp. So a guest who went in first, the host on its way, outside the wall or back at a
+    -- bell, fought a boss this game had brought out for the fight and never woken: their own stood with it, bar up, and
+    -- never swung ("my friend is host and i guest, the boss cant hit me", 11-15; the bench, 11-16: 15 hits in 25 s with the
+    -- host by it, none with the host 70 m off). It's this game's again the moment this player is in a fight (E at the wall,
+    -- F3, its own bar, the boss going for them), with the health the guest's game last said it had left.
+    function handover.bossGoes(name, actor, runs)
+        local t = net.target
+        if net.party or net.pvp or t == nil or net.partnerGone or not sameMap(t) or net.localLoc == nil
+            or name:sub(1, 3) ~= "sp:" or not net.partnerBosses[name] then
+            return false
+        end
+        return runs or (os.clock() >= (handover.retryAt[name] or 0) and not (game.isDead and game.isDead(actor)))
+    end
+
+    -- Host: this player is in that boss's fight: walked into the guest's (E at the wall, F3), the game's own bar up on it
+    -- here (its fight began in this game too), or a blow of theirs landed from near it. dh: how far it is from them.
+    function handover.hostIn(name, addr, dh)
+        if net.joinedBoss == name or (net.struck[name] and dh <= handover.FIGHT_CM) then
+            return true
+        end
+        for _, boss in ipairs(game.bossActors and game.bossActors() or {}) do
+            if boss:GetAddress() == addr and not (game.isMirrorBar and game.isMirrorBar(boss)) then
+                return true
+            end
+        end
+        return false
+    end
+
     -- Host, an enemy's turn: true while the guest's game runs it. It's handed over, or taken back, as where it is says.
     function handover.guestRuns(name, actor, addr, x, y, z)
         local runs = net.guestRuns[name] == true
@@ -1663,16 +1698,25 @@ return function(api)
             return runs
         end
         local want = false
+        local boss = game.isBoss and game.isBoss(actor, addr)
+        local dh = net.localLoc and handover.dist(x, y, z, net.localLoc) or 0
+        -- (In its fight, or in a fight with it still this game's: it stays, whatever the guest does.)
+        if boss and (handover.hostIn(name, addr, dh) or (not runs and net.toldFighting)) then
+            want = false
+        elseif boss and handover.bossGoes(name, actor, runs) then
+            want = true
         -- (Nothing new handed over while either player's boss bar is up: an arena's other fighters and a boss the codex
         -- doesn't call one, the gold-masked man of the first map, went to the guest's game mid-fight, and the host's own
         -- copy stood held at 1 health with its AI off.)
-        if handover.on and name:sub(1, 3) == "sp:" and not (game.isBoss and game.isBoss(actor, addr))
-            and (runs or not (net.toldFighting or net.partnerFighting)) then
-            local dh, dg = handover.dist(x, y, z, net.localLoc), handover.dist(x, y, z, net.target)
+        elseif handover.on and name:sub(1, 3) == "sp:" and (runs or not (net.toldFighting or net.partnerFighting)) then
+            local dg = handover.dist(x, y, z, net.target)
             if runs then
                 want = dh + handover.NEARER_CM >= dg
             else
                 -- (Within the guest's own reach: its game has it near, and sends what it does.)
+                -- (A boss in no fight too: this game wakes one for its own player alone, as they walk into its arena, and
+                -- one the guest walked up to first stood asleep here, its copy with it, the host 45 m behind: the bench,
+                -- 11-16. In the guest's game it wakes as the game means it to.)
                 want = dg <= ENEMY_RADIUS_CM and dg + handover.NEARER_CM < dh and os.clock() >= (handover.retryAt[name] or 0)
                     and not (dh <= handover.FIGHT_CM and game.enemyAfter(actor, net.ghost) == "host")
                     and not (game.isDead and game.isDead(actor))    -- (a body just gone can read as alive for a turn)
@@ -3054,7 +3098,6 @@ return function(api)
         if whose then
             endFights(whose)
             game.forgetFocus()
-            game.forgetMoves()
             handover.reset()
             return
         end
@@ -3073,7 +3116,6 @@ return function(api)
             game.resetBosses()
         end
         game.forgetFocus()
-        game.forgetMoves()
         handover.reset()
     end
 
@@ -3146,6 +3188,26 @@ return function(api)
             -- (Its queue too, all of it: the turns left in it went on with the list taken away, an error each one.)
             round.seen, round.held, round.queue, round.at = nil, {}, {}, 1
             net.mine = {}       -- (this world's enemies are new ones: what it ran for the host, the host takes back unheard of)
+            -- (And what else was kept of the old ones by their addresses, which the new ones often take: who hit which, which
+            -- copy went with which of the host's, what's an enemy and what's a boss, which bar is only shown for a
+            -- partner's fight, which boss was brought out for one. "Many things gets lost after the guest dies", the
+            -- owner, 11-15; the audit of that day.)
+            game.forgetFocus()
+            net.matchSticky, net.stickySeen = {}, {}
+            net.spawnedFor, net.extraBossWatch = nil, nil
+            if game.forgetActors then
+                game.forgetActors()
+            end
+            if game.forgetMirrors then
+                game.forgetMirrors()
+            end
+            -- (A fight shown here that isn't coming back now, its player down and waiting say, is let go: kept, its B told
+            -- again later was dropped as shown already, and the fight had a bar here and no walls.)
+            for name in pairs(net.partnerBosses) do
+                if not net.pendingBosses[name] then
+                    net.partnerBosses[name], net.fightOf[name] = nil, nil
+                end
+            end
             if again > 0 then
                 log(again .. " enemies the host killed will be removed again as they load.")
             end
@@ -3241,7 +3303,6 @@ return function(api)
             restEvent(kind)
             endFights(from)
             game.forgetFocus()
-            game.forgetMoves()
             handover.reset()
             return
         end
@@ -3494,6 +3555,13 @@ return function(api)
         end
         if net.fellLately(name) then
             return          -- (down a moment, maybe getting up: nothing said; the guest asks again)
+        end
+        -- (Nor for one this world has alive and put away: its camp's enemies are out only while this player is in the
+        -- camp's area. "No" hid them on a guest who walked in first, the host a few steps outside: the guest's enemies
+        -- gone from the screen for 25 s at a time, the fight with them. Nothing said: they're the guest's own till this
+        -- player is in there too.)
+        if game.sleepsHere and game.sleepsHere(name, select(2, getPlayer1())) then
+            return
         end
         if game.isBeaten and game.isBeaten(name) then
             tellBeaten(name, from)
@@ -4957,7 +5025,7 @@ return function(api)
     -- A copy's bar alone isn't being in it: at the black wall, at a bell by the arena or far off, its F 1 kept a dead player
     -- waiting on nobody, while that player's own F 1 kept the copy up. Never a joiner's watch.
     net.FIGHT_NEAR_CM = 10000
-    net.struck = net.struck or {}         -- boss id -> true: this guest hit it in this fight
+    net.struck = net.struck or {}         -- boss id -> true: this player hit it in this fight, or it went for them
     function net.fightingHere(pawn)
         if net.watchingFight then
             return false
