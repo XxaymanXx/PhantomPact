@@ -8533,6 +8533,55 @@ local function localRise()
     allErrors(s)
 end
 
+-- Player 2 back from down, or brought back from a long fall, is set down beside player 1 where there's floor: to the right as
+-- before, else the left, behind, in front, else on player 1's own spot. Straight to the right by a cliff's edge put them over the
+-- drop at every comeback, down again each time till player 1 moved (the stability session's bench, 11-16).
+local function localGround()
+    part("player 2 set down where there's floor")
+    local s, pc, state = localGame()
+    s:run(1.5)
+    local traces = Fake.traces(pc)
+    local here = at(pc.pawn)
+    local yaw = math.rad(field(pc.pawn, "yaw") or 0)
+    local function side(turn)
+        local a = yaw + math.rad(turn)
+        return { X = here.X + math.cos(a) * 200, Y = here.Y + math.sin(a) * 200 }
+    end
+    local function near(l, p, cm)
+        return l ~= nil and gap(l, p) <= (cm or 20)
+    end
+    local function backFromDown()
+        Fake.setHealth(state.p2Pawn, 1)
+        s:run(7.0)
+        return at(state.p2Pawn)
+    end
+    local right, left = side(90), side(-90)
+    check(near(backFromDown(), right) and field(traces, "traced") > 0, "floor all round: back on player 1's right, as before")
+    pc.noFloor = function(l) return near(l, right, 50) end
+    local back = backFromDown()
+    check(near(back, left) and back.Z > 100, "a drop on player 1's right, as at a cliff's edge: back on their left, on its floor")
+    check(count(pc.logs, "No floor to the right: set down on the left") == 1, "said so")
+    pc.noFloor = function(l) return not near(l, here, 50) end
+    check(near(backFromDown(), here, 1), "no floor on any side: on player 1's own spot")
+    pc.noFloor = function(l) return near(l, right, 50) end
+    Fake.put(field(state.p2Pawn, "CharacterMovement"), "MovementMode", 3)     -- (falling, then down from it)
+    s:run(1.5)
+    Fake.setHealth(state.p2Pawn, 1)
+    s:run(7.0)
+    local said = count(pc.logs, "fell out of the world")
+    local cmc = field(state.p2Pawn, "CharacterMovement")
+    Fake.put(cmc, "MovementMode", 3)
+    s:run(2.0)
+    check(count(pc.logs, "fell out of the world") == said,
+        "the old Soul's fall isn't the new one's: its first slip isn't a fall out of the world")
+    s:run(5.0)
+    check(count(pc.logs, "fell out of the world") == said + 1 and near(at(state.p2Pawn), left) and (field(cmc, "stopped") or 0) > 0,
+        "a long fall still is: brought back where there's floor, its speed stopped")
+    Fake.put(cmc, "MovementMode", 1)
+    pc.noFloor = nil
+    allErrors(s)
+end
+
 -- Player 2's Options (BUGHUNT 248): the game's menu layer takes every joystick's as player 1's, so main.dll keeps pad 2's
 -- from it while the mod asks, every frame in play, and the mod opens player 2's menu for each press kept.
 -- Player 2's Cross and Circle do what player 1's do, by the game's own sets and its own rule for a climb spot (11-12).
@@ -11571,6 +11620,7 @@ return function(print_, scripts)
     localScreen()
     localSticks()
     localRise()
+    localGround()
     localButtons()
     localFight()
     localOptions()

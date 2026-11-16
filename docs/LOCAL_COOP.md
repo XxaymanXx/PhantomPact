@@ -18,7 +18,8 @@ played through all ten regions of the story with player 2's presses injected, an
 
 Player 2 shares player 1's save, backpack, dust and gourd count, and rests at the same bells, but wears and holds their
 own: see "Player 2's own gear" below. Player 2 cannot die for good: at zero health they are down for a while and come back
-beside player 1.
+beside player 1, where there's floor: to player 1's right, else their left, behind or in front of them, else on player 1's
+own spot. So a comeback by a cliff's edge never puts player 2 over the drop.
 
 ## Player 2's own gear
 

@@ -325,14 +325,68 @@ return function(api)
         end
     end
 
-    local function besidePoint(p1, up)
+    -- Straight to player 1's right, at their height: where a body is held in the air on a far move, and beside them when the
+    -- floor can't be looked for.
+    function V.rightOf(p1, up)
         local q = p1:K2_GetActorLocation()
         local yaw = math.rad(p1:K2_GetActorRotation().Yaw) + math.pi / 2
         return { X = q.X + math.cos(yaw) * BESIDE_CM, Y = q.Y + math.sin(yaw) * BESIDE_CM, Z = q.Z + up }
     end
+
+    -- Beside player 1 is where there's floor: to their right, else their left, behind them, in front of them, the first with
+    -- floor from V.FLOOR_UP_CM above their feet to V.FLOOR_DOWN_CM below and a clear line to it at chest height (the game's
+    -- visibility channel, as the duel's start looks: the bodies left out); none, player 1's own spot. Straight to the right
+    -- put player 2 over the drop at a cliff's edge every time they came back: they fell, went down, and came back over it
+    -- again, every 8 s till player 1 moved (bench, 11-16: eleven rounds by a camp on a cliff top).
+    V.FLOOR_UP_CM, V.FLOOR_DOWN_CM = 150, 250
+    V.SIDES = { { turn = 90, name = "on the right" }, { turn = -90, name = "on the left" }, { turn = 180, name = "behind" },
+        { turn = 0, name = "in front" } }
+    local function besidePoint(p1, up, body)
+        local ksl = StaticFindObject("/Script/Engine.Default__KismetSystemLibrary")
+        if not valid(ksl) then
+            return V.rightOf(p1, up)
+        end
+        local q = p1:K2_GetActorLocation()
+        local yaw = math.rad(p1:K2_GetActorRotation().Yaw)
+        local got, half = pcall(function() return p1.CapsuleComponent:GetScaledCapsuleHalfHeight() end)
+        half = got and tonumber(half) or 90
+        local feet = q.Z - half
+        local skip, none, broken = { body }, { R = 0, G = 0, B = 0, A = 0 }, false
+        local function hitOf(from, to)
+            local hit = {}
+            local ok, blocked = pcall(function()
+                return ksl:LineTraceSingle(p1, from, to, 0, false, skip, 0, hit, true, none, none, 0)
+            end)
+            broken = broken or not ok
+            return ok and blocked and hit or nil
+        end
+        local chest = q.Z + 30
+        for _, side in ipairs(V.SIDES) do
+            local a = yaw + math.rad(side.turn)
+            local s = { X = q.X + math.cos(a) * BESIDE_CM, Y = q.Y + math.sin(a) * BESIDE_CM }
+            if not hitOf({ X = q.X, Y = q.Y, Z = chest }, { X = s.X, Y = s.Y, Z = chest }) then
+                local floor = hitOf({ X = s.X, Y = s.Y, Z = feet + V.FLOOR_UP_CM + 50 }, { X = s.X, Y = s.Y, Z = feet - V.FLOOR_DOWN_CM - 50 })
+                local z = floor and floor.Location and tonumber(floor.Location.Z)
+                if z and z <= feet + V.FLOOR_UP_CM and z >= feet - V.FLOOR_DOWN_CM then
+                    if side ~= V.SIDES[1] then
+                        log(string.format("No floor to the right: set down %s.", side.name))
+                    end
+                    return { X = s.X, Y = s.Y, Z = z + half + up }
+                end
+            end
+            if broken then              -- (the game wouldn't trace: beside them as before)
+                return V.rightOf(p1, up)
+            end
+        end
+        log("No floor beside: set down on the same spot.")
+        return { X = q.X, Y = q.Y, Z = q.Z + up }
+    end
     local function moveBeside(pawn, p1)
         local far = distance(pawn:K2_GetActorLocation(), p1:K2_GetActorLocation()) > V.FAR_MOVE_CM
-        pawn:K2_SetActorLocation(besidePoint(p1, far and 120 or 30), false, {}, true)
+        -- (Far, it's held in the air till player 1 lands, as the world streams in: the floor is looked for then.)
+        pawn:K2_SetActorLocation(far and V.rightOf(p1, 120) or besidePoint(p1, 30, pawn), false, {}, true)
+        -- (And it starts still: a fall's speed kept would land it hard, down from the fall it was brought back from.)
+        pcall(function() pawn.CharacterMovement:StopMovementImmediately() end)
         if far then
             pcall(function() pawn.CharacterMovement:SetMovementMode(5, 0) end)
             -- The world streams in around player 1: the Soul is set down once player 1 stands on the ground again
@@ -346,7 +400,7 @@ return function(api)
                 local grounded = mode == 1 or mode == 2
                 if grounded or os.clock() - started >= V.FAR_MOVE_MAX_S then
                     if grounded then
-                        pawn:K2_SetActorLocation(besidePoint(p1, 60), false, {}, true)
+                        pawn:K2_SetActorLocation(besidePoint(p1, 60, pawn), false, {}, true)
                     end
                     pcall(function() pawn.CharacterMovement:SetMovementMode(1, 0) end)
                 else
@@ -593,7 +647,10 @@ return function(api)
         V.dropDeathCard()
         p2Dust = nil
         V.dropHud()
-        api.spawnPawnForPlayer2(p1:GetClass())
+        api.spawnPawnForPlayer2(p1:GetClass(), besidePoint(p1, 10))
+        -- (A fall the old Soul was in isn't the new one's: kept, a Soul back over a drop was "out of the world" the moment it
+        -- slipped, and was put straight back over it.)
+        fallingSince = nil
         V.watchControls()
         V.nextMenuKeep = 0
         if valid(state.p2Pawn) then
