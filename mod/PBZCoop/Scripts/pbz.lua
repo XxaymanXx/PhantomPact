@@ -3169,20 +3169,6 @@ return function(api)
         return found
     end
 
-    local function hasAbility(asc, cls)
-        local name, has = cls:GetFName():ToString(), false
-        pcall(function()
-            asc.ActivatableAbilities.Items:ForEach(function(_, spec)
-                pcall(function()
-                    if spec:get().Ability:GetClass():GetFName():ToString() == name then
-                        has = true
-                    end
-                end)
-            end)
-        end)
-        return has
-    end
-
     -- An ability by class path. False when it won't start. The game hands an enemy its moves as its AI goes along, and a
     -- guest's copy has its AI stopped, so more than half of what the host's enemy did wasn't there to replay: it's given
     -- here, to a copy that hasn't got it. (Looked for each time it won't start, not once per address and move: an enemy that
@@ -3204,19 +3190,29 @@ return function(api)
         return game.abilityClassSeen[key]
     end
 
-    -- A copy's own cooldown on a move, cleared: true if it had one running or run. The game's abilities keep a cooldown of
+    -- A copy's own cooldown on a move, cleared: the stamp it had (or nil), and whether the body has the move at all, in
+    -- one walk of its moves. The game's abilities keep a cooldown of
     -- their own (their base class's Cooldown Mark Time, on the move's instance: 30 s on a boss's big moves), stamped as
     -- each copy starts the move for itself: a moment after the host's enemy did, over the link, and again each time a cut
     -- move is taken up. The host's enemy uses a move as it comes off cooldown there, so by the copy's stamp it was a
     -- moment early: refused, and the move played as an animation that hits no one ("the boss can't hit me"). On the
     -- bench, 11-16, at 75 ms and 5% loss: the mounted officer of Pangzhen's 7 s combo, refused on the guest's copy 6 times
     -- of 6, its stamp 24 s old of 30; the stamp cleared, it started. When a move may be used is the host's enemy's to say.
+    -- to: a stamp put back instead (playAbility: refused all the same). This runs for the boss this PC runs itself too,
+    -- as a cut move is taken up (puppets.resumeHost, with CoopBossArmor).
     game.NO_COOLDOWN_MARK = -10000.0       -- (what the game has on a move never used)
-    function game.clearCooldown(asc, cls)
-        local name, cleared = cls:GetFName():ToString(), false
+    function game.clearCooldown(asc, cls, to)
+        local name, was, has = cls:GetFName():ToString(), nil, false
         forEachSpec(asc, function(spec)
             pcall(function()
                 if spec.Ability:GetClass():GetFName():ToString() ~= name then
+                    return
+                end
+                has = true
+                -- (Not one running here: an A that comes in its middle is news of it, a relink's or a flinch's. Cleared,
+                -- the game started it over from its beginning, or, one it won't take again as it runs, kept no stamp
+                -- at all. The main session's second review, 11-16.)
+                if (tonumber(spec.ActiveCount) or 0) > 0 then
                     return
                 end
                 for _, list in ipairs({ spec.NonReplicatedInstances, spec.ReplicatedInstances }) do
@@ -3225,9 +3221,9 @@ return function(api)
                             pcall(function()
                                 local inst = i:get()
                                 local mark = valid(inst) and inst["Cooldown Mark Time"]
-                                if type(mark) == "number" and mark > game.NO_COOLDOWN_MARK then
-                                    inst["Cooldown Mark Time"] = game.NO_COOLDOWN_MARK
-                                    cleared = true
+                                if type(mark) == "number" and (to or mark > game.NO_COOLDOWN_MARK) then
+                                    inst["Cooldown Mark Time"] = to or game.NO_COOLDOWN_MARK
+                                    was = was or mark
                                 end
                             end)
                         end)
@@ -3235,7 +3231,7 @@ return function(api)
                 end
             end)
         end)
-        return cleared
+        return was, has
     end
 
     function game.playAbility(actor, classPath)
@@ -3254,11 +3250,21 @@ return function(api)
         if start() then
             return true
         end
-        if not hasAbility(asc, cls) then
+        -- (One walk of its moves: whether it has this one, and its own cooldown on it cleared if so. See clearCooldown.)
+        local was, has = game.clearCooldown(asc, cls)
+        if not has then
             return pcall(function() asc:K2_GiveAbility(cls, 1, -1) end) and start()
         end
-        -- (Has it and won't start: its own cooldown, as like as not. See clearCooldown.)
-        return game.clearCooldown(asc, cls) and start()
+        -- (Has it and won't start: its own cooldown, as like as not. Refused all the same, for another reason, its stamp
+        -- goes back as it was: left cleared, the move was there again at once for its own AI, a 30 s move the host's
+        -- boss among them.)
+        if was and start() then
+            return true
+        end
+        if was then
+            game.clearCooldown(asc, cls, was)
+        end
+        return false
     end
 
     ------------------------------------------------------------------ hit reactions
@@ -4197,6 +4203,15 @@ return function(api)
             end
         end
         localAim.seen = seen
+        -- (One steered till now that's dead, or that neither player is near, is let go here, its body still on the list,
+        -- as online's turns let go at a death and with nobody near. Kept, it waited with its body and picker for player
+        -- 2's next down, past the body's end or a load, its picker's wait stayed ours, and a later enemy at its address
+        -- took what it was hit for. The main session's second review, 11-16.)
+        for addr in pairs(aim.steered) do
+            if not seen[addr] then
+                game.unfocus(addr)
+            end
+        end
     end
     -- One of the two gone or down: every enemy's picker its own again, what each took forgotten.
     function game.steerLocalOff()
@@ -4213,6 +4228,13 @@ return function(api)
             return
         end
         localAim.loop = true
+        -- (A map load takes this map's enemies with it: each steered one is let go while it's still there. Kept, the old
+        -- map's were looked at once the load was over.)
+        pcall(function()
+            RegisterLoadMapPreHook(function()
+                pcall(game.steerLocalOff)
+            end)
+        end)
         LoopInGameThreadWithDelay(100, function()
             local ok, err = pcall(function()
                 local _, p1 = api.getPlayer1()
