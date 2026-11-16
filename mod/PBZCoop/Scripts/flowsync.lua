@@ -24,6 +24,8 @@ return function(api)
     local LOOK_S = 6                -- host: what its flow added is looked for this often
     local CHUNK = 600               -- characters of items in one event
     local FLOOD = 200               -- more new at once than this is a world loaded or restored, not play: the new baseline
+    local WIN_S, WIN_MAX = 150, 1000    -- host: this long after a boss fell here, up to this many at once are its win
+    local ELSEWHERE_MAX = 3000      -- guest: flow steps of levels it isn't on kept waiting, at most
     -- Never sent: the game's mode, the screen's own state, and the states of a moment (a fight, a dodge, a lock-on).
     local SKIP = { "^GameMode%.", "^UI%.", "^State%.", "^Combat%.", "^Battle%.", "^Input%.", "^Camera%.", "^Ability%.",
         "^Status%.", "^Buff%.", "^Player%.State" }
@@ -31,6 +33,7 @@ return function(api)
     -- told: what the guests have (the baseline and what was sent); sent: what was sent, in order, told again to a guest
     -- (re)linked; seen: new last look, sent if it's still there this one (a tag on for a moment isn't story).
     local flow = { told = nil, sent = {}, seen = nil, linkedN = 0, queue = {}, applied = 0 }
+    flow.elsewhere = {}             -- guest: { item, level }: a level's own flow steps, waiting for this player to stand there
     -- A guest's flag, flow step or bell whose call failed is tried again a calm second on, TRIES times in all: let go
     -- with the rest of the queue, it was lost till the next link (issue #16). No more than AGAIN_MAX wait at once.
     -- again: "kind item" -> the tries so far.
@@ -181,8 +184,13 @@ return function(api)
         -- (Each kind on its own, and never the bells: a scene after a boss that marked hundreds of flow steps took the bell it
         -- woke down with them, and a reconnect never sent it. The bells are the world's list: a load doesn't flood them, and
         -- a guest lights one only where it stands by it.)
+        -- (A boss's win is no load: its scene can mark hundreds of flow steps at once, and a guest who was down as it
+        -- fell, its win not run in their own world (see tellDownFlow), or wasn't there, was told none of them: their
+        -- story stopped at that boss. For WIN_S after a boss falls in this world the limit is the down flow's.)
+        local fell = coop.net and coop.net.bossFellAt
+        local most = (fell and now - fell < WIN_S) and WIN_MAX or FLOOD
         for _, kind in ipairs({ "t", "n" }) do
-            if count[kind] > FLOOD then
+            if count[kind] > most then
                 flow.told[kind], new[kind] = cur[kind], {}
                 log(string.format("Story flow: %d new %s at once (a load?): taken as this world's state, not sent.",
                     count[kind], kind == "t" and "flags" or "flow steps"))
@@ -686,17 +694,57 @@ return function(api)
         return by
     end
 
+    -- Guest: the level a flow step belongs to, when it's a level's own (an actor of that level: "<level>-<actor>...") and
+    -- a story level; nil for a quest's or a scene's (a bare id).
+    local function levelOfStep(item)
+        local level = item:match("^([%w_]+)%-")
+        return level and game.isStoryLevel and game.isStoryLevel(level) and level or nil
+    end
+
     local function guestTick()
-        if (#flow.queue > 0 or next(flow.pending) ~= nil) and game.inPrologue and game.inPrologue() then
+        local waiting = #flow.queue > 0 or #flow.elsewhere > 0 or next(flow.pending) ~= nil
+        if waiting and game.inPrologue and game.inPrologue() then
             -- (Nothing of the host's into this player's prologue: see hostTick.)
-            flow.queue, flow.pending, flow.again, flow.visited = {}, {}, {}, {}
+            flow.queue, flow.elsewhere, flow.pending, flow.again, flow.visited = {}, {}, {}, {}, {}
             return
         end
         -- (Not following now, or the host's story table another: what waits is let go, one to be tried again too.)
-        if (#flow.queue > 0 or next(flow.pending) ~= nil) and api.story
-            and (api.story.follow == false or api.story.mismatch) then
-            flow.queue, flow.pending, flow.again, flow.visited = {}, {}, {}, {}
+        if waiting and api.story and (api.story.follow == false or api.story.mismatch) then
+            flow.queue, flow.elsewhere, flow.pending, flow.again, flow.visited = {}, {}, {}, {}, {}
             return
+        end
+        -- A level's own flow steps are taken on that level only. Marked done on a guest who stood on another, a level
+        -- not yet played there came up with its setting up skipped, and saved so (the same harm hostTick keeps from a
+        -- link's first telling; one map load of the host's sent 74 of them, and it fits the report "guest can't damage
+        -- some bosses, nor later as host"). They wait here for this player to stand on that level, their own load of
+        -- it over; if the session ends first, that level is theirs to play as it comes.
+        if #flow.queue > 0 or #flow.elsewhere > 0 then
+            local _, body = api.getPlayer1()
+            local level = valid(body) and game.mapName and game.mapName(body) or nil
+            level = level ~= "?" and level ~= "" and level or nil
+            local rest = {}
+            for _, q in ipairs(flow.queue) do
+                local of = q.kind == "n" and levelOfStep(q.item) or nil
+                if of and of ~= level then
+                    if #flow.elsewhere < ELSEWHERE_MAX then
+                        flow.elsewhere[#flow.elsewhere + 1] = { item = q.item, level = of }
+                    end
+                else
+                    rest[#rest + 1] = q
+                end
+            end
+            flow.queue = rest
+            if level and #flow.elsewhere > 0 then
+                local still = {}
+                for _, e in ipairs(flow.elsewhere) do
+                    if e.level == level then
+                        flow.queue[#flow.queue + 1] = { kind = "n", item = e.item, host = true }
+                    else
+                        still[#still + 1] = e
+                    end
+                end
+                flow.elsewhere = still
+            end
         end
         if #flow.queue == 0 and next(flow.pending) == nil then
             flow.standBell, flow.standSince, flow.standSaid = nil, nil, nil
@@ -855,6 +903,7 @@ return function(api)
             -- (And what waits, a call to try again among it: kept, it was taken at the next session's first calm second,
             -- maybe in another save. The review of 339d057.)
             flow.queue, flow.owed, flow.downFlow, flow.owedFlow, flow.own, flow.visited = {}, {}, {}, {}, nil, {}
+            flow.elsewhere = {}
             flow.standBell, flow.standSince, flow.standSaid = nil, nil, nil
             return
         end

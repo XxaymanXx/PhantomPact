@@ -100,9 +100,20 @@ return function(api)
             end
             return false
         end
+        -- (Never an ending's condition, "结局条件": whether a player has met one is their own play's to say. Followed by
+        -- its place in the table, the Soul Cliff's "bloodline awakening" was set on any guest whose host was past it.)
+        local function ending(i)
+            for _, c in ipairs(marks) do
+                if (c[i] or ""):find("结局条件", 1, true) then
+                    return true
+                end
+            end
+            return false
+        end
         rows.marks = {}
         for i = 1, rows.count do
-            if rows.optional[i] ~= "True" and (rows.questText[i] or "") == "" and any(marks, i) and not any(finds, i) then
+            if rows.optional[i] ~= "True" and (rows.questText[i] or "") == "" and any(marks, i) and not any(finds, i)
+                and not ending(i) then
                 rows.marks[#rows.marks + 1] = { i = i }
             end
         end

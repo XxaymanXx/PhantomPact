@@ -1069,6 +1069,9 @@ return function(api)
                     net.fellInFight = net.fellInFight or {}
                     net.fellInFight[name] = os.clock()      -- (fell in a fight here: see "up again" below)
                 end
+                if boss and not isClient() then
+                    net.bossFellAt = os.clock()             -- (its win's flow goes out whole: flowsync.lua's hostTick)
+                end
                 -- (Once for each body: a restart or a map change forgets which bodies were told, and a boss's body still
                 -- lying there was told again, its items paid again.)
                 net.bossPaid = net.bossPaid or {}
@@ -2848,6 +2851,7 @@ return function(api)
                     end
                     if boss then
                         endBossFight(name, actor)
+                        net.bossFellAt = os.clock()         -- (its win's flow goes out whole: flowsync.lua's hostTick)
                     end
                 end
                 net.stats.hitsApplied = (net.stats.hitsApplied or 0) + 1

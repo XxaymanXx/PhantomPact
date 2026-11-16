@@ -2802,6 +2802,85 @@ local function hostDownAtBossDeath()
 end
 -- A player report (11-09): a door the host opened before the guest got there, or before it had loaded in the guest's world,
 -- stayed shut for the guest (a hand-in door, the Phantom Tavern's): only F3 got them past.
+-- The other way round: a guest down as the boss falls. Its copy's death runs in its world with its player down, none of
+-- the win's steps (as on the host: hostDownAtBossDeath), and the host's own win, hundreds of flow steps at once, was taken
+-- for a load and told to nobody: the guest's story stopped at that boss. And a level's own flow steps, which a guest
+-- takes only on the level it stands on.
+local function guestDownAtBossDeath()
+    part("a guest down when the boss dies; flow steps of another level")
+    local LIB = "/Script/GameplayAbilities.Default__AbilitySystemBlueprintLibrary"
+    local function has(list, x)
+        for _, v in ipairs(list) do
+            if v == x then
+                return true
+            end
+        end
+        return false
+    end
+    local function step(pc, node)       -- (a flow step run in this PC's world)
+        pc.storyGuids[node] = true
+        pc.storyGuids[#pc.storyGuids + 1] = node
+    end
+    local nodes = {}
+    for i = 1, 300 do
+        nodes[i] = string.format("N_WIN_%03d", i)
+    end
+    local s, h, g = pair()
+    bossStart(s)
+    guestsHit(s)
+    s:run(2)
+    local bossH = Session.enemyOn(h, "boss")
+    for _, pc in ipairs(s.pcs) do
+        Fake.put(Session.enemyOn(pc, "boss"), "winSteps", { tags = { "boss.win" }, nodes = nodes })
+    end
+    s:run(8)                    -- (the host's flow as it stands is what the guest was told)
+    Session.die(g)
+    s:run(3)
+    h.env.PBZ.game.noteLocalMove()
+    h.env.StaticFindObject(LIB):GetAbilitySystemComponent(bossH):BP_ApplyGameplayEffectToSelf()     -- (the host's own kill)
+    s:run(3)
+    h.hudLayout:UnRegisterBossHPBar(bossH)
+    s:run(20)
+    check(has(h.storyGuids, "N_WIN_300") and has(h.globalTags, "boss.win") and not has(g.storyGuids, "N_WIN_300"),
+        "the host's world ran the win, 300 flow steps at once; the guest's, its player down, none of it")
+    Session.revive(g)
+    s:run(30)
+    check(has(g.storyGuids, "N_WIN_001") and has(g.storyGuids, "N_WIN_300") and has(g.globalTags, "boss.win"),
+        "the guest up again has the win's flag and every one of its flow steps")
+    allErrors(s)
+
+    -- Not a load's: hundreds at once with no boss fallen are a world loaded, as before.
+    local u, uh, ug = pair()
+    u:run(8)
+    for i = 1, 300 do
+        step(uh, string.format("N_LOAD_%03d", i))
+    end
+    u:run(20)
+    check(not has(ug.storyGuids, "N_LOAD_001") and count(uh.logs, "new flow steps at once %(a load%?%)") == 1,
+        "300 at once with no boss fallen: a load, told to nobody")
+    allErrors(u)
+
+    -- A level's own flow steps wait for the guest to stand on that level.
+    local t, th, tg = pair()
+    for _, pc in ipairs(t.pcs) do
+        pc.env.PBZ.game.isStoryLevel = function(level)
+            return level == "Map_Xigu" or level == "Map_Other"
+        end
+    end
+    t:run(8)
+    step(th, "Map_Xigu-BP_FlowActor_C_1")
+    step(th, "Map_Other-BP_FlowActor_C_2")
+    step(th, "0F9F320E463C16637297009D16FBD4D1")
+    t:run(12)
+    check(has(tg.storyGuids, "Map_Xigu-BP_FlowActor_C_1") and has(tg.storyGuids, "0F9F320E463C16637297009D16FBD4D1"),
+        "the host's flow steps of the level the guest stands on, and a quest's own, are taken")
+    check(not has(tg.storyGuids, "Map_Other-BP_FlowActor_C_2"), "one of another level's waits")
+    tg.map = "Map_Other"
+    t:run(5)
+    check(has(tg.storyGuids, "Map_Other-BP_FlowActor_C_2"), "and is taken once the guest stands on that level")
+    allErrors(t)
+end
+
 local function doorsOpenedBefore()
     part("doors the host opened before the guest came")
     local s, h, g = pair()
@@ -6552,6 +6631,24 @@ local function followTheHost()
         "but nothing the host hasn't started: the host's point stays its own")
     check(count(eh.logs, "a guest finished") == 1, "said once")
     allErrors(e)
+
+    -- An ending's condition (the Soul Cliff's "bloodline awakening": a row that sets only its flag) is each player's own
+    -- play's to meet. Followed by its place in the table, any guest whose host was past it had it set.
+    local keep, with = Fake.STORY_ROWS, {}
+    for i, r in ipairs(keep) do
+        with[i] = r
+    end
+    table.insert(with, 10, { "forest-ending", "", "False", tags = "dhy.结局条件.sim" })
+    Fake.STORY_ROWS = with
+    local n, nh, ng = pair()
+    nh.storyUpTo(#with)
+    ng.storyUpTo(3)
+    n:run(33)
+    Fake.STORY_ROWS = keep
+    check(ng.storyState("Main-Forest", "1") == 2 and ng.storyMarks["UI.VisibilityTag.Shop"] ~= nil
+        and not ng.storyMarks["dhy.结局条件.sim"],
+        "a guest catches up past an ending's condition, and that isn't set for them: their own play's to meet")
+    allErrors(n)
 
     -- The bags on joining: only the host gives. A guest gets what the host has and they lack; a guest's own things
     -- (a finished save's weapons and money) stay theirs and don't fill a newcomer host's bag.
@@ -11913,6 +12010,7 @@ return function(print_, scripts)
     hostDiesFirst()
     bossItemsOnce()
     hostDownAtBossDeath()
+    guestDownAtBossDeath()
     doorsOpenedBefore()
     farThings()
     farThingsKept()
