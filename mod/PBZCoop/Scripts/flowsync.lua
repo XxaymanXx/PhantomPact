@@ -26,6 +26,7 @@ return function(api)
     local FLOOD = 200               -- more new at once than this is a world loaded or restored, not play: the new baseline
     local WIN_S, WIN_MAX = 150, 1000    -- host: this long after a boss fell here, up to this many at once are its win
     local ELSEWHERE_MAX = 3000      -- guest: flow steps of levels it isn't on kept waiting, at most
+    local START_TAIL_S = 15         -- guest: what the host tells this long after a scene of its own is still that scene's
     -- Never sent: the game's mode, the screen's own state, and the states of a moment (a fight, a dodge, a lock-on).
     local SKIP = { "^GameMode%.", "^UI%.", "^State%.", "^Combat%.", "^Battle%.", "^Input%.", "^Camera%.", "^Ability%.",
         "^Status%.", "^Buff%.", "^Player%.State" }
@@ -34,6 +35,10 @@ return function(api)
     -- (re)linked; seen: new last look, sent if it's still there this one (a tag on for a moment isn't story).
     local flow = { told = nil, sent = {}, seen = nil, linkedN = 0, queue = {}, applied = 0 }
     flow.elsewhere = {}             -- guest: { item, level }: a level's own flow steps, waiting for this player to stand there
+    -- guest: the host's scene now and what it has told in it, and the starts held: boss name -> what was told in the
+    -- scene before its fight, kept from this world while that boss isn't started here (holdStarts).
+    flow.start = { open = false, items = {}, before = {} }
+    flow.startHeld = {}
     -- A guest's flag, flow step or bell whose call failed is tried again a calm second on, TRIES times in all: let go
     -- with the rest of the queue, it was lost till the next link (issue #16). No more than AGAIN_MAX wait at once.
     -- again: "kind item" -> the tries so far.
@@ -701,18 +706,105 @@ return function(api)
         return level and game.isStoryLevel and game.isStoryLevel(level) and level or nil
     end
 
+    -- Guest: a boss's start is this world's own to run. The host walks into a story boss's trigger, its scene plays, and
+    -- the flow steps and flags of it are told here. Taken as done, this world's own trigger went with them, and a player
+    -- who wasn't in it with the host had a boss never started in their world: it followed the host's moves and health
+    -- and took no hit of theirs, in that fight and, the steps being saved, in their own game after ("for some bosses,
+    -- after the host enters, the guest can't deal damage; when the guest becomes the host, still can't": the reports of
+    -- 11-06 and 11-09). The bench, 11-17, Peng Meng: none of a late guest's 300 swings landed. With the host's steps
+    -- left alone, that guest walked into their own trigger mid-fight, their scene played, the boss was started there,
+    -- and their hits were applied.
+    -- So what the host tells from the start of a scene of its own till START_TAIL_S after it waits apart (the host
+    -- tells a step up to two looks after it ran). A boss fight of the host's begun in that time makes it that boss's
+    -- start: kept from this world for as long as the boss lives in the host's and this world's copy of it isn't started
+    -- (its AI's state reads None, as a story boss's does before its scene; no copy here is none started). What this
+    -- world runs itself meanwhile is its own. The rest is taken once the boss is beaten there or started here, as
+    -- before; with no fight begun, as the wait ends.
+    local function unstarted(name)
+        local e = coop.enemyActor and coop.enemyActor(name)
+        if not valid(e) then
+            return true
+        end
+        return not game.isDead(e) and game.aiState ~= nil and game.aiState(e) == "None"
+    end
+
+    local function holdStarts(now)
+        local net = coop.net
+        local s, t = flow.start, net.target
+        local hostBosses = net.hostBosses or {}
+        if t ~= nil and not net.partnerGone and t.Cine == true then
+            if not s.open then
+                s.open, s.items, s.before, s.boss = true, {}, {}, nil
+                for name in pairs(hostBosses) do
+                    s.before[name] = true
+                end
+            end
+            s.endAt = nil
+        elseif s.open and not s.endAt then
+            s.endAt = now
+        end
+        if s.open then
+            local rest = {}
+            for _, q in ipairs(flow.queue) do
+                if q.host and q.kind ~= "b" then
+                    s.items[#s.items + 1] = q
+                else
+                    rest[#rest + 1] = q
+                end
+            end
+            flow.queue = rest
+            for name in pairs(hostBosses) do
+                if not s.before[name] then
+                    s.boss = name
+                end
+            end
+            if s.endAt and now - s.endAt >= START_TAIL_S then
+                local boss = s.boss
+                if boss and #s.items > 0 and not net.hostKilled[boss] and unstarted(boss) then
+                    local held = flow.startHeld[boss] or {}
+                    for _, q in ipairs(s.items) do
+                        held[#held + 1] = q
+                    end
+                    flow.startHeld[boss] = held
+                    log(string.format("Story flow: %d of the host's flags and flow steps are the start of its fight with %s, "
+                        .. "not started in this world: left for this world's own start of it.", #s.items, boss))
+                else
+                    for _, q in ipairs(s.items) do
+                        flow.queue[#flow.queue + 1] = q
+                    end
+                end
+                flow.start = { open = false, items = {}, before = {} }
+            end
+        end
+        for boss, held in pairs(flow.startHeld) do
+            local beaten = net.hostKilled[boss] == true
+            if beaten or not unstarted(boss) then
+                for _, q in ipairs(held) do
+                    flow.queue[#flow.queue + 1] = q
+                end
+                flow.startHeld[boss] = nil
+                log(string.format("Story flow: the start of the host's fight with %s (%d) is taken now: %s.", boss, #held,
+                    beaten and "beaten in the host's world" or "started in this world"))
+            end
+        end
+    end
+
     local function guestTick()
         local waiting = #flow.queue > 0 or #flow.elsewhere > 0 or next(flow.pending) ~= nil
+            or flow.start.open or next(flow.startHeld) ~= nil
         if waiting and game.inPrologue and game.inPrologue() then
             -- (Nothing of the host's into this player's prologue: see hostTick.)
             flow.queue, flow.elsewhere, flow.pending, flow.again, flow.visited = {}, {}, {}, {}, {}
+            flow.start, flow.startHeld = { open = false, items = {}, before = {} }, {}
             return
         end
         -- (Not following now, or the host's story table another: what waits is let go, one to be tried again too.)
         if waiting and api.story and (api.story.follow == false or api.story.mismatch) then
             flow.queue, flow.elsewhere, flow.pending, flow.again, flow.visited = {}, {}, {}, {}, {}
+            flow.start, flow.startHeld = { open = false, items = {}, before = {} }, {}
             return
         end
+        holdStarts(os.clock())
         -- A level's own flow steps are taken on that level only. Marked done on a guest who stood on another, a level
         -- not yet played there came up with its setting up skipped, and saved so (the same harm hostTick keeps from a
         -- link's first telling; one map load of the host's sent 74 of them, and it fits the report "guest can't damage
@@ -904,6 +996,7 @@ return function(api)
             -- maybe in another save. The review of 339d057.)
             flow.queue, flow.owed, flow.downFlow, flow.owedFlow, flow.own, flow.visited = {}, {}, {}, {}, nil, {}
             flow.elsewhere = {}
+            flow.start, flow.startHeld = { open = false, items = {}, before = {} }, {}
             flow.standBell, flow.standSince, flow.standSaid = nil, nil, nil
             return
         end
