@@ -3184,6 +3184,40 @@ return function(api)
         return game.abilityClassSeen[key]
     end
 
+    -- A copy's own cooldown on a move, cleared: true if it had one running or run. The game's abilities keep a cooldown of
+    -- their own (their base class's Cooldown Mark Time, on the move's instance: 30 s on a boss's big moves), stamped as
+    -- each copy starts the move for itself: a moment after the host's enemy did, over the link, and again each time a cut
+    -- move is taken up. The host's enemy uses a move as it comes off cooldown there, so by the copy's stamp it was a
+    -- moment early: refused, and the move played as an animation that hits no one ("the boss can't hit me"). On the
+    -- bench, 11-16, at 75 ms and 5% loss: the mounted officer of Pangzhen's 7 s combo, refused on the guest's copy 6 times
+    -- of 6, its stamp 24 s old of 30; the stamp cleared, it started. When a move may be used is the host's enemy's to say.
+    game.NO_COOLDOWN_MARK = -10000.0       -- (what the game has on a move never used)
+    function game.clearCooldown(asc, cls)
+        local name, cleared = cls:GetFName():ToString(), false
+        forEachSpec(asc, function(spec)
+            pcall(function()
+                if spec.Ability:GetClass():GetFName():ToString() ~= name then
+                    return
+                end
+                for _, list in ipairs({ spec.NonReplicatedInstances, spec.ReplicatedInstances }) do
+                    pcall(function()
+                        list:ForEach(function(_, i)
+                            pcall(function()
+                                local inst = i:get()
+                                local mark = valid(inst) and inst["Cooldown Mark Time"]
+                                if type(mark) == "number" and mark > game.NO_COOLDOWN_MARK then
+                                    inst["Cooldown Mark Time"] = game.NO_COOLDOWN_MARK
+                                    cleared = true
+                                end
+                            end)
+                        end)
+                    end)
+                end
+            end)
+        end)
+        return cleared
+    end
+
     function game.playAbility(actor, classPath)
         if not classPath:match("^/[%w_/%-]+%.[%w_%-]+$") or #classPath > 256 then
             return false
@@ -3200,7 +3234,11 @@ return function(api)
         if start() then
             return true
         end
-        return not hasAbility(asc, cls) and pcall(function() asc:K2_GiveAbility(cls, 1, -1) end) and start()
+        if not hasAbility(asc, cls) then
+            return pcall(function() asc:K2_GiveAbility(cls, 1, -1) end) and start()
+        end
+        -- (Has it and won't start: its own cooldown, as like as not. See clearCooldown.)
+        return game.clearCooldown(asc, cls) and start()
     end
 
     ------------------------------------------------------------------ hit reactions
@@ -5042,7 +5080,7 @@ return function(api)
     -- Only what was earned goes out: a rise across a new body (a respawn, a trip to a partner, a load: the dust read low, then
     -- the saved amount back) or while down isn't, and the count starts again from there. Each was sent whole
     -- as a gain and paid to everyone, over and over (player report 11-09: three players, an hour, 600k and 1.5m).
-    game.dustWatch = { addr = nil, quietUntil = 0, QUIET_S = 10, AFTER_DOWN_S = 5 }
+    game.dustWatch = { addr = nil, quietUntil = 0, bodyUntil = 0, QUIET_S = 10, AFTER_DOWN_S = 5 }
     game.COPY_PAY_S = 5
     function game.watchCurrency(pawn, sendEvent)
         local d = dust(pawn)
@@ -5053,6 +5091,7 @@ return function(api)
         local addr = pawn:GetAddress()
         if addr ~= w.addr then
             w.quietUntil = w.addr and now + w.QUIET_S or w.quietUntil     -- (a new body, not the first one seen)
+            w.bodyUntil = w.addr and now + w.QUIET_S or w.bodyUntil
             w.addr = addr
         end
         -- (Not a scene: a boss's dust comes in its death scene, and the partners' share of it was lost.)
@@ -5062,14 +5101,19 @@ return function(api)
             -- takes 3 s and keeps the body, so a wallet given back with it came after it)
         end
         local still = down or now < w.quietUntil
-        if lastDust ~= nil and not still then
+        if lastDust ~= nil then
             local gained = d - lastDust - syncedDust
-            -- (A copy's own pay for a death that was the partner's: back out of the wallet, and not shared on. killForReal.)
+            -- (A copy's own pay for a death that was the partner's: back out of the wallet, and not shared on. killForReal.
+            -- While this player is down or just up as well: the game pays a player who's down, and with nothing looked at
+            -- then, one down in the fight as the boss fell kept the copy's own and had the share on top once up: on the
+            -- bench, 11-16, 280000 to the 140000 of the host who killed it. Only across a new body it isn't looked for,
+            -- whose wallet reads low and then comes back: a respawn keeps the body, and its wallet read true all through
+            -- one on the bench.)
             local pay = game.copyPay
             if pay and now > pay.untilAt then
                 game.copyPay, pay = nil, nil
             end
-            if pay and gained > 0 then
+            if pay and gained > 0 and now >= w.bodyUntil then
                 local back = math.min(gained, pay.dust)
                 game.copyPay = nil
                 if pcall(function() pawn:ChangeDustNumInternal(-back) end) then
@@ -5077,7 +5121,7 @@ return function(api)
                     log("A copy's own dust for the partner's kill taken back: " .. math.floor(back) .. " (their share of it comes).")
                 end
             end
-            if gained > 0 then
+            if gained > 0 and not still then
                 sendEvent("C", gained)
             end
         end

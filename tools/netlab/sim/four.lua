@@ -2446,6 +2446,63 @@ local function bossItemsOnce()
         string.format("the host's kill of its boss: its dust once each (host %d, guest %d)",
             Session.dust(uh) - uh0, Session.dust(ug) - ug0))
     allErrors(u)
+    -- The same with the guest down in the fight, its respawn held: the dust watch looked at no rise of a player who's
+    -- down, so the copy's own stayed in the wallet and the share came on top (the bench, 11-16: the twin-blade officer of
+    -- Pangzhen, 280000 for the guest who was down, 140000 for the host who killed it).
+    local v, vh, vg = pair()
+    bossStart(v)
+    Fake.put(Session.enemyOn(vh, "boss"), "dustLoot", 700)
+    Fake.put(Session.enemyOn(vg, "boss"), "dustLoot", 700)
+    vg.paysAtLevelZero = true
+    v:run(5)
+    local vh0, vg0 = Session.dust(vh), Session.dust(vg)
+    Session.die(vg)
+    vg.hudLayout:UnRegisterBossHPBar(Session.enemyOn(vg, "boss"))
+    v:run(6)
+    check(field(vg.deathWidget, "NotTick") == true, "the guest down in the host's boss fight waits")
+    local vtheirs = Session.enemyOn(vh, "boss")
+    swing(vh, vtheirs, 0)
+    Fake.put(vtheirs, "dead", true)
+    vh.pawn:ChangeDustNumInternal(700)
+    v:run(3)
+    check(Session.dust(vg) - vg0 == 0, "the copy's own, paid as it died with the guest still down, is back out of the wallet: "
+        .. (Session.dust(vg) - vg0))
+    Session.respawned(vg)                           -- (the fight over: the guest's respawn goes on, and its share comes)
+    Session.revive(vg)
+    v:run(25)
+    check(Session.dust(vh) - vh0 == 700 and Session.dust(vg) - vg0 == 700,
+        string.format("the host's kill with the guest down in the fight: its dust once each (host %d, guest %d)",
+            Session.dust(vh) - vh0, Session.dust(vg) - vg0))
+    allErrors(v)
+end
+
+-- A copy's own cooldown ("the boss can't hit me"; the bench, 11-16, at 75 ms and 5% loss: the mounted officer of Pangzhen's
+-- 7 s combo, refused on the guest's copy 6 times of 6, an animation that hit no one). The game's abilities keep a cooldown
+-- of their own, stamped as each copy starts the move for itself: a moment after the host's enemy did, over the link. The
+-- host's enemy uses a move as it comes off cooldown there, so by the copy's stamp it was a moment early, and refused.
+local function copyCooldown()
+    part("a copy's own cooldown")
+    local SKILL = "/PBZCombatAsset/ActorData/Mobs/Fake/GA_Fake_Skill_03.GA_Fake_Skill_03_C"
+    local s, h, g = pair()
+    bossStart(s)
+    s:run(2)
+    local boss, copy = Session.enemyOn(h, "boss"), Session.enemyOn(g, "boss")
+    Fake.cooldownMove(h, boss, SKILL, 30)
+    local onCopy = Fake.cooldownMove(g, copy, SKILL, 30)
+    local function use()
+        Fake.running(h, boss, "GA_Fake_Skill_03_C", true)
+        Session.enemyMove(h, "boss", "/PBZCombatAsset/ActorData/Move/E1.E1")
+        s:run(1.5)
+        Fake.running(h, boss, "GA_Fake_Skill_03_C", false)
+        Session.enemyMove(h, "boss", nil)
+    end
+    use()
+    check(onCopy.starts == 1, "the host's boss uses a move: it starts on the guest's copy as an attack (" .. onCopy.starts .. ")")
+    s:run(28.4)         -- (30 s on by the host's clock, as it comes off cooldown there: 29.9 s by the copy's own stamp)
+    use()
+    check(onCopy.starts == 2, "and again as it comes off cooldown on the host, a moment early by the copy's own stamp: it "
+        .. "starts all the same (" .. onCopy.starts .. ")")
+    allErrors(s)
 end
 
 local function hostDiesFirst()
@@ -12133,6 +12190,7 @@ return function(print_, scripts)
     holdingForTwo()
     hostDiesFirst()
     bossItemsOnce()
+    copyCooldown()
     hostDownAtBossDeath()
     guestDownAtBossDeath()
     doorsOpenedBefore()

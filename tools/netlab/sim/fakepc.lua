@@ -494,6 +494,41 @@ function Fake.running(pc, actor, class, active)
         Ability = { IsValid = function() return true end, GetClass = function() return cls end } }
 end
 
+-- A move of an enemy's with the game's own cooldown, as its abilities' base class keeps one (the bench, 11-16:
+-- BP_AbilityBase's "Cooldown Mark Time" on the move's one instance, 30 s on a boss's combo): the ability system starts it
+-- only once that long has passed since the mark, and marks it as it starts. path: its class's, found by it from then on.
+-- Returns { starts, inst }.
+function Fake.cooldownMove(pc, actor, path, cooldown, mark)
+    local cls = pc.found[path]
+    if not cls then
+        cls = object(pc, "LegoAbilityBlueprintGeneratedClass")
+        rawset(cls, "__path", path)
+        rawset(cls, "__name", path:match("([^.]+)$"))
+        put(cls, "GetCDO", function() return cls end)       -- (an ability class: its default object is an ability)
+        pc.found[path] = cls
+    end
+    local asc = pc.env.StaticFindObject("/Script/GameplayAbilities.Default__AbilitySystemBlueprintLibrary"):GetAbilitySystemComponent(actor)
+    local inst = object(pc, "LegoAbility", { ["Cooldown Mark Time"] = mark or -10000.0 })
+    local move = { starts = 0, inst = inst }
+    local items = rawget(asc, "__fields").ActivatableAbilities.Items.items
+    items[#items + 1] = { class = path:match("([^.]+)$"), ActiveCount = 0,
+        Ability = { IsValid = function() return true end, GetClass = function() return cls end },
+        NonReplicatedInstances = list({ inst }), ReplicatedInstances = list({}) }
+    local before = rawget(asc, "__fields").TryActivateAbilityByClass
+    put(asc, "TryActivateAbilityByClass", function(self, class)
+        if class ~= cls then
+            return before(self, class)
+        end
+        if pc.now - rawget(inst, "__fields")["Cooldown Mark Time"] < cooldown then
+            return false
+        end
+        put(inst, "Cooldown Mark Time", pc.now)
+        move.starts = move.starts + 1
+        return true
+    end)
+    return move
+end
+
 -- An effect on a body, as the game puts one there: a system from the effects pack, on its mesh.
 function Fake.effectOn(pc, actor, path, socket)
     local system = pc.found[path]
