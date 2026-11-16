@@ -23,7 +23,7 @@ start.)
 You don't need Python: the connection runs inside the game (`PBZCoop\dlls\main.dll`). Its source is in the GitHub
 repository (`native/`).
 
-**Both players must use the same version.** 1.5.0 has a new connection, and 1.4.1 or older can't connect to it.
+**Both players must use the same version.** This version has a new connection, and 1.7.3 or older can't connect to it.
 
 ## Install (both players)
 
@@ -99,11 +99,13 @@ With more than two players:
 - What anyone gets, everyone gets, and if two of you are given the same thing at once it counts once.
 - If a guest drops out the others play on. If the host leaves, it's over for everyone.
 - Enemies are shared near the host, and near a guest up to 120 m from the host. Further off the host's game leaves them
-  asleep, so each guest out there fights a copy of their own, and the first kill counts for everyone.
+  asleep, so each guest out there fights a copy of their own, and the first kill counts for everyone. A guest watching
+  such a fight from more than 30 m off sees the enemy stand still: step closer to be in it.
 - PvPvE and Revive stay off. PvP matches (F6) work with up to six, in two teams.
 - The host sends about 50-100 KB/s with three guests, so a slow upload will show.
 
-- **Updating:** both players update. Extract the new version over the old one, then set `Role` / `HostAddress` again.
+- **Updating:** both players update. Close the game first: while it runs, the old `main.dll` stays in place under the
+  new files. Then extract the new version over the old one, and set `Role` / `HostAddress` again.
   What an older version left in the `PBZCoop` folder (the `relay` folder, and `net_in.txt`, `net_out.txt` and the
   `net_events` files) isn't used any more; you can delete it.
 - **Playing alone:** set `Role = Off`.

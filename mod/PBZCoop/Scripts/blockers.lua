@@ -190,6 +190,19 @@ return function(api)
     -- word, as is one last seen open before a load or time alone on the map. Doors only: a lever is as it was. The main
     -- session's second review, 11-16. shutHere: name -> true; openAt: name -> when a look last saw it open.
     local shutHere, openAt = {}, {}
+    -- A guest tells only an opening of its own player's doing: one within PRESS_S of their walk up to a switch (the end
+    -- of the game's own walk to it, as a press begins). A door or lever a guest's world opens by itself (a scene's, a
+    -- quest step's, a fight's end there, that guest further on in the story) opened the host's copy, and wrote that
+    -- switch's flow flags into the host's save: the host's world decides the story. The host tells any opening, and
+    -- names its open ones again every OFFER_S. (What a guest no longer tells: a door pushed open with no press, a gate
+    -- that opens more than PRESS_S after its lever. The third review.)
+    local PRESS_S = 20
+    blockers.walkedUpAt = -1e9
+    pcall(function()
+        RegisterHook("/Script/ProjectPBZ.PBZSwitchBase:FinishMoveToAsync", function()
+            blockers.walkedUpAt = os.clock()
+        end)
+    end)
 
     local function sharedSwitch(s)
         local ok, cn = pcall(function() return s:GetClass():GetFName():ToString() end)
@@ -263,20 +276,30 @@ return function(api)
         end
     end
 
+    -- (True if it was opened.)
     local function openHere(s, name)
-        pcall(function() s:SwitchWithoutPlaySequence() end)
         -- (And the flags its own flow raises once it's opened, its presets' AddTagWhenSuccess, as a partner's chest's are
         -- raised (coop.lua's OF): the word's call isn't the player's opening, and a quest's door a partner opened first
         -- would stand open here without them. None seen yet: the doors on the bench have no presets. The second review.)
+        local okT, tags = false, nil
         if api.flowsync and api.flowsync.raise and api.game and api.game.successTags then
-            local okT, tags = pcall(api.game.successTags, s)
-            if okT and type(tags) == "table" and #tags > 0 then
-                api.flowsync.raise(tags, name)
-            end
+            okT, tags = pcall(api.game.successTags, s)
+        end
+        local flags = okT and type(tags) == "table" and #tags > 0
+        -- (One with flags of its own flow is a story's: a guest whose story is its own (FollowHostStory = Off) opens it
+        -- themselves, its flags with it, as the host's chests aren't opened for them (coop.lua's OC). Opened by word, it
+        -- had the host's flags written into their save with every naming, 20 s apart. The third review.)
+        if flags and api.story and api.story.follow == false and not coop.isHost() then
+            return false
+        end
+        pcall(function() s:SwitchWithoutPlaySequence() end)
+        if flags then
+            api.flowsync.raise(tags, name)
         end
         switchSeen[name] = true
         blockers.broken = blockers.broken + 1
         log("The other player opened " .. name .. ": open here too.")
+        return true
     end
 
     -- Names, a batch an event.
@@ -333,14 +356,13 @@ return function(api)
                     if pending[name] then
                         pending[name] = nil
                         if not open then
-                            openHere(s, name)
-                            open = true
+                            open = openHere(s, name)
                         end
                     end
                     openNow[name] = open or nil
                     local was = switchSeen[name]
                     switchSeen[name] = open
-                    if was == false and open then
+                    if was == false and open and (coop.isHost() or now - blockers.walkedUpAt <= PRESS_S) then
                         local okL, at = pcall(function() return s:K2_GetActorLocation() end)
                         if okL and at and api.distance(at, here) <= NEAR_CM then
                             blockers.sent = blockers.sent + 1

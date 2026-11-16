@@ -358,8 +358,10 @@ a long one is a list told at a join, whose copies would be packets of their own.
 An older version drops a copy as it drops any event it has had, so copies alone would mix with 1.7.3. The protocol is 5
 all the same from this version on: a party's enemy line says "asleep" in its boss field (2, and 3 for a boss), which a
 1.7.3 guest read as a thug's and brought a beaten boss back by, and a boss's win goes out whole, which a 1.7.3 guest on
-another level marked done where it stood (BUGHUNT 302). So 1.7.3 and this version don't link: each is told that both PCs
-need the same version. (While they did, the review of 11-13 counted 3.5-8.8% more packets from the 1.7.3 side of a mixed
+another level marked done where it stood (BUGHUNT 302). So 1.7.3 and this version don't link. A host of this version
+answers a 1.7.3 guest's knock with its own header, once a second at most, so both are told that both PCs need the same
+version (BUGHUNT 334); a guest of this version at a 1.7.3 host hears nothing back (that host is told), and is told to
+check the address. (While they did, the review of 11-13 counted 3.5-8.8% more packets from the 1.7.3 side of a mixed
 pair: a 1.7.3 partner hurries an acknowledgement for each copy.)
 
 Two players, an hour of simulated play on each connection, 1.7.3 against this (sure events, host to guest):

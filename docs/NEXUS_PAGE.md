@@ -155,7 +155,7 @@ Online co-op needs none of these pad steps. If your pads stop working in other g
 [list]
 [*]Phantom Blade Zero on Steam, for every player
 [*][url=https://www.nexusmods.com/phantombladezero/mods/5][color=#ff2222]UE4SS for Phantom Blade Zero[/color][/url] 1.0.1 by Vercadi, for every player
-[*]Everyone on the same Phantom Pact version: 1.4.1 or older can’t connect to 1.5.0
+[*]Everyone on the same Phantom Pact version: 1.7.3 or older can’t connect to this one
 [*]No Python needed: the connection runs inside the game
 [/list]
 

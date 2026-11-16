@@ -455,6 +455,7 @@ local function sharing()
         levers[pc] = lv
     end
     s:run(1.5)
+    Fake.arrive(b, levers[b])                       -- (its player walks up to it, as a press begins)
     Fake.put(levers[b], "CurSwitchState", true)
     s:run(1.5)
     check(field(levers[h], "CurSwitchState") == true and field(levers[a], "CurSwitchState") == true
@@ -1025,7 +1026,72 @@ local function aPartysBystander()
         and net(tc).toldFighting ~= true and count(tc.sent, "^E F 1") == 0,
         "the game's own bar on the watcher's copy before the fighter's fight is told: held all the same, in no fight")
     check(not tc.env.PBZ.game.bossFightActive(), "and with no partner's fight to mirror, that bar is taken down")
+    -- (The third review.) That bar was told as a fight of the watcher's own before it was taken down, and nothing ended
+    -- it: the host filed the fight as the watcher's, the fighter's own was never told, and the fighter's lost fight
+    -- never started over: the next try began where the last ended.
+    check(count(tc.sent, "^E B sp:boss") == 0, "nor told to anyone as a fight of the watcher's")
+    local onH, onB = Session.enemyOn(th, "boss"), Session.enemyOn(tb, "boss")
+    tb.hudLayout:RegisterBossHPBar(onB)             -- (the fighter's own fight begins)
+    t:run(3)
+    check(count(tb.sent, "^E B sp:boss") >= 1 and net(th).fightOf["sp:boss"] == 3,
+        "the fighter's own fight is told, and the host has it as theirs")
+    local left, most = Fake.health(onB)
+    while left > most * 0.3 + 1 do
+        left = math.max(most * 0.3, left - most * 0.1)
+        swing(tb, onB, left)
+        t:run(0.6)
+    end
+    t:run(2)
+    local low, hostMost = Fake.health(onH)
+    Session.die(tb)
+    tb.hudLayout:UnRegisterBossHPBar(onB)           -- (the game takes the bar down as its player dies)
+    t:run(7)
+    Session.moveTo(tb, 2100 - 15000, 2900)          -- (back at a bell 150 m off, its world refreshed: its boss new, at full)
+    Session.respawned(tb)
+    Fake.setHealth(onB, select(2, Fake.health(onB)))
+    Session.revive(tb)
+    t:run(8)
+    check(low < hostMost * 0.4 and select(1, Fake.health(onH)) >= hostMost - 1,
+        string.format("the fighter loses alone: the boss at full on the host again (it stood at %.0f; now %.0f/%.0f)", low,
+            select(1, Fake.health(onH)), hostMost))
     allErrors(t)
+
+    -- A partner's fight that has moved away from where the boss sleeps on the host, where a held copy stays: the
+    -- watcher 43 m off is the nearest to theirs now. A stray bar on it is still that fight's mirror.
+    local u = party(list)
+    local uh, ub, uc = u.pcs[1], u.pcs[3], u.pcs[4]
+    Session.moveTo(uh, -6000, 0)
+    Session.moveTo(u.pcs[2], -5800, 100)
+    Session.moveTo(ub, 2100, 2900)
+    Session.moveTo(uc, 6300, 3000)
+    u:run(3)
+    local fighters, watchers = Session.enemyOn(ub, "boss"), Session.enemyOn(uc, "boss")
+    ub.hudLayout:RegisterBossHPBar(fighters)
+    u:run(3)
+    Session.moveTo(ub, -3500, 3000)                 -- (their fight, 55 m from that spot now)
+    u:run(2)
+    uc.hudLayout:RegisterBossHPBar(watchers)
+    u:run(6)
+    check(brain(watchers) == false and floor(watchers) == 1 and net(uc).toldFighting ~= true
+        and uc.env.PBZ.game.isMirrorBar(watchers) == true and count(uc.sent, "^E B sp:boss") == 0,
+        "a partner's fight moved 55 m off, the watcher the nearest to their held copy: a stray bar on it is still the mirror")
+    allErrors(u)
+
+    -- A guest's own fight begun from 40 m (the game's own 45 m), a partner in no fight standing a little nearer, 35 m
+    -- from it: the fight is that guest's all the same.
+    local v = party(list)
+    local vh, va, vc = v.pcs[1], v.pcs[2], v.pcs[4]
+    Session.moveTo(vh, -6000, 0)
+    Session.moveTo(v.pcs[3], -5800, 100)
+    Session.moveTo(va, 5500, 3000)
+    Session.moveTo(vc, 6000, 3000)
+    v:run(3)
+    local mine = Session.enemyOn(vc, "boss")
+    vc.hudLayout:RegisterBossHPBar(mine)
+    v:run(4)
+    check(brain(mine) == true and floor(mine) == 0 and count(vc.sent, "^E B sp:boss") >= 1,
+        "a guest's own fight begun from 40 m, a partner in no fight 35 m from it: theirs, awake, and told")
+    allErrors(v)
 end
 
 -- A party's guest far from an enemy the host's lines tell of (another guest is by it) and that its own world hasn't:
@@ -3657,6 +3723,7 @@ local function doorsOfTheGames()
     local hostDoor, guestDoor = door(h, KEY), door(g, KEY)
     local hostGate, guestGate = door(h, GATE), door(g, GATE)
     s:run(3)
+    Fake.arrive(g, guestDoor)
     Fake.put(guestDoor, "DoorOpen", true)           -- (the guest opens it with its key)
     s:run(3)
     check(count(g.sent, "^E SWO " .. KEY .. "$") == 1, "a door the guest opens with its key is told ("
@@ -3693,7 +3760,55 @@ local function doorsOfTheGames()
     g.switches[#g.switches + 1] = guestGate
     s:run(25)
     check(field(guestGate, "DoorOpen") == true, "one that went out of reach and came back shut is opened by the host's word, as ever")
+    -- A door the guest's world opens by itself, no walk up of its player's (a scene's, a quest step's, a fight's end,
+    -- that guest further on in the story): not told, and shut in the host's world, whose story it isn't yet. The host's
+    -- own are told, press or not. (The third review.)
+    local SELF = "BP_Block_Door_C_UAID_5"
+    local hostSelf, guestSelf = door(h, SELF), door(g, SELF)
+    s:run(3)
+    Fake.put(guestSelf, "DoorOpen", true)
+    s:run(3)
+    check(count(g.sent, "^E SWO " .. SELF .. "$") == 0 and field(hostSelf, "DoorOpen") == false,
+        "a door the guest's world opens by itself, no press of its player's: not told, shut in the host's world")
+    Fake.put(hostSelf, "DoorOpen", true)
+    s:run(3)
+    check(count(h.sent, "^E SWO " .. SELF .. "$") == 1, "one the host's world opens by itself is told all the same")
     allErrors(s)
+
+    -- FollowHostStory = Off: a switch with flags of its own flow is a story's, and the guest's own to open; a plain door
+    -- still opens by the host's word. (Every naming, 20 s apart, wrote the host's flags into that guest's save.)
+    local o, oh, og = pair("FollowHostStory = Off\n")
+    local QUEST, PLAIN = "BP_Block_Gate_C_UAID_6", "BP_SingleDoor_Poverty_C_UAID_7"
+    local hostQuest, guestQuest = door(oh, QUEST), door(og, QUEST)
+    local hostPlain, guestPlain = door(oh, PLAIN), door(og, PLAIN)
+    Fake.flags(hostQuest, { "quest.gate.open" })
+    Fake.flags(guestQuest, { "quest.gate.open" })
+    o:run(3)
+    Fake.put(hostQuest, "DoorOpen", true)
+    Fake.put(hostPlain, "DoorOpen", true)
+    o:run(25)
+    local function has(list, x)
+        for _, v in ipairs(list) do
+            if v == x then
+                return true
+            end
+        end
+        return false
+    end
+    check(field(guestPlain, "DoorOpen") == true, "FollowHostStory = Off: a plain door the host opens is open for the guest")
+    check(field(guestQuest, "DoorOpen") == false and not has(og.globalTags, "quest.gate.open"),
+        "one with flags of its own flow stays the guest's own: not opened by word, none of its flags raised")
+    allErrors(o)
+    local f, fh, fg = pair()
+    local hostQ2, guestQ2 = door(fh, QUEST), door(fg, QUEST)
+    Fake.flags(hostQ2, { "quest.gate.open" })
+    Fake.flags(guestQ2, { "quest.gate.open" })
+    f:run(3)
+    Fake.put(hostQ2, "DoorOpen", true)
+    f:run(5)
+    check(field(guestQ2, "DoorOpen") == true and has(fg.globalTags, "quest.gate.open"),
+        "following the host's story: opened by word, its flags raised with it")
+    allErrors(f)
 
     -- A lever has no DoorOpen. Asked for one at every look (1.5 s) of every lever, lift and cage around: a name the class
     -- hasn't got is the read that took the game down on the bench (an actor still streaming in). Asked till the class is
@@ -3711,6 +3826,7 @@ local function doorsOfTheGames()
     t:run(3)
     check(field(guestLever, "CurSwitchState") == true and count(th.sent, "^E SWO " .. LEVER .. "$") == 1,
         "pulled by the host, it's still told and opens for the guest")
+    Fake.arrive(tg, tDoor)
     Fake.put(tDoor, "DoorOpen", true)               -- (and a door the guest opens then, long after)
     t:run(3)
     check(count(tg.sent, "^E SWO " .. KEY .. "$") == 1, "and a door opened after all that is still seen and told")
@@ -3744,6 +3860,7 @@ local function farThings()
     local chain, lever = chainOn(a, 60200.0), leverOn(a, 60300.0)
     s:run(2)
     Fake.put(chain, "bBroken", true)
+    Fake.arrive(a, lever)
     Fake.put(lever, "CurSwitchState", true)
     s:run(3)
     check(count(a.sent, "^E BLK " .. CHAIN .. "$") == 1 and count(a.sent, "^E SWO " .. LEVER .. "$") == 1, "(guest a tells both)")
@@ -3801,6 +3918,7 @@ local function farThingsKept()
     local chain, lever = Fake.blocker(a, CHAIN, 60200.0, 0.0, 100.0), leverOn(a, 60300.0)
     s:run(2)
     Fake.put(chain, "bBroken", true)
+    Fake.arrive(a, lever)
     Fake.put(lever, "CurSwitchState", true)
     s:run(3)
     -- Everyone to another map and back: what the host waits for there is still that map's.

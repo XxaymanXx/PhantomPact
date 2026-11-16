@@ -121,6 +121,10 @@ out of view, and execution points on the enemies they can finish, all their own.
 half of whoever it's after, up once it's hurt. The gourd on it shows their own charges. Going
 down, the game's death card plays in their half alone, and they get back up off the ground beside player 1.
 
+With both players near, an enemy goes for whoever leads by the online rule (AGGRO.md): who's nearer, whose blows landed
+lately, and a drink from the gourd, turning only after a hold. The game's difficulty stays the one you chose, with the
+game's own enemy numbers.
+
 ## What the game hardwires to player 1, and how 1.5.0 bridges it
 
 - **Interaction prompts** are drawn for player 1 only, on the things themselves, and player 2's own search would play them
