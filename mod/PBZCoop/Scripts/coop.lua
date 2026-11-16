@@ -5340,10 +5340,19 @@ return function(api)
             return false
         end
         for _, boss in ipairs(game.bossActors()) do
-            if not (game.isMirrorBar and game.isMirrorBar(boss)) then
+            local addr = boss:GetAddress()
+            local mirror = game.isMirrorBar and game.isMirrorBar(boss)
+            -- (A party guest's held copy of one asleep on the host, its bar the game's own: no fight of this player's.
+            -- The game starts a stopped AI again by itself, a partner's figure beside the copy rouses it in that moment,
+            -- and the game puts its bar up for it; the copy is stopped again, its player 42 m off, and they were told
+            -- as in the fight for as long as that bar stood. The bench, three copies. handover.byHere.)
+            if not mirror and net.party and isClient() and handover.live[addr] == nil then
+                local r = net.remoteEnemies[enemyName(boss, addr)]
+                mirror = r ~= nil and r.Asleep == true
+            end
+            if not mirror then
                 return true
             end
-            local addr = boss:GetAddress()
             for name in pairs(net.partnerBosses) do
                 local e = enemyByName[name]
                 if valid(e) and e:GetAddress() == addr and (net.joinedBoss == name or (net.struck[name] and valid(pawn)
