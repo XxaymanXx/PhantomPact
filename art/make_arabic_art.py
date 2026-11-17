@@ -340,6 +340,7 @@ def seeded_grain(name):
 # ------------------------------------------------------------------ the pictures
 
 PICTURES = []       # (file name, the English words on it, which ids are its own in the table, how it's drawn, in pvp/)
+UNCHECKED = os.path.join(HERE, "unchecked")     # where a picture waits whose words the author hasn't checked yet
 F5, F6, MATCH = ("f5.art.", "f5more.art."), ("f6.art.",), ("match.",)
 EN, PE = op.WORDS["en"], pv.WORDS["en"]
 
@@ -638,6 +639,7 @@ class Words:
 
     def __init__(self, path):
         self.rows = {}
+        self.unchecked = set()
         with open(path, encoding="utf-8-sig") as fh:
             head = None
             for raw in fh:
@@ -650,20 +652,31 @@ class Words:
                 row = dict(zip(head, cells))
                 en, ar = (row.get("english") or "").strip(), (row.get("arabic") or "").strip()
                 if en and ar:
-                    self.rows.setdefault(en, []).append(((row.get("id") or "").strip(), ar))
+                    rid = (row.get("id") or "").strip()
+                    self.rows.setdefault(en, []).append((rid, ar))
+                    # (Not yet checked by the mod's author: its notes begin UNCHECKED. A picture with such a word is
+                    # kept out of the mod, in art/unchecked, till it is.)
+                    if (row.get("notes") or "").strip().startswith("UNCHECKED"):
+                        self.unchecked.add(rid)
         self.loose = {}
         for en, rows in self.rows.items():
             self.loose.setdefault(" ".join(en.lower().split()), rows)
 
-    def get(self, english, ids):
+    def pick(self, english, ids):
         rows = self.rows.get(english) or self.loose.get(" ".join(english.lower().split()))
         if not rows:
-            return None
+            return None, None
         for start in ids + (".art.",):
             for rid, ar in rows:
                 if rid.startswith(start) or (start == ".art." and start in rid):
-                    return ar
-        return rows[0][1]
+                    return rid, ar
+        return rows[0]
+
+    def get(self, english, ids):
+        return self.pick(english, ids)[1]
+
+    def waits(self, english, ids):
+        return self.pick(english, ids)[0] in self.unchecked
 
 
 def player_badge(words):
@@ -694,14 +707,15 @@ def main(args):
     pvp_pictures()
     match_pictures()
     local_pictures()
-    made, skipped = [], []
+    made, skipped, held = [], [], []
     for name, english, ids, draw, hud in PICTURES:
         if only and name not in only:
             continue
         assert name.startswith("ar_") or name == "online_lang_ar"
-        t, missing = {}, []
+        t, missing, waiting = {}, [], False
         for words in english:
             got = ar.get(words, ids)
+            waiting = waiting or ar.waits(words, ids)
             if got is None:
                 missing.append(words)
             elif "%d" in words and "%d" not in got:
@@ -714,10 +728,19 @@ def main(args):
         seeded_grain(name)
         page = draw(t)
         check(name, page, (page.img.width // K, page.img.height // K), t)
+        if waiting:
+            os.makedirs(UNCHECKED, exist_ok=True)
+            w, h = page.img.size
+            page.img.resize((w // K, h // K), Image.LANCZOS).save(os.path.join(UNCHECKED, name + ".png"))
+            held.append(name)
+            continue
         (pv.save_hud if hud else lp.save)(page.img, name)
         made.append(name)
     print("Arabic pictures written: %d (to %s and %s)"
           % (len(made), os.path.normpath(lp.OUT), os.path.normpath(pv.HUD)))
+    if held:
+        print("Held back in %s, a word of theirs not yet checked by the author: %s"
+              % (os.path.normpath(UNCHECKED), ", ".join(held)))
     if skipped:
         print("Skipped, no Arabic yet for their words: %d" % len(skipped))
         for name, missing in skipped:

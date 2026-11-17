@@ -340,13 +340,26 @@ return function(api)
         return x + w * BADGE_X, y + h * BADGE_Y, bw, bw * BADGE_ASPECT
     end
 
+    -- The badge's picture, in English or Arabic (local co-op's words have no Chinese). The Arabic one only if it's in
+    -- the mod: a new one stays out of it, in art/unchecked, till the mod's author has checked it, and the English badge
+    -- is shown meanwhile.
+    function loadout.badgePicture(n)
+        local name = "player_menu_" .. n .. ".png"
+        if api.lang and api.lang.arabic and api.lang.arabic() then
+            local f = io.open(api.modRoot() .. "art/panel/ar_" .. name, "rb")
+            if f then
+                f:close()
+                return "panel/ar_" .. name
+            end
+        end
+        return "panel/" .. name
+    end
+
     local function showBadge(n)
         dropBadge()
         local ok, err = pcall(function()
             local x, y, w, h = badgeSpot()
-            -- (In English or Arabic: local co-op's words have no Chinese.)
-            local prefix = api.lang and api.lang.arabic and api.lang.arabic() and "ar_" or ""
-            badgeWidget = api.hud.newImage("panel/" .. prefix .. "player_menu_" .. n .. ".png", w, h, BADGE_Z)
+            badgeWidget = api.hud.newImage(loadout.badgePicture(n), w, h, BADGE_Z)
             if badgeWidget then
                 badgeWidget:SetPositionInViewport({ X = x, Y = y }, false)
             end
