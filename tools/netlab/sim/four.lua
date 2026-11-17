@@ -3948,6 +3948,52 @@ local function bossStartsHere()
         "the guest walks into its own trigger: its world runs the start itself, and the wait is over")
     allErrors(s)
 
+    -- The trigger's own step runs a second or two before its scene (the bench at A-Hua, 11-17: told 0.2 s after the host
+    -- stepped in, taken in the guest's world 0.6 s on, the scene's flag there 1.2 s after that: the guest's own start
+    -- never came). Told in that gap it waits a few seconds on the guest, and the scene's window has it. (The fourth
+    -- review's G1.)
+    local function tellNow(w, pc, node)     -- (a step of this PC's flow, and on till its look has told it)
+        local told = count(pc.logs, "here, told the others")
+        step(pc, node)
+        for _ = 1, 24 do
+            if count(pc.logs, "here, told the others") > told then
+                return true
+            end
+            w:run(0.5)
+        end
+        return false
+    end
+    local e, eh, eg = world()
+    local toldE = tellNow(e, eh, GUID)
+    e:run(1.5)
+    check(toldE and not has(eg.storyGuids, GUID),
+        "the trigger's own step, told before its scene: not taken in the guest's world the second it comes")
+    Session.scene(eh, true)
+    step(eh, STEP)
+    eh.globalTags[#eh.globalTags + 1] = FLAG
+    e:run(14)
+    Session.scene(eh, false)
+    ai(eh, "AI.State.Combat")
+    onSide(eh, "Faction.Enemy", 0)
+    bossStart(e)
+    e:run(20)
+    check(not has(eg.storyGuids, GUID) and not has(eg.storyGuids, STEP) and not has(eg.globalTags, FLAG),
+        "its scene 1.5 s on: that step is held with the rest of the start, the guest's own trigger kept")
+    scene(e, eg)
+    e:run(3)
+    check(has(eg.storyGuids, GUID) and count(eg.logs, "is taken now: started in this world") == 1,
+        "and the guest's own scene runs it")
+    allErrors(e)
+    -- (What that costs: whatever the host tells is in a guest's world 4 s later than it was.)
+    local y, yh, yg = world()
+    local toldY = tellNow(y, yh, "Map_Xigu-BP_FlowActor_C_8")
+    y:run(2)
+    local early = has(yg.storyGuids, "Map_Xigu-BP_FlowActor_C_8")
+    y:run(4)
+    check(toldY and not early and has(yg.storyGuids, "Map_Xigu-BP_FlowActor_C_8"),
+        "with no scene after it, a step the host tells is taken in the guest's world 4 to 6 s on, not at once")
+    allErrors(y)
+
     -- The guest never goes in, and the host wins: taken then, as before.
     local w, wh, wg = world()
     scene(w, wh)
@@ -4731,7 +4777,7 @@ local function ownRing()
     table.insert(ra.bellIds, BELL)
     r:run(8)
     table.insert(rh.globalTags, "zddy.party.flag")
-    r:run(16)
+    r:run(20)           -- (the host's look, and 349's 4 s on the guests)
     check(rb.storyMarks["zddy.party.flag"] == true and not rb.storyMarks[BELL],
         "a party: by a bell only another guest rang, the host's flag comes as ever (the bell stays theirs to ring)")
     allErrors(r)
