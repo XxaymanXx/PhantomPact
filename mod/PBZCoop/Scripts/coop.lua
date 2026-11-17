@@ -4051,7 +4051,11 @@ return function(api)
             -- (F3 too: an arena some players reach by a trip of the game's, with no wall to press E at, shut a guest out who
             -- had beaten that boss in their own save: "he teleported into the arena, but I couldn't enter".)
             net.farFight = { name = name, p = p, at = { X = at.X, Y = at.Y, Z = at.Z } }
-            api.status.notify("join", "your partner is in a boss fight: press E at the black wall, or F3, to join.")
+            -- (Not for a boss that fell here a moment ago and is up again, a rise: this player was by its fight, most
+            -- often in it, and was told to press E at a wall they stood inside. The bench, 11-18, Xiao Xue's.)
+            if not (net.killedAt and net.killedAt[name] and os.clock() - net.killedAt[name] < net.RISE_S) then
+                api.status.notify("join", "your partner is in a boss fight: press E at the black wall, or F3, to join.")
+            end
         end
         net.lastFarFight = net.farFight     -- (F3 back in after a death here: see onLocalRest)
     end
@@ -5463,6 +5467,7 @@ return function(api)
     net.FIGHT_NEAR_CM = 10000
     net.struck = net.struck or {}         -- boss id -> true: this player hit it in this fight, or it went for them
     net.struckAt = net.struckAt or {}     -- enemy id -> os.clock() of this player's last blow on it (handover.byHere)
+    net.RISE_S = 15     -- a boss whose fight begins this soon after its death here is that boss up again (joinBossFight)
     function net.fightingHere(pawn)
         if net.watchingFight then
             return false

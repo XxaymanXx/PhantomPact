@@ -4850,6 +4850,43 @@ local function bossStartsHere()
     end
 end
 
+-- A boss that falls and is up again a few seconds on (Xiao Xue's rise: the bench, 11-18): its fight is told again, and
+-- the guest, by it and in its fight till the fall, was told to press E at the black wall or F3 to join, inside that
+-- wall. Not told for a boss that fell here a moment ago; a fight begun later is told as ever.
+local function aBossRises()
+    part("a boss up again after its fall")
+    local TIP = "press E at the black wall, or F3, to join"
+    for _, later in ipairs({ false, true }) do
+        local s, h, g = pair()
+        local onH, onG = Session.enemyOn(h, "boss"), Session.enemyOn(g, "boss")
+        Session.moveTo(g, 60000, 0)                             -- (the guest far off as the fight begins: told of F3)
+        s:run(2)
+        bossStart(s)
+        Session.moveTo(g, 2800, 2900)                           -- (then in, beside it)
+        s:run(2)
+        swing(g, onG, select(1, Fake.health(onG)) - 100)        -- (and in its fight)
+        s:run(3)
+        local told = count(g.logs, TIP)
+        bossEnd(s)                                              -- (it falls: the host's kill)
+        s:run(later and 20 or 4)
+        for _, e in ipairs({ onH, onG }) do                     -- (and is up again, in both worlds)
+            Fake.put(e, "dead", false)
+            Fake.setHealth(e, select(2, Fake.health(e)))
+        end
+        h.hudLayout:RegisterBossHPBar(onH)
+        s:run(4)
+        if later then
+            check(net(g).partnerBosses["sp:boss"] == true and count(g.logs, TIP) == told + 1,
+                "one whose fight begins 20 s after its fall: the guest by it is told how to join, as ever")
+        else
+            check(told == 0 and net(g).partnerBosses["sp:boss"] == true and count(g.logs, TIP) == told,
+                "a boss up again 4 s after its fall, the guest by it: its fight shown there, and no word of a wall to press E at ("
+                    .. count(g.logs, TIP) - told .. ")")
+        end
+        allErrors(s)
+    end
+end
+
 local function doorsOpenedBefore()
     part("doors the host opened before the guest came")
     local s, h, g = pair()
@@ -14562,6 +14599,7 @@ return function(print_, scripts)
     padHold()
     panelApply()
     bossStartsHere()
+    aBossRises()
     localScreen()
     localButtons()
     localFight()
