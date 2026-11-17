@@ -299,7 +299,7 @@ return function(api)
         local values = network(choice.connect)
         values.Role = what == "host" and "Host" or "Guest"
         save(values)
-        api.online.start(c, settings)
+        note = api.online.start(c, settings)        -- (nil once it's started; else what stopped it)
     end
 
     local function clipboard()

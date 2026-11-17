@@ -58,7 +58,9 @@ of the 32 after it). Round trip comes from the echo, so no ping packets are need
 The protocol number is the relay's (`PROTOCOL` in `relay.hpp`) and the scripts' (`PROTOCOL` in `main.lua`), bumped
 together: `eventcheck.py` fails if they differ. The scripts ask `main.dll` for its own as they start (`pp_protocol`) and
 leave online co-op off, saying why, with one that answers another or has no such call (1.7.3's and older): a game left
-open while the mod is updated keeps its old `main.dll` loaded under the new scripts.
+open while the mod is updated keeps its old `main.dll` loaded under the new scripts. The other way round, older scripts
+under this `main.dll`: `net_start.txt` carries the scripts' protocol, and `main.dll` starts no relay for another's or
+for none (1.7.3's and older write none); it writes the reason into `net_status.txt`, which those scripts show.
 
 Sections follow: state (40 bytes), sure event, quick event, enemy line, hello (version, map, shared settings), and with more than
 two players another player (a slot and 40 bytes).

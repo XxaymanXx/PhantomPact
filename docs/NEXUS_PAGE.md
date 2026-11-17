@@ -39,7 +39,7 @@ Open contribution, built by the community for the community. Let’s push it for
 Everyone who plays does this. To find the game folder: Steam > right-click the game > Manage > Browse local files.
 
 [b]1. Install UE4SS[/b]
-Get [url=https://www.nexusmods.com/phantombladezero/mods/5][color=#ff2222]UE4SS for Phantom Blade Zero[/color][/url]. Both [b]dwmapi.dll[/b] and the [b]ue4ss[/b] folder are in that download, not in this mod's zip: put them in [b]platform\steam[/b], next to PBZ.exe.
+Get [url=https://www.nexusmods.com/phantombladezero/mods/5][color=#ff2222]UE4SS for Phantom Blade Zero[/color][/url]. UE4SS itself ([b]dwmapi.dll[/b] and its [b]ue4ss[/b] folder) comes from that download; this mod's zip only adds its own files to that folder. Put both in [b]platform\steam[/b], next to PBZ.exe.
 
 [img]IMAGE-1[/img]
 
@@ -203,14 +203,14 @@ Online co-op needs none of these pad steps. If your pads stop working in other g
 每位玩家都要安装。打开游戏文件夹:Steam > 右键点击游戏 > 管理 > 浏览本地文件。上面的三张图对应下面的第 1 到第 3 步。
 
 [list=1]
-[*]安装 [url=https://www.nexusmods.com/phantombladezero/mods/5][color=#ff2222]UE4SS for Phantom Blade Zero[/color][/url]:把其中的 [b]dwmapi.dll[/b] 和 [b]ue4ss[/b] 文件夹(都在那个下载里,不在本模组的压缩包里)放进 [b]platform\steam[/b],和 PBZ.exe 放在一起。不需要安装 Python。
+[*]安装 [url=https://www.nexusmods.com/phantombladezero/mods/5][color=#ff2222]UE4SS for Phantom Blade Zero[/color][/url]:UE4SS 本体([b]dwmapi.dll[/b] 和它的 [b]ue4ss[/b] 文件夹)在那个下载里,本模组的压缩包只往这个文件夹里添加自己的文件。把这两样放进 [b]platform\steam[/b],和 PBZ.exe 放在一起。不需要安装 Python。
 [*]把压缩包里的所有内容解压到游戏文件夹,也就是有 [b]platform[/b]、[b]ProjectPBZ[/b] 和 [b]steam[/b] 的那个文件夹,不是 PBZ.exe 所在的文件夹。提示合并文件夹时选择“是”。
 [*]确认 [b]platform\steam\ue4ss\Mods[/b] 里有 [b]PBZCoop[/b] 文件夹。
 [*]启动游戏并读取存档,房主先进,然后按下面的 F5 面板教程操作。
 [*]第一次开房时,Windows 会询问游戏能否使用网络,请点击[b]允许[/b]。这个窗口可能在游戏后面,连不上时按 Alt+Tab 查看。
 [/list]
 
-[b]更新:[/b]先关闭游戏,再把新版本解压覆盖旧版本。所有人都要使用相同版本:1.7.3 及更早的版本无法与这个版本连接。
+[b]更新:[/b]先关闭游戏(游戏运行时,旧的 main.dll 会留在原处),再把新版本解压覆盖旧版本,然后在 F5 里重新按[b]开房[/b]或[b]加入[/b]。所有人都要使用相同版本:1.7.3 及更早的版本无法与这个版本连接。
 
 [b]F5 面板教程[/b]
 
@@ -234,7 +234,7 @@ Online co-op needs none of these pad steps. If your pads stop working in other g
 
 [b]同一台电脑两个人玩(测试中)[/b]
 
-本地分屏也在同一个下载里,不需要网络,也不需要第二台电脑。可以每人一个手柄,也可以玩家 1 用键盘鼠标、玩家 2 用手柄。你们共用一个存档、背包和尘。
+本地分屏也在同一个下载里,不需要网络,也不需要第二台电脑。可以每人一个手柄,也可以玩家 1 用键盘鼠标、玩家 2 用手柄。你们共用一个存档、背包和尘。本地分屏保持你自己选的难度和游戏自己的敌人数值。
 
 [list=1]
 [*]打开本地模式:按 [b]F5 > 更多 > 模式 > 本地分屏[/b],然后重启游戏。也可以用记事本打开 platform\steam\ue4ss\Mods\PBZCoop\PhantomPact.ini,设置 [b]Role = Local[/b]。要切换回去,在 F4 面板里按 [b]MULTIPLAYER[/b]。
@@ -248,7 +248,7 @@ Xbox 手柄应该不需要这些步骤,但我们还没有测试过。线上联�
 
 [b]没有连接上?[/b]
 
-确认房主已允许游戏通过 Windows 防火墙。更多内容见[url=https://github.com/yhsharaf/PhantomPact/blob/main/INSTALL.zh-CN.md][color=#ff2222]中文安装说明[/color][/url]。仍然不行,请在 Bugs 页面附上 ue4ss\UE4SS.log、ue4ss\Mods\PBZCoop\net_status.txt 和 ue4ss\Mods\PBZCoop\relay_log.txt。
+双方都是这个版本的 Phantom Pact 吗?1.7.3 及更早版本的房主完全不会回应。确认房主已允许游戏通过 Windows 防火墙。更多内容见[url=https://github.com/yhsharaf/PhantomPact/blob/main/INSTALL.zh-CN.md][color=#ff2222]中文安装说明[/color][/url]。仍然不行,请在 Bugs 页面附上 ue4ss\UE4SS.log、ue4ss\Mods\PBZCoop\net_status.txt 和 ue4ss\Mods\PBZCoop\relay_log.txt。
 
 [center][i]Fan-made mod, not affiliated with or endorsed by S-GAME.[/i][/center]
 ```

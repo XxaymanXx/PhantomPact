@@ -466,7 +466,9 @@ return function(api)
         local addr = actor:GetAddress()
         local was = game.sided[addr]
         game.sided[addr] = nil
-        if not was or game.isDead(actor) or game.aiState(actor) ~= "None" then
+        -- (Its name first: the copy a bar went on is kept from before, and its address can be another object's now.)
+        if not was or select(2, pcall(function() return actor:GetFName():ToString() end)) ~= was.fname
+            or game.isDead(actor) or game.aiState(actor) ~= "None" then
             return false
         end
         local ok, done = pcall(function()

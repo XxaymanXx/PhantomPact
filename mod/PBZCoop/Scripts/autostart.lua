@@ -209,7 +209,7 @@ return function(api)
             return false
         end
         local lines = { "role=" .. c.modRole, "port=" .. c.port, "transport=" .. (c.steam and "steam" or "udp"),
-            "version=" .. (api.version or "?") }
+            "version=" .. (api.version or "?"), "protocol=" .. tostring(api.protocol) }
         if c.modRole == "client" and c.hostAddress ~= "" then
             lines[#lines + 1] = "peer=" .. c.hostAddress
         end
@@ -313,7 +313,9 @@ return function(api)
             c.settings = s
             if startRelay(c, s) then
                 current = c
+                return nil
             end
+            return setupTip         -- (what stopped it, for the panel's own line: a tip alone is easy to miss)
         end,
     }
 

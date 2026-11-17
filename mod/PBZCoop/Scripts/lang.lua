@@ -121,6 +121,7 @@ return function(scriptDir)
         { "^your partner is on another map%.", "队友在另一张地图上。" },
         { "^APPLY waits for player (%d): drag the keyboard or a controller onto their slot%.$",
             "APPLY 在等玩家 %1:把键盘或手柄拖到该玩家的位置上。" },
+        { "^APPLY waits for player (%d): drag a controller onto their slot%.$", "APPLY 在等玩家 %1:把手柄拖到该玩家的位置上。" },
         { "^APPLY waits for player (%d)'s controller: it isn't connected, or isn't one Windows sees as an Xbox pad%. "
             .. "A PlayStation pad needs DS4Windows: the local co%-op guide has the steps%.$",
             "APPLY 在等玩家 %1 的手柄:手柄没有连接,或者 Windows 没有把它识别成 Xbox 手柄。PlayStation 手柄需要 DS4Windows,步骤见本地分屏指南。" },

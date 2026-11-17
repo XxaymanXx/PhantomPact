@@ -359,8 +359,10 @@ return function(api)
         if inside(x, y, APPLY) and not ready() and api.status and api.status.notify then
             local n = (choice.p1 == nil or not available(choice.p1)) and 1 or 2
             api.status.lastShown.apply = nil        -- (a click deserves its answer, however soon after the last)
+            -- (The keyboard and mouse are player 1's alone, as the guide has it: player 2's line names a controller only.)
             api.status.notify("apply", choice["p" .. n] == nil
-                and string.format("APPLY waits for player %d: drag the keyboard or a controller onto their slot.", n)
+                and string.format("APPLY waits for player %d: drag %s onto their slot.", n,
+                    n == 1 and "the keyboard or a controller" or "a controller")
                 or string.format("APPLY waits for player %d's controller: it isn't connected, or isn't one Windows sees as an "
                     .. "Xbox pad. A PlayStation pad needs DS4Windows: the local co-op guide has the steps.", n))
             return

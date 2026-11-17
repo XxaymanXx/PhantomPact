@@ -73,7 +73,7 @@ and enemies get extra health and posture on top of it.
 join a host further into the story. Your save stays where you land, so your own story can get ahead of where you were.
 After that, **F3** takes you to your partner if you turn TP > Partner on under MORE. It's off by default, because it's a
 lot of power to have on one key. With it off, F3 still takes a guest to a host who has gone on to another map. Neither
-works during a boss fight, a cutscene, a duel or a menu, or while you or your
+works during a boss fight of your own, a cutscene, a duel or a menu, or while you or your
 partner are down.
 
 ### 4 players (Beta) and 6 players (Experimental)
@@ -107,7 +107,7 @@ With more than two players:
 - **Updating:** both players update. Close the game first: while it runs, the old `main.dll` stays in place under the
   new files. Then extract the new version over the old one, and set `Role` / `HostAddress` again.
   If the game says `dlls\main.dll is another version's`, it was open during the update: close it and extract
-  once more.
+  once more. In local co-op nothing says so: pad 2's Options opens player 1's menu till then.
   What an older version left in the `PBZCoop` folder (the `relay` folder, and `net_in.txt`, `net_out.txt` and the
   `net_events` files) isn't used any more; you can delete it.
 - **Playing alone:** set `Role = Off`.
