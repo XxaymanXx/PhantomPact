@@ -118,6 +118,25 @@ return function(api)
         return base + (base - 1) * (math.min(players, MOST_SCALED) - 2)
     end
 
+    -- A body's guard bar scaled for these numbers: by the whole of it for a new body, by what's missing (most often
+    -- nothing) for one that still has the most posture it was given here. The game writes a boss's health and its most
+    -- back to their base in a fight, its posture left as it is (Xiao Xue's, every few seconds in the state the bench
+    -- reaches her in, 11-17; a rise of hers may do it in play). To the look above that's a new body, scaled again, and
+    -- her guard bar was multiplied again at each write: 34443 to 72 billion in a minute, a bar nobody breaks.
+    local scaledPosture = {}        -- enemy address -> { name, max, p, players }: what its most posture was scaled to
+    local function scalePosture(set, addr, name, p, players, factor)
+        local rec = scaledPosture[addr]
+        local ok, now = pcall(function() return set.Shachi_Max.CurrentValue end)
+        if rec and rec.name == name and ok and type(now) == "number" and now >= rec.max * 0.99 then
+            factor = forPlayers(p, players) / forPlayers(rec.p, rec.players)
+        end
+        if math.abs(factor - 1) > 0.001 then
+            scaleAttr(set, "Shachi", "Shachi_Max", factor)
+        end
+        ok, now = pcall(function() return set.Shachi_Max.CurrentValue end)
+        scaledPosture[addr] = (ok and type(now) == "number") and { name = name, max = now, p = p, players = players } or nil
+    end
+
     local function playersConnected()
         local n = 1
         for _, p in ipairs(api.coop.partners()) do
@@ -160,7 +179,7 @@ return function(api)
             health, posture = health / forPlayers(h, before), posture / forPlayers(p, before)
         end
         scaleAttr(set, "Health", "Health_Max", health)
-        scaleAttr(set, "Shachi", "Shachi_Max", posture)
+        scalePosture(set, addr, name, p, players, posture)
         scaledMax[addr] = maxOf(e)
         scaledAs[addr] = { name = name, h = h, p = p, boss = boss, players = players }
         return true
@@ -177,7 +196,7 @@ return function(api)
         local h, p = numbersFor(e, addr)
         local players, set = was.players or 2, e.AttributeSetBase
         scaleAttr(set, "Health", "Health_Max", forPlayers(h, players) / forPlayers(was.h, players))
-        scaleAttr(set, "Shachi", "Shachi_Max", forPlayers(p, players) / forPlayers(was.p, players))
+        scalePosture(set, addr, name, p, players, forPlayers(p, players) / forPlayers(was.p, players))
         scaledAs[addr] = { name = name, h = h, p = p, boss = true, players = players }
         scaledMax[addr] = maxOf(e)
         log(string.format("Co-op difficulty: %s is a boss: %d%% health, %d%% posture.", name,
@@ -517,7 +536,7 @@ return function(api)
                     local set = e.AttributeSetBase
                     local health, posture, boss = numbersFor(e, addr)
                     scaleAttr(set, "Health", "Health_Max", health)
-                    scaleAttr(set, "Shachi", "Shachi_Max", posture)
+                    scalePosture(set, addr, name, posture, 2, posture)
                     scaledMax[addr] = maxOf(e)
                     scaledAs[addr] = { name = name, h = health, p = posture, boss = boss, players = 2 }
                     n = n + 1
