@@ -25,6 +25,8 @@ function Relay:linkFor(pc)
     pc.heard, pc.inbox, pc.enemyLines, pc.sent = {}, {}, {}, {}
     function link.now() return pc.now end
     function link.wall() return pc.now end
+    -- (The main.dll that came with these scripts answers their protocol; pc.dllProtocol: another version's, for a test.)
+    function link.protocol() return pc.dllProtocol or relay.protocol end
     function link.state(...)
         local s = { ... }
         s.at = pc.now

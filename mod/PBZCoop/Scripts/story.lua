@@ -134,11 +134,13 @@ return function(api)
     -- quest name -> branch ID -> the branch's state: 0 not yet, 1 under way, 2 done. Read a few quests a tick: start with
     -- readQuests(true), then call it each tick until it hands back the states. A finished quest has no current state, so only
     -- branches are read: a call on a missing object is a crash in UE4SS, not a Lua error.
+    -- (over: the quests the game calls complete, by name, as of the last read: pastTaking.)
     local reading = nil
+    local over = {}
     local function readQuests(start)
         if start then
             local nc = narrative()              -- (found once a read: a search of every object is the dear part)
-            reading = nc and { i = 1, states = {}, nc = nc } or nil
+            reading = nc and { i = 1, states = {}, over = {}, nc = nc } or nil
             return nil
         end
         if reading == nil then
@@ -156,6 +158,7 @@ return function(api)
             local i = reading.i
             if i > n then
                 local states = reading.states
+                over = reading.over
                 reading = nil
                 return states
             end
@@ -166,6 +169,10 @@ return function(api)
                 local name = q:GetClass():GetFName():ToString():gsub("_C$", "")
                 local branches = reading.states[name] or {}
                 reading.states[name] = branches
+                local okC, complete = pcall(function() return q:IsQuestComplete() end)
+                if okC and complete == true then
+                    reading.over[name] = true
+                end
                 local bs = q.Branches
                 for j = 1, #bs do
                     local b = bs[j]
@@ -741,10 +748,30 @@ return function(api)
         return false
     end
 
+    -- A step this world can't take any more: every branch it's short of is a quest's that's over here, and the game
+    -- changes no branch of a quest that's over (on the bench: begun and finished by hand, a side branch stood as it
+    -- was). A side branch can be left under way so: the flag that ends its quest came by the story flow before the
+    -- table's row did. On the bench, 11-17, "meet Xiong Zhang again" stood so on a guest, and its row was applied at
+    -- every load from then on, never took, and the player was told "your story caught up with the host's: 1 step" each
+    -- time.
+    local function pastTaking(states, row)
+        if not states then
+            return false
+        end
+        for _, need in ipairs(row.needs) do
+            local st = (states[need.quest] or {})[need.branch]
+            if (st == nil or st < (need.finish and 2 or 1)) and not over[need.quest] then
+                return false
+            end
+        end
+        return true
+    end
+
     local function todoFor(done, point, states)
         local todo = {}
         for k, row in ipairs(rows.quests) do
-            if host.done[k] and not done[k] and not tried[k] and not otherChoice(states, row) then
+            if host.done[k] and not done[k] and not tried[k] and not otherChoice(states, row)
+                and not pastTaking(states, row) then
                 todo[#todo + 1] = { i = row.i, k = k }
             end
         end
@@ -832,6 +859,7 @@ return function(api)
                 end
             end
             if missed > 0 then
+                caught = math.max(0, caught - missed)       -- (not caught up to: nothing to tell the player of)
                 log(string.format("Story: %d of the host's story steps didn't take here: left as they are.", missed))
             end
             batch = nil

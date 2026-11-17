@@ -7,6 +7,8 @@
 -- F9  remove player 2
 
 local VERSION = "1.7.3"
+-- The relay these scripts are written for: native/relay.hpp's PROTOCOL, the two bumped together (openLink asks main.dll's).
+local PROTOCOL = 5
 local TAG = "[PBZCoop] "
 if (os.getenv("PBZCOOP_INSTANCE") or "1") ~= "1" then
     TAG = "[PBZCoop#" .. os.getenv("PBZCOOP_INSTANCE") .. "] "
@@ -479,6 +481,17 @@ local function openLink()
     if not link.now() then
         log("Can't reach main.dll: this UE4SS has no Lua calls for it.")
         return nil
+    end
+    -- (Another version's main.dll under these scripts: a game left open while the mod is updated keeps its old one
+    -- loaded, the new scripts beside it, and they linked through it with the old version's players, in its protocol:
+    -- a boss's win taken for a thug's, the asleep word unread. Its other calls stay; online co-op is left off, and
+    -- says why (autostart.lua, coop.lua's start). 1.7.3's and older have no such call: nil.)
+    local ask = package.loadlib(dll, "pp_protocol")
+    local theirs = ask and ask() or nil
+    if theirs ~= PROTOCOL then
+        link.other = theirs and ("protocol " .. tostring(math.floor(theirs))) or "1.7.3 or older"
+        log("main.dll is another version's (" .. link.other .. "; these scripts are written for protocol " .. PROTOCOL
+            .. "): online co-op stays off. Close the game, extract the Phantom Pact zip again, then start the game.")
     end
     return link
 end

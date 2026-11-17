@@ -738,8 +738,9 @@ function Fake.story(pc)
     local function branchOf(quest, id)
         local q = pc.quests[quest]
         if q == nil then
-            q = object(pc, "Quest", { Branches = {} })
+            q = object(pc, "Quest", { Branches = {}, over = false })
             rawset(q, "__name", quest .. "_C")
+            defs(pc, q, { IsQuestComplete = function(self) return rawget(self, "__fields").over == true end })
             pc.quests[quest] = q
             table.insert(rawget(nc, "__fields").QuestList, q)
         end
@@ -757,6 +758,16 @@ function Fake.story(pc)
     pc.storyStep = function(quest, id, state)
         local b = branchOf(quest, id)
         put(b, "state", math.max(rawget(b, "__fields").state, state))
+    end
+    -- A quest the game calls complete: it changes none of its branches from then on (the bench, 11-17). And a branch
+    -- the game won't change for a reason of its own (storyStuck: "quest id" -> true).
+    pc.storyStuck = {}
+    pc.storyOver = function(quest)
+        put(pc.quests[quest], "over", true)
+    end
+    local function takes(quest, id)
+        local q = pc.quests[quest]
+        return not (q and rawget(q, "__fields").over) and not pc.storyStuck[quest .. " " .. id]
     end
     -- And a task of a branch's that waits for flags (the game's BPT_HasTag), or for them to be gone (inverted: its Not).
     pc.storyTask = function(quest, id, tags, inverted)
@@ -893,13 +904,17 @@ function Fake.story(pc)
     defs(pc, nc, {
         BeginQuestAndActiveBranch = function(_, cls, branches)
             for _, b in ipairs(branches) do
-                pc.storyStep(rawget(cls, "__quest"), b:ToString(), 1)
+                if takes(rawget(cls, "__quest"), b:ToString()) then
+                    pc.storyStep(rawget(cls, "__quest"), b:ToString(), 1)
+                end
             end
             did("begin")
         end,
         FinishQuestBranch = function(_, cls, branches)
             for _, b in ipairs(branches) do
-                pc.storyStep(rawget(cls, "__quest"), b:ToString(), 2)
+                if takes(rawget(cls, "__quest"), b:ToString()) then
+                    pc.storyStep(rawget(cls, "__quest"), b:ToString(), 2)
+                end
             end
             did("finish")
         end,
@@ -2617,6 +2632,9 @@ function Fake.new(id, scripts, ini, link)
     env.os.remove, env.os.rename = fs.remove, fs.rename
     env.io = setmetatable({ open = fs.open }, { __index = io })
     env.package = { loadlib = function(_, entry)
+        if entry == "pp_protocol" and pc.dllProtocol == false then
+            return nil                      -- (1.7.3's main.dll and older: no such call)
+        end
         return link[entry:gsub("^pp_", "")]
     end }
     env.dofile = function(path)

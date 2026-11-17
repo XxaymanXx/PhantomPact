@@ -55,6 +55,11 @@ Header: marker 0xA3, protocol 5, flags (1 = from the host), session, the partner
 time in ms, the partner's time echoed back, how long we held it, sure-lane acknowledgement (next id expected, plus a bitmap
 of the 32 after it). Round trip comes from the echo, so no ping packets are needed.
 
+The protocol number is the relay's (`PROTOCOL` in `relay.hpp`) and the scripts' (`PROTOCOL` in `main.lua`), bumped
+together: `eventcheck.py` fails if they differ. The scripts ask `main.dll` for its own as they start (`pp_protocol`) and
+leave online co-op off, saying why, with one that answers another or has no such call (1.7.3's and older): a game left
+open while the mod is updated keeps its old `main.dll` loaded under the new scripts.
+
 Sections follow: state (40 bytes), sure event, quick event, enemy line, hello (version, map, shared settings), and with more than
 two players another player (a slot and 40 bytes).
 
@@ -447,16 +452,19 @@ now (with the copies and the enemy lines' repeats, which are what the upload gai
 
 | players, FPS | packets a second from the host | the host's upload | a guest's figure on another guest's screen, behind |
 |---|---|---|---|
-| 3, 60 | 295 -> 276 | 34.7 -> 35.4 KB/s | 122 -> 116 ms |
-| 3, 120 | 416 -> 396 | 46.9 -> 47.5 KB/s | 117 -> 116 ms |
-| 4, 60 | 475 -> 405 | 61.6 -> 61.9 KB/s | 124 -> 119 ms |
-| 4, 120 | 664 -> 599 | 81.4 -> 81.5 KB/s | 118 -> 116 ms |
-| 6, 60 | 906 -> 762 | 137.0 -> 140.3 KB/s | 124 -> 118 ms |
-| 6, 90 | 1100 -> 944 | 158.3 -> 159.9 KB/s | 119 -> 117 ms |
-| 6, 120 | 1248 -> 1100 | 174.0 -> 175.0 KB/s | 117 -> 116 ms |
-| 6, 144 | 1275 -> 1124 | 175.5 -> 176.9 KB/s | 118 -> 117 ms |
+| 3, 60 | 295 -> 276 | 34.7 -> 35.4 KB/s | 122 -> 115 ms |
+| 3, 120 | 416 -> 374 | 46.9 -> 46.2 KB/s | 117 -> 116 ms |
+| 4, 60 | 475 -> 403 | 61.6 -> 61.8 KB/s | 124 -> 119 ms |
+| 4, 120 | 664 -> 590 | 81.4 -> 80.9 KB/s | 118 -> 116 ms |
+| 6, 60 | 906 -> 760 | 137.0 -> 140.1 KB/s | 124 -> 118 ms |
+| 6, 90 | 1100 -> 935 | 158.3 -> 159.4 KB/s | 119 -> 117 ms |
+| 6, 120 | 1248 -> 1098 | 174.0 -> 174.8 KB/s | 117 -> 116 ms |
+| 6, 144 | 1275 -> 1118 | 175.5 -> 176.6 KB/s | 118 -> 117 ms |
 
-A guest's sure event reaches another guest sooner too, the copies working on both hops: the slowest 1% 252 -> 124-132 ms.
+(Run again on 11-17 with the held place riding the host's next packet, 286: above 60 FPS three and four players' hosts
+now upload less than on 1.7.3.)
+
+A guest's sure event reaches another guest sooner too, the copies working on both hops: the slowest 1% 252 -> 119-130 ms.
 The figure's speed is as steady as it was (off by 103 cm/s at the 95th percentile, 102 before), the host's figure on a
 guest's screen and a guest's on the host's are where they were (64 ms), and a guest's upload is 7.3 -> 7.5 KB/s at any
 size. The host's upload is still what a big party costs: each guest gets every other guest's place, 42 bytes, 60 times a

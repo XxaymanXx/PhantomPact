@@ -4923,6 +4923,10 @@ return function(api)
             log("Online sync can't start: main.dll can't be reached (see the line above). Reinstall Phantom Pact, check your antivirus didn't remove it, and use the UE4SS build from the install guide.")
             return
         end
+        if link.other then
+            log("Online sync can't start: main.dll is another version's (" .. tostring(link.other) .. "). Close the game, extract the Phantom Pact zip again, then start the game.")
+            return
+        end
         net.role = role
         net.enabled = true
         leaveParty()

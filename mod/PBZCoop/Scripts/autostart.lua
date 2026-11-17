@@ -203,6 +203,11 @@ return function(api)
             setupProblem("Couldn't start the relay: dlls\\main.dll can't be reached. Reinstall Phantom Pact, check your antivirus didn't remove it, and use the UE4SS build from the install guide.")
             return false
         end
+        -- (Another version's main.dll, kept loaded by a game that was open while the mod was updated: main.lua's openLink.)
+        if api.link.other then
+            setupProblem("Couldn't start the relay: dlls\\main.dll is another version's (was the game open while Phantom Pact was updated?). Close the game, extract the zip again, then start the game.")
+            return false
+        end
         local lines = { "role=" .. c.modRole, "port=" .. c.port, "transport=" .. (c.steam and "steam" or "udp"),
             "version=" .. (api.version or "?") }
         if c.modRole == "client" and c.hostAddress ~= "" then

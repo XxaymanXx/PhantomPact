@@ -84,6 +84,15 @@ def main():
     files = [(name, texts[name]) for name in order if name in texts]
     files += [(name, text) for name, text in sorted(texts.items()) if name not in order]
     problems, first, sent = check(files)
+    # The protocol the scripts are written for is the relay's own (main.lua's PROTOCOL, native/relay.hpp's): bumped in one
+    # and not the other, every install would refuse its own main.dll, or take another version's.
+    relay = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "native", "relay.hpp")
+    ours = re.search(r"^local PROTOCOL = (\d+)", texts["main.lua"], re.M)
+    if ours and os.path.exists(relay):
+        theirs = re.search(r"constexpr int PROTOCOL = (\d+);", open(relay, encoding="utf-8").read())
+        if not theirs or theirs.group(1) != ours.group(1):
+            problems.append("main.lua's PROTOCOL is %s and native/relay.hpp's is %s: they go together"
+                            % (ours.group(1), theirs.group(1) if theirs else "not found"))
     for line in problems:
         print("  " + line)
     print("%d handlers, %d names sent, %d problems" % (len(first), len(sent), len(problems)))

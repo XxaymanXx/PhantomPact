@@ -395,6 +395,13 @@ void test_lanes() {
     list.push(std::string(relay::SURE_COPY_BYTES + 1, 'b'));     // a bag's line, told at a join
     run_copies(list, 0, 0.2, times);
     check(times.size() == 1 && list.copied == 0, "sure: a long event has no copies: each would be a packet of its own");
+    // A guest's hit with the flinch it made is some 250 bytes (a D with a montage's path): it has its copies. With the
+    // limit at 200 it had none, and a lost one waited for the resend: the hit landed a quarter of a second late.
+    relay::SureSender hit;
+    times.clear();
+    hit.push(std::string(250, 'd'));
+    run_copies(hit, 0, 0.2, times);
+    check(times.size() == 4 && hit.copied == 3, "sure: a hit with its flinch, 250 bytes, has its copies as a short event has");
     // A copy that would need a packet of its own waits a little longer for one to ride in.
     relay::SureSender rider;
     times.clear();
