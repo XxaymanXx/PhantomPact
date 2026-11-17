@@ -39,7 +39,7 @@ Open contribution, built by the community for the community. Let’s push it for
 Everyone who plays does this. To find the game folder: Steam > right-click the game > Manage > Browse local files.
 
 [b]1. Install UE4SS[/b]
-Get [url=https://www.nexusmods.com/phantombladezero/mods/5][color=#ff2222]UE4SS for Phantom Blade Zero[/color][/url]. Put [b]dwmapi.dll[/b] and the [b]ue4ss[/b] folder in [b]platform\steam[/b], next to PBZ.exe.
+Get [url=https://www.nexusmods.com/phantombladezero/mods/5][color=#ff2222]UE4SS for Phantom Blade Zero[/color][/url]. Both [b]dwmapi.dll[/b] and the [b]ue4ss[/b] folder are in that download, not in this mod's zip: put them in [b]platform\steam[/b], next to PBZ.exe.
 
 [img]IMAGE-1[/img]
 
@@ -203,7 +203,7 @@ Online co-op needs none of these pad steps. If your pads stop working in other g
 每位玩家都要安装。打开游戏文件夹:Steam > 右键点击游戏 > 管理 > 浏览本地文件。上面的三张图对应下面的第 1 到第 3 步。
 
 [list=1]
-[*]安装 [url=https://www.nexusmods.com/phantombladezero/mods/5][color=#ff2222]UE4SS for Phantom Blade Zero[/color][/url]:把 [b]dwmapi.dll[/b] 和 [b]ue4ss[/b] 文件夹放进 [b]platform\steam[/b],和 PBZ.exe 放在一起。不需要安装 Python。
+[*]安装 [url=https://www.nexusmods.com/phantombladezero/mods/5][color=#ff2222]UE4SS for Phantom Blade Zero[/color][/url]:把其中的 [b]dwmapi.dll[/b] 和 [b]ue4ss[/b] 文件夹(都在那个下载里,不在本模组的压缩包里)放进 [b]platform\steam[/b],和 PBZ.exe 放在一起。不需要安装 Python。
 [*]把压缩包里的所有内容解压到游戏文件夹,也就是有 [b]platform[/b]、[b]ProjectPBZ[/b] 和 [b]steam[/b] 的那个文件夹,不是 PBZ.exe 所在的文件夹。提示合并文件夹时选择“是”。
 [*]确认 [b]platform\steam\ue4ss\Mods[/b] 里有 [b]PBZCoop[/b] 文件夹。
 [*]启动游戏并读取存档,房主先进,然后按下面的 F5 面板教程操作。
