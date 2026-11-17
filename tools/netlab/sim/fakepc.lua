@@ -559,6 +559,22 @@ function Fake.health(a)
     return set.Health.CurrentValue, set.Health_Max.CurrentValue, set.Shachi_Max.CurrentValue
 end
 
+-- Whether a blow lands between this enemy and a player, either way: by its side, as in the game. A boss the game hasn't
+-- started is a figure on the player's own side (Faction.Player, its controller's team 1), and nothing lands between it
+-- and a player (the bench, 11-17: 326, 343). With the team alone an enemy's nothing landed either (326); the faction
+-- alone was never tried, and is taken for not landing here, so a switch half made shows. (The fifth review's G4: the
+-- fake took any blow whatever the side, and what 343 is for couldn't be seen in it.)
+function Fake.lands(e)
+    local f = rawget(e, "__fields")
+    local side = f.faction and rawget(f.faction, "__fields")
+    local controller = f.Controller and rawget(f.Controller, "__fields")
+    local team = controller and controller.Team
+    if not side or side.faction == nil or not team then
+        return true         -- (no enemy of the fake's: as ever)
+    end
+    return side.faction ~= "Faction.Player" and team.TeamID ~= 1
+end
+
 local function hatredOf(pc, owner)
     local h = object(pc, "Hatred", { HatredList = list({}), CanBeHatredNow = true })
     local items = rawget(h, "__fields").HatredList.items

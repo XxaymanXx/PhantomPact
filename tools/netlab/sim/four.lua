@@ -47,9 +47,14 @@ local function ghostOf(pc, slot)
 end
 
 -- This player's own hit: a move of theirs, then their copy loses health. A copy that loses health with no move isn't their hit.
+-- (If it lands: none does on a figure on the player's own side, fakepc's Fake.lands. Says whether it did.)
 local function swing(pc, e, health)
     pc.env.PBZ.game.noteLocalMove()
+    if not Fake.lands(e) then
+        return false
+    end
     Fake.setHealth(e, health)
+    return true
 end
 
 local function field(o, name)
@@ -4207,6 +4212,37 @@ local function bossStartsHere()
         allErrors(t3)
     end
 
+    -- What the side is for: the late guest's blows land on their copy and come off the boss in the host's world, and
+    -- the copy's land on them. On a figure none does, either way, and nothing is told of one: the fake goes by the
+    -- side as the game does (the fifth review's G4; 326 and 343 couldn't be seen in the sim till then).
+    do
+        local v, vh, vg = world()
+        local function blow(pc, e, damage)      -- (an enemy's blow at this PC's own player: off their health, if it lands)
+            if not Fake.lands(e) then
+                return false
+            end
+            Fake.setHealth(pc.pawn, select(1, Fake.health(pc.pawn)) - damage)
+            return true
+        end
+        local copy, hosts = Session.enemyOn(vg, "boss"), Session.enemyOn(vh, "boss")
+        local had, sent = select(1, Fake.health(copy)), count(vg.sent, "^E D ")
+        local figure = swing(vg, copy, had - 200)
+        v:run(2)
+        check(not figure and not blow(vg, copy, 30) and select(1, Fake.health(copy)) == had and count(vg.sent, "^E D ") == sent,
+            "a figure nobody has started: no blow of the guest's lands on it and none of its on the guest, nothing told")
+        scene(v, vh)
+        bossStart(v)
+        v:run(6)
+        local hadH, hadG = select(1, Fake.health(hosts)), select(1, Fake.health(vg.pawn))
+        local landed = swing(vg, copy, select(1, Fake.health(copy)) - 200)
+        v:run(2)
+        check(landed and select(1, Fake.health(hosts)) == hadH - 200 and count(vg.sent, "^E D ") == sent + 1,
+            "the host's fight on, the guest come late: their blow lands on their copy, and is off the boss in the host's world ("
+                .. tostring(landed) .. ", " .. hadH - select(1, Fake.health(hosts)) .. ")")
+        check(blow(vg, copy, 30) and select(1, Fake.health(vg.pawn)) == hadG - 30, "and the copy's blow lands on the late guest")
+        allErrors(v)
+    end
+
     -- Both walk in together: each world runs its own, nothing is kept back.
     local b, bh, bg = world()
     Session.scene(bg, true)
@@ -4262,8 +4298,7 @@ local function bossStartsHere()
     onSide(jh, "Faction.Enemy", 0)
     bossStart(j)
     j:run(3)
-    local late = Session.enemyOn(jg, "boss")
-    swing(jg, late, select(1, Fake.health(late)) - 50)     -- (in it: a blow of its own, as hostDiesFirst has it)
+    net(jg).joinedBoss = "sp:boss"                  -- (in it: walked in at its wall; no blow lands on a figure)
     j:run(3)
     local before = side(jg)
     Session.die(jh)
