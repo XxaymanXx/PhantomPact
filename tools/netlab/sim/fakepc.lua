@@ -665,14 +665,18 @@ function Fake.enemy(pc, id, class, x, y, z, hp, posture, boss)
         RestartLogic = function(self) put(self, "running", true) end,
     })
     local controller = object(pc, "AIController", { BrainComponent = brain,
-        SGameAIComponent = { SpawnedAIScripts = list({ picker }) }, Blackboard = object(pc, "Blackboard") })
+        SGameAIComponent = { SpawnedAIScripts = list({ picker }) }, Blackboard = object(pc, "Blackboard"), Team = { TeamID = 0 } })
+    defs(pc, controller, { BlueprintSetGenericTeamId = function(self, t) rawget(self, "__fields").Team.TeamID = t.TeamID end })
     put(e, "Controller", controller)
-    -- Its side: hostile to players (2) unless overridden for one of them.
-    local side = object(pc, "FactionComponent", { overrides = {} })
+    -- Its side: hostile to players (2) unless overridden for one of them. (Its faction and its controller's team are an
+    -- enemy's; a boss the game hasn't started is a figure on the player's own, Faction.Player and team 1: the test's hand.)
+    local side = object(pc, "FactionComponent", { overrides = {}, faction = "Faction.Enemy" })
     defs(pc, side, {
         GetFactionRelation = function(self, other) return rawget(self, "__fields").overrides[other] or 2 end,
         SetFactionRelationOverride = function(self, other, relation) rawget(self, "__fields").overrides[other] = relation end,
         ClearFactionRelationOverride = function(self, other) rawget(self, "__fields").overrides[other] = nil end,
+        GetCurrnetFaction = function(self) return { TagName = name(rawget(self, "__fields").faction) } end,
+        SetFaction = function(self, tag) put(self, "faction", tag.TagName:ToString()) end,
     })
     put(e, "faction", side)
     put(e, "GetComponentByClass", function(_, class) return (class == pc.factionClass and side) or nil end)
