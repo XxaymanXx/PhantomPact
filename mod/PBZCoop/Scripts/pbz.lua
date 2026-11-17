@@ -1460,6 +1460,8 @@ return function(api)
                 local live = pay and now <= pay.untilAt
                 game.copyPay = { dust = (live and pay.dust or 0) + ownDust, untilAt = now + game.COPY_PAY_S, last = ownDust,
                     keep = live and pay.keep or nil, hostDownAt = live and pay.hostDownAt or nil }
+            elseif game.copyPay then
+                game.copyPay.last = 0       -- (this death rolled nothing: none of an earlier one's is kept for it, handlers.K)
             end
             return true
         end

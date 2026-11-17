@@ -365,7 +365,7 @@ all the same from this version on: a party's enemy line says "asleep" in its bos
 1.7.3 guest read as a thug's and brought a beaten boss back by, and a boss's win goes out whole, which a 1.7.3 guest on
 another level marked done where it stood (BUGHUNT 302). So 1.7.3 and this version don't link. A host of this version
 answers a 1.7.3 guest's knock with its own header, once a second at most, so both are told that both PCs need the same
-version (BUGHUNT 334); a guest of this version at a 1.7.3 host hears nothing back (that host is told), and is told to
+version (BUGHUNT 335); a guest of this version at a 1.7.3 host hears nothing back (that host is told), and is told to
 check the address. (While they did, the review of 11-13 counted 3.5-8.8% more packets from the 1.7.3 side of a mixed
 pair: a 1.7.3 partner hurries an acknowledgement for each copy.)
 

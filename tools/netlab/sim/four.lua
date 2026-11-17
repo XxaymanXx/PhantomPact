@@ -1150,7 +1150,8 @@ local function aPartysBystander()
     allErrors(u)
 
     -- A guest's own fight begun from 40 m (the game's own 45 m), a partner in no fight standing a little nearer, 35 m
-    -- from it: the fight is that guest's all the same.
+    -- from it: to this game the same as a watcher's stray bar with the one about to fight that far off (below). Held,
+    -- and told to nobody, till they're within 30 m.
     local v = party(list)
     local vh, va, vc = v.pcs[1], v.pcs[2], v.pcs[4]
     Session.moveTo(vh, -6000, 0)
@@ -1161,9 +1162,97 @@ local function aPartysBystander()
     local mine = Session.enemyOn(vc, "boss")
     vc.hudLayout:RegisterBossHPBar(mine)
     v:run(4)
-    check(brain(mine) == true and floor(mine) == 0 and count(vc.sent, "^E B sp:boss") >= 1,
-        "a guest's own fight begun from 40 m, a partner in no fight 35 m from it: theirs, awake, and told")
+    check(brain(mine) == false and count(vc.sent, "^E B sp:boss") == 0 and net(vh).partnerBosses["sp:boss"] == nil,
+        "a guest's own bar from 40 m, a partner in no fight 35 m from it: held, and told to nobody")
+    Session.moveTo(vc, 4700, 3000)
+    v:run(2)
+    vc.hudLayout:RegisterBossHPBar(mine)            -- (the game's bar again, as the copy, theirs now, takes them on)
+    v:run(4)
+    check(brain(mine) == true and floor(mine) == 0 and net(vh).fightOf["sp:boss"] == 4,
+        "within 30 m: theirs, awake, and told")
     allErrors(v)
+
+    -- A watcher's stray bar with the one about to fight still 35 m off, not told yet; then their own fight begins:
+    -- nearer is nearer, beside it or not. (Counted only within 30 m or in a fight, the watcher's copy was made theirs,
+    -- woken and told, the fighter's own was never told, and their lost fight never started over. The fourth review.)
+    for _, sameFrame in ipairs({ false, true }) do
+        local w = party(list)
+        local wh, wb, wc = w.pcs[1], w.pcs[3], w.pcs[4]
+        Session.moveTo(wh, -6000, 0)
+        Session.moveTo(w.pcs[2], -5800, 100)
+        Session.moveTo(wb, -1500, 3000)    -- 35 m off, no fight yet
+        Session.moveTo(wc, 6300, 3000)     -- the watcher, 43 m off
+        w:run(3)
+        local strayW, ownW = Session.enemyOn(wc, "boss"), Session.enemyOn(wb, "boss")
+        if sameFrame then
+            wb.hudLayout:RegisterBossHPBar(ownW)        -- (their own fight begun by the game from 35 m, the stray with it)
+        end
+        wc.hudLayout:RegisterBossHPBar(strayW)
+        w:run(1.5)
+        if not sameFrame then
+            Session.moveTo(wb, 2100, 2900)
+            wb.hudLayout:RegisterBossHPBar(ownW)
+        end
+        w:run(3)
+        check(brain(strayW) == false and floor(strayW) == 1 and net(wc).toldFighting ~= true
+            and count(wc.sent, "^E F 1") == 0 and count(wc.sent, "^E B sp:boss") == 0,
+            "a watcher's stray bar " .. (sameFrame and "as" or "before") .. " the fight of one 35 m off begins: held, in no fight")
+        check(net(wh).fightOf["sp:boss"] == 3, "and the host has that fight as the fighter's")
+    end
+
+    -- A blow on a copy with no bar of the game's on it, then away past 45 m and back: no fight of theirs, and none
+    -- told. (328's re-tell went by "in it", which a blow from near alone says: the host had a fight filed, its bar up
+    -- and its walls shut, for a fight nobody was in. The fourth review's V3.)
+    do
+        local k = party(list)
+        local kh, kb = k.pcs[1], k.pcs[3]
+        Session.moveTo(kh, -6000, 0)
+        Session.moveTo(k.pcs[2], -5800, 100)
+        Session.moveTo(kb, 2300, 3000)
+        Session.moveTo(k.pcs[4], 2600, 3400)        -- (another guest by it too: asleep on the host all along)
+        k:run(4)
+        local struck = Session.enemyOn(kb, "boss")
+        kb.env.PBZ.game.noteLocalMove()
+        Fake.setHealth(struck, select(1, Fake.health(struck)) - 200)
+        k:run(2)
+        Session.moveTo(kb, 7200, 3000)
+        k:run(6)
+        Session.moveTo(kb, 2300, 3000)
+        k:run(6)
+        check(net(kb).struck["sp:boss"] == true and count(kb.sent, "^E B ") == 0 and net(kh).partnerBosses["sp:boss"] == nil,
+            "a blow with no bar, away to 52 m and back: no fight told, none shown on the host")
+        allErrors(k)
+    end
+
+    -- The watcher's mirror gone with no HUD to put it back on (mid-load): put back once a second at most, each try a
+    -- search of the HUD and of every fog wall; at every turn, it was 20 to 30 of each a second (the third review's V10).
+    do
+        local n = party(list)
+        local nb, nc = n.pcs[3], n.pcs[4]
+        Session.moveTo(n.pcs[1], -6000, 0)
+        Session.moveTo(n.pcs[2], -5800, 100)
+        Session.moveTo(nb, 2100, 2900)
+        Session.moveTo(nc, 6300, 3000)
+        n:run(3)
+        local mirror = Session.enemyOn(nc, "boss")
+        nb.hudLayout:RegisterBossHPBar(Session.enemyOn(nb, "boss"))
+        n:run(3)
+        local had, searches, noHud, find = nc.env.PBZ.game.isMirrorBar(mirror) == true, 0, true, nc.env.FindFirstOf
+        nc.env.FindFirstOf = function(class)
+            if class == "PBZHUDLayout" and noHud then
+                searches = searches + 1
+                return nil
+            end
+            return find(class)
+        end
+        nc.hudLayout:UnRegisterBossHPBar(mirror)
+        n:run(2)
+        noHud = false
+        n:run(2)
+        check(had and searches <= 6 and nc.env.PBZ.game.isMirrorBar(mirror) == true, "the watcher's mirror gone and no HUD for 2 s: "
+            .. "put back once a second at most (" .. searches .. " searches of the HUD), and back with the HUD")
+        allErrors(n)
+    end
 end
 
 -- A party's guest far from an enemy the host's lines tell of (another guest is by it) and that its own world hasn't:
@@ -3945,6 +4034,111 @@ local function bossStartsHere()
         and side(kg) == "Faction.Player 1",
         "and ended there a few seconds on, the host in no fight: no bar, no walls, the figure as it was (" .. side(kg) .. ")")
     allErrors(k)
+
+    -- The host tells all it has sent again to a player who links again: this one back from a load, a trip or a drop,
+    -- or in a party any other. A start held here came with it, and taken so, its trigger went after all. (The fourth
+    -- review's V1.)
+    local q, qh, qg = world()
+    scene(q, qh)
+    bossStart(q)
+    q:run(20)
+    check(not has(qg.storyGuids, GUID) and count(qg.logs, "left for this world's own start of it") == 1, "(a start held)")
+    for _ = 1, 8 * 60 do                            -- (the guest's game stands still 8 s: a load)
+        Fake.frame(qh, 1 / 60)
+        qg.now = qg.now + 1 / 60
+        q.relay:step(qh.now)
+    end
+    q:run(12)
+    check(count(qh.logs, "told again") >= 1 and not has(qg.storyGuids, GUID) and not has(qg.storyGuids, STEP)
+        and not has(qg.globalTags, FLAG),
+        "the guest back from a load of 8 s, the host telling all again: the held start stays held ("
+            .. count(qh.logs, "told again") .. " retelling)")
+    bossEnd(q)
+    q:run(8)
+    check(has(qg.storyGuids, GUID) and has(qg.globalTags, FLAG), "and is taken when the host beats the boss, as before")
+    allErrors(q)
+
+    -- One start that brings two bosses: kept under one name, the start went as that one fell, the other alive there
+    -- and not started here. (The fourth review's V5.)
+    local DUO = {}
+    for _, e in ipairs(ENEMIES) do
+        DUO[#DUO + 1] = e
+    end
+    DUO[#DUO + 1] = { "boss2", "BP_Monster_Boss_C", 3300.0, 3000.0, 100.0, 5000, 400, true }
+    for _, first in ipairs({ "boss", "boss2" }) do
+        local d = Session.new(SIM_SCRIPTS, { "Host", "Guest" }, false, DUO)
+        local dh, dg = d.pcs[1], d.pcs[2]
+        d:run(4)
+        Session.moveTo(dh, 0, 0)
+        Session.moveTo(dg, 500, 0)
+        d:run(2)
+        local function state(pc, id, s)
+            local c = rawget(field(Session.enemyOn(pc, id), "Controller"), "__fields").SGameAIComponent
+            c.CurrentStateTag = { TagName = { ToString = function() return s end } }
+        end
+        local function beat(id)
+            local e = Session.enemyOn(dh, id)
+            Fake.setHealth(e, 0)
+            Fake.put(e, "dead", true)
+            d:run(1)
+            dh.hudLayout:UnRegisterBossHPBar(e)
+            d:run(8)
+        end
+        for _, pc in ipairs(d.pcs) do
+            pc.env.PBZ.game.isStoryLevel = function(level) return level == "Map_Xigu" end
+            state(pc, "boss", "None")
+            state(pc, "boss2", "None")
+        end
+        d:run(8)
+        Session.scene(dh, true)
+        step(dh, GUID)
+        step(dh, STEP)
+        dh.globalTags[#dh.globalTags + 1] = FLAG
+        d:run(14)
+        Session.scene(dh, false)
+        state(dh, "boss", "AI.State.Combat")
+        state(dh, "boss2", "AI.State.Combat")
+        dh.hudLayout:RegisterBossHPBar(Session.enemyOn(dh, "boss"))
+        dh.hudLayout:RegisterBossHPBar(Session.enemyOn(dh, "boss2"))
+        d:run(22)
+        check(not has(dg.storyGuids, GUID) and count(dg.logs, "sp:boss and sp:boss2, not started in this world") == 1,
+            "one start of the host's that brings two bosses: held under both")
+        beat(first)
+        check(not has(dg.storyGuids, GUID),
+            "the host beats " .. first .. " first: still held, the other alive there and not started here")
+        beat(first == "boss" and "boss2" or "boss")
+        check(has(dg.storyGuids, GUID) and has(dg.globalTags, FLAG), "both beaten: taken")
+        allErrors(d)
+    end
+
+    -- A boss of phases: the first falls with the guest away, its fall's scene tells its win, and the next phase's bar
+    -- comes up as that scene ends. The win is no start: held under the next phase, the guest had none of it till that
+    -- phase fell, and none at all if the session ended first. (The fourth review's V6.)
+    local p, ph, pg = pair()
+    for _, pc in ipairs(p.pcs) do
+        pc.env.PBZ.game.isStoryLevel = function(level) return level == "Map_Xigu" end
+    end
+    bossStart(p)
+    local phase1 = Session.enemyOn(pg, "boss")
+    swing(pg, phase1, select(1, Fake.health(phase1)) - 10)
+    p:run(6)
+    Session.moveTo(pg, 90000, 0)                    -- (900 m off as it falls)
+    p:run(3)
+    bossEnd(p)
+    Session.scene(ph, true)                         -- (its fall's scene, a second on)
+    p:run(4)
+    step(ph, "Map_Xigu-BP_FlowActor_C_Phase1Won")
+    ph.globalTags[#ph.globalTags + 1] = "xg.boss.phase1.won"
+    p:run(10)
+    Session.scene(ph, false)
+    local phase2 = Fake.enemy(ph, "boss2", "BP_Monster_Boss_C", 3000.0, 3200.0, 100.0, 5000, 400, true)
+    p:run(1)
+    ph.hudLayout:RegisterBossHPBar(phase2)
+    p:run(24)
+    check(has(pg.storyGuids, "Map_Xigu-BP_FlowActor_C_Phase1Won") and has(pg.globalTags, "xg.boss.phase1.won")
+        and count(pg.logs, "left for this world's own start of it") == 0,
+        "a phase falls, its fall's scene tells its win, the next phase's bar comes up: the win is taken, not held as a start")
+    allErrors(p)
 end
 
 local function doorsOpenedBefore()
@@ -4081,9 +4275,16 @@ local function doorsOfTheGames()
     Fake.put(guestLever, "SwitchWithoutPlaySequence", function(self) Fake.put(self, "CurSwitchState", true) end)
     local tDoor = door(tg, KEY)
     door(th, KEY)
+    -- (And one with neither name, a wharf: no CurSwitchState to read either. The fourth review's V4.)
+    local WHARF = "BP_Wharf_C_UAID_10"
+    Fake.switch(th, WHARF, 360.0, 0.0, 100.0, nil, true)
+    Fake.switch(tg, WHARF, 360.0, 0.0, 100.0, nil, true)
     t:run(40)
     local asked = th.missed[LEVER .. ".DoorOpen"] or 0
     check(asked >= 1 and asked <= 3, "a lever is asked for a DoorOpen three looks at most, not at every look (" .. asked .. " in 40 s)")
+    local state = th.missed[WHARF .. ".CurSwitchState"] or 0
+    check(state >= 1 and state <= 3 and (tg.missed[WHARF .. ".CurSwitchState"] or 0) <= 3,
+        "a wharf, with no CurSwitchState and no DoorOpen, is asked for neither once that's known (" .. state .. " in 40 s)")
     Fake.put(hostLever, "CurSwitchState", true)     -- (the host pulls it)
     t:run(3)
     check(field(guestLever, "CurSwitchState") == true and count(th.sent, "^E SWO " .. LEVER .. "$") == 1,
@@ -4093,6 +4294,42 @@ local function doorsOfTheGames()
     t:run(3)
     check(count(tg.sent, "^E SWO " .. KEY .. "$") == 1, "and a door opened after all that is still seen and told")
     allErrors(t)
+
+    -- A press seen late: the guest opens a door while the host is on another map, or in a quiet after a stall, and the
+    -- first look that sees it open comes more than 20 s after the walk up. Told all the same. (The fourth review's V7.)
+    local a, ah, ag = pair()
+    local LATE, QUIET = "BP_SingleDoor_Poverty_C_UAID_8", "BP_Block_Door_C_UAID_9"
+    local hostLate, guestLate = door(ah, LATE), door(ag, LATE)
+    local hostQuiet, guestQuiet = door(ah, QUIET), door(ag, QUIET)
+    a:run(3)
+    ah.map = "Map_Other"
+    a:run(3)
+    Fake.arrive(ag, guestLate)
+    Fake.put(guestLate, "DoorOpen", true)
+    a:run(30)
+    ah.map = "Map_Xigu"
+    a:run(6)
+    check(count(ag.sent, "^E SWO " .. LATE .. "$") == 1 and field(hostLate, "DoorOpen") == true,
+        "a door the guest opened while the host was on another map is told once the host is back, 30 s on")
+    Fake.arrive(ag, guestQuiet)
+    Fake.put(guestQuiet, "DoorOpen", true)
+    net(ag).quietUntil = ag.now + 25                -- (a stall as it opens, and hitches after it)
+    a:run(30)
+    check(count(ag.sent, "^E SWO " .. QUIET .. "$") == 1 and field(hostQuiet, "DoorOpen") == true,
+        "and one opened as the guest's game stalled, seen as the quiet ends 25 s on")
+    -- A walk up to a rubbish pile (a chest, a bell) is no press of a door: one the guest's world opens by itself within
+    -- 20 s of it isn't told. (The fourth review's V10.)
+    local PILED = "BP_Block_Door_C_UAID_12"
+    local hostPiled, guestPiled = door(ah, PILED), door(ag, PILED)
+    local pile = Fake.pile(ag, "BP_Rubbish_C_UAID_13", 400.0, 0.0, 100.0)
+    a:run(3)
+    Fake.arrive(ag, pile)
+    a:run(10)
+    Fake.put(guestPiled, "DoorOpen", true)
+    a:run(4)
+    check(count(ag.sent, "^E SWO " .. PILED .. "$") == 0 and field(hostPiled, "DoorOpen") == false,
+        "a walk up to a rubbish pile, then a door the guest's world opens by itself 10 s on: not told")
+    allErrors(a)
 end
 
 -- Point 6 of a report on 1.7.1 (three players): "unless we're near each other (like within 75m), bells and certain things
@@ -10035,6 +10272,33 @@ local function localTargets()
     s:run(3)
     check(field(e, "target") == pc.pawn, "player 2 down: it's after player 1")
     allErrors(s)
+    -- One player 2 fights alone, player 1 40 m off: never steered, but what it was hit for is kept. It dies: the record
+    -- goes with it, or a later enemy at its address took it over (the third review's V12).
+    do
+        local d, dpc, dstate = localGame()
+        d:run(2)
+        local dp2 = dstate.p2Pawn
+        local lone, blow = Session.enemyOn(dpc, "near"), dpc.env.StaticFindObject(MOVE)
+        Session.moveTo(dpc, 4300, 300)
+        d:run(5)                                        -- (a 43 m jump takes player 2 along: put back by it after)
+        Fake.put(dp2, "loc", { X = 600.0, Y = 300.0, Z = 100.0 })
+        d:run(2)
+        field(lone, "BP_PBZHatredManagerComponent"):AddActorToHatredList(dp2, {})
+        d:run(2)
+        for _ = 1, 40 do
+            Fake.put(rawget(dp2, "__fields").anim, "montage", blow)
+            Fake.setHealth(lone, select(1, Fake.health(lone)) - 12)
+            d:run(0.1)
+        end
+        Fake.put(rawget(dp2, "__fields").anim, "montage", nil)
+        local had = dpc.env.PBZ.game.aim.dmg[lone:GetAddress()] ~= nil
+        Fake.setHealth(lone, 0)
+        Fake.put(lone, "dead", true)
+        d:run(2)
+        check(had and dpc.env.PBZ.game.aim.dmg[lone:GetAddress()] == nil,
+            "one player 2 fought alone, never steered, dies: what it was hit for goes with it")
+        allErrors(d)
+    end
 
     -- A trip with an enemy steered (317: let go as the load begins, by the load's own hook): nothing kept past it, no
     -- error on the old world's bodies. (The third review's G8: no check read the records across a load.)
@@ -11918,6 +12182,12 @@ local function screens()
     s:run(2)
     check(count(h.logs, "player 3 is on Phantom Pact 1%.4%.1 and you're on ") == 1 and count(h.logs, "player 4 is on Phantom Pact 1%.4%.0") == 1, "the host hears of each guest on another version")
     check(count(s.pcs[2].logs, "is on Phantom Pact") == 0, "not the guests, who compare with the host alone")
+    -- (One turned away for its protocol isn't in the game: told they can't connect, not that they're in and out of step.)
+    s.relay.otherVersions = "3:other-protocol"
+    s:run(2)
+    check(count(h.logs, "your partner's Phantom Pact %(other%-protocol%) can't connect to ") == 1
+        and count(h.logs, "is on Phantom Pact other%-protocol") == 0, "a friend on another protocol at the door: "
+        .. "told they can't connect, not that they're in the game and out of step")
 end
 
 local function panel()

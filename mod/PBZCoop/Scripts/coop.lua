@@ -1904,14 +1904,14 @@ return function(api)
     -- shown or not; whether a partner's fight is told yet is no test (the watcher's bar came first, on the bench).
     handover.BY_CM, handover.BY_FAR_CM = 3000, 4500
     handover.live = {}          -- guest: enemy address -> its name, while this game runs its own copy of it
-    -- (Nearer, and beside it (within BY_CM) or in a fight with it: what rouses a copy. One merely nearer, in no fight,
-    -- took a guest's own fight begun from 30-45 m away from them. The third review.)
-    function handover.nobodyNearer(at, gap, name)
-        local whose = net.fightOf[name]
+    -- (Any partner nearer, in a fight or not: the one about to fight, 35 m off and not told yet, is nearer than a
+    -- watcher whose stray bar comes then. Counted only within 30 m or in a fight, the watcher's copy was made theirs
+    -- and told, and the fighter's lost fight never started over. A guest's own fight begun from further off, a
+    -- partner nearer, waits till they're within 30 m; its B is held till then (announceBoss). The fourth review.)
+    function handover.nobodyNearer(at, gap)
         for _, p in ipairs(partners()) do
             local t = p.target
-            local d = t ~= nil and not p.partnerGone and sameMap(t) and handover.dist(at.X, at.Y, at.Z, t)
-            if d and d < gap and (d <= handover.BY_CM or (whose ~= nil and whose == p.number) or p.fights) then
+            if t ~= nil and not p.partnerGone and sameMap(t) and handover.dist(at.X, at.Y, at.Z, t) < gap then
                 return false
             end
         end
@@ -1930,7 +1930,7 @@ return function(api)
             -- fight's mirror again whoever is nearest: the fight had moved away from where the boss sleeps on the host,
             -- where a held copy stays, and the watcher 43 m off was the nearest to theirs. The third review.)
             yes = gap <= (was and handover.BY_FAR_CM or handover.BY_CM) or net.joinedBoss == name
-                or (own and (was or (net.partnerBosses[name] == nil and handover.nobodyNearer(at, gap, name))))
+                or (own and (was or (net.partnerBosses[name] == nil and handover.nobodyNearer(at, gap))))
             local now, c = os.clock(), handover.calm[addr]
             -- (A partner's fight with it shown here: its copy isn't calmed meanwhile. Calmed, the game ended "its fight"
             -- and took the bar down, the mirror with it: the watcher saw no bar for the fight. The bench.)
@@ -1972,7 +1972,10 @@ return function(api)
             end
         end
         handover.live[addr] = yes and name or nil
-        if yes and not was and own and not (net.ownAnnounced or {})[name] and api.coop and api.coop.announceBoss then
+        -- (Only with the game's own bar on it: hostIn says yes for a blow from near it too, and a guest who struck one
+        -- with no bar, went off past 45 m and came back told a fight nobody was in. The fourth review.)
+        if yes and not was and handover.barOn(addr) and not (game.isMirrorBar and game.isMirrorBar(actor))
+            and not (net.ownAnnounced or {})[name] and api.coop and api.coop.announceBoss then
             api.coop.announceBoss(actor)    -- (its fight, held back while the copy wasn't this game's: announceBoss)
         end
         return yes

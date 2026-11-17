@@ -996,7 +996,7 @@ void test_hello() {
 
         // A guest takes another protocol's word from a host alone: on Steam it hears every friend in the game.
         FakeNet friends;
-        End lone(friends, "client", 3, at(1));
+        End lone(friends, "client", 3);      // (no host given, as on Steam: given one, the link drops other senders first)
         friends.send(at(5), lone.addr, knock);      // (another guest's knock, at other doors)
         run(friends, {&lone}, 0.1);
         check(lone.field("partner_version") != "other-protocol", "another guest's knock on another protocol says nothing of this guest's host");
@@ -1008,6 +1008,14 @@ void test_hello() {
         friends.send(at(1), lone.addr, host_word);
         run(friends, {&lone}, 0.1);
         check(lone.field("partner_version") == "other-protocol", "its host's does");
+        check(friends.wires[at(1).ip].empty(), "and a guest answers it no more than another guest's");
+        // And a host takes it from a guest alone: another host's packet says nothing of this host's guests.
+        FakeNet hosts;
+        End alone(hosts, "host", 1);
+        hosts.send(at(6), alone.addr, host_word);
+        run(hosts, {&alone}, 0.1);
+        check(alone.field("partner_version") == "-" && hosts.wires[at(6).ip].empty(),
+              "a host hears nothing in another host's packet on another protocol, and answers none");
     }
 
     End guest2(old, "client", 3, at(1));
