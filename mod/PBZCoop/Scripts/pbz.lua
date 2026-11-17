@@ -6296,6 +6296,12 @@ return function(api)
             if kind == "p" and counts ~= false and n and n > (mine or 0) then
                 game.grantLoot(pawn, id, nil, n - (mine or 0), true)
                 came = came + 1
+            elseif kind == "p" and n and mine == nil and game.keepsake(id) then
+                -- (A sync started again: a story thing, or a piece that adds to the player, which the host found while
+                -- this player was away and this bag has none of. It isn't used up as it's used, and nothing else brings
+                -- it: an elite's Sha-Chi Amber Shard stayed the host's alone. The bench, 11-17.)
+                game.grantLoot(pawn, id, nil, n, true)
+                came = came + 1
             elseif kind == "m" and id == "Hulu" and mine == nil then
                 -- The healing gourd, which grantLoot never hands over (in the prologue it came unequipped, and none to drink
                 -- from): past the prologue, a player without one gets it equipped and full. The game's own prologue skip
@@ -6355,6 +6361,16 @@ return function(api)
         return once ~= nil and once[id] == true
     end
 
+    -- A story thing, or a piece that adds to the player (the item table's ItemDetailType NarrativeItem or AddAttribute: 85
+    -- and 7 of its 235 plain items, the bench of 11-17; its 110 materials are spent as they're used): one has it or
+    -- hasn't. game.mergeBag.
+    game.KEEP_DETAILS = { NarrativeItem = true, AddAttribute = true }
+    function game.keepsake(id)
+        game.isPetal(id)        -- (the table read once: game.flowers.keeps with it)
+        local keeps = game.flowers.keeps
+        return keeps ~= nil and keeps[id] == true
+    end
+
     -- A Memory Flower's petal, by the game's item table (ItemType MemoryFlowerPetal), read once (game.flowers.once too).
     function game.isPetal(id)
         local fl = game.flowers
@@ -6384,8 +6400,9 @@ return function(api)
                 end
                 -- (Read once, even with no such column: an item that isn't a petal goes grantLoot's own way.)
                 local set, once, n, m = {}, {}, 0, 0
-                fl.petals, fl.once = set, once
+                fl.petals, fl.once, fl.keeps = set, once, {}
                 local kinds = lib:GetDataTableColumnAsString(t, FName("ItemType"))
+                local details = lib:GetDataTableColumnAsString(t, FName("ItemDetailType"))
                 for i = 1, #ids do
                     local kind = text(kinds[i])
                     if kind == "MemoryFlowerPetal" then
@@ -6393,6 +6410,9 @@ return function(api)
                     end
                     if game.ONCE_TYPES[kind] then
                         once[text(ids[i])], m = true, m + 1
+                    end
+                    if details[i] ~= nil and game.KEEP_DETAILS[text(details[i])] then
+                        fl.keeps[text(ids[i])] = true
                     end
                 end
                 log("Memory Flower petals in the game's table: " .. n .. "; things it keeps once a save: " .. m .. ".")

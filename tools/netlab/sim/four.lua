@@ -8149,6 +8149,28 @@ local function followTheHost()
     check(Session.items(bg, "R_800") == 5 and Session.items(bh, "R_700") == 2, "and each keeps their own")
     allErrors(b)
 
+    -- A sync started again later in the same run of the game (the guest left and came back, or its link dropped and
+    -- rose): what's counted stays as it is, so the bombs and herbs used since aren't refilled. A story thing, or a piece
+    -- that adds to the player, which the host found meanwhile and this bag has none of, comes all the same: it isn't used
+    -- up as it's used, and nothing else brings it. (The bench, 11-17: an elite's Sha-Chi Amber Shard.)
+    local k, kh, kg = pair(nil, function(ph)
+        Session.gainItem(ph, "Weapon_Material_01", 3)
+    end)
+    k:run(70)                                   -- (past the run's first minute)
+    check(Session.items(kg, "Weapon_Material_01") == 3, "(the first joining: what the host has, counted)")
+    kg.bag:RemovePropsFromBackPack(2, kg.env.FName("Weapon_Material_01"))       -- (used since)
+    Session.command(kg, "netoff")
+    k:run(2)
+    kh.bag:AddPropsToBackPack(1, kh.env.FName("I_KEY_9"), false)                -- (found by the host meanwhile)
+    kh.bag:AddPropsToBackPack(2, kh.env.FName("Weapon_Material_02"), false)
+    Session.command(kg, "neton client")
+    k:run(20)
+    check(Session.items(kg, "I_KEY_9") == 1, "back in the same run: a story thing the host found meanwhile comes")
+    check(Session.items(kg, "Weapon_Material_01") == 1 and Session.items(kg, "Weapon_Material_02") == 0,
+        "and nothing that's counted: what was used stays used, a material found meanwhile stays the host's ("
+            .. Session.items(kg, "Weapon_Material_01") .. ", " .. Session.items(kg, "Weapon_Material_02") .. ")")
+    allErrors(k)
+
     local c, ch, cg = pair()
     ch.storyUpTo(all)
     cg.storyUpTo(3)
