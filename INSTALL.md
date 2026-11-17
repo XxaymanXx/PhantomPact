@@ -243,14 +243,15 @@ Not in PvPvE yet: executions (posture break only staggers). It's for two players
   usual on both PCs, so block, parry and dodge do too.
 - Boss fights: when one of you starts a boss, the other gets a tip: press E at the black wall, or F3, to join. Stay close
   when you're about to start one: far from the host, enemies that aren't loaded on the host's PC fight on their own on the
-  guest's.
+  guest's. A story boss's opening scene is each player's own: if you weren't beside the host as it began, it may play
+  for you as you go in, while the fight goes on.
 - If your partner disappears, they are down, in a cutscene, on another map or disconnected; they come back.
 - With both of you in a fight, an enemy picks whom to fight by how near each of you is and the damage each has done to it
   lately, and holds its target a few seconds (a boss longer) before it turns.
 - If one of you dies during a boss fight, they watch the other until it's over, and respawn when the boss dies or the
   other dies too.
 - If you join while the host is in a boss fight, you watch it (F3 takes you in now), and go to them when it's over; after
-  30 s you're free to move. From another map you only get a message, and go across at the end.
+  30 s you're free to move. From another map there's nothing to watch: F3 takes you there now, or you go at the end.
 - Bells: the host's bells light for you when you come to them, not before.
 - Not shared yet: cutscenes, dialogue and spending dust. Quests and story: see The host's story, above.
 - Never press Ctrl+R (UE4SS hot reload) while playing together: it can crash the game. Restart the game instead.
@@ -323,10 +324,12 @@ simulated bad connection, not a real one.
 
 **`connected=no`.** Go through these in order:
 
-1. Both on Tailscale, in the same network? The host's IP in the guest's `HostAddress`?
-2. The guest runs `tailscale ping 100.x.y.z` in PowerShell, with the host's IP. No reply means Tailscale itself isn't
+1. Both on this Phantom Pact version? 1.7.3 or older can't connect to it, and a host on 1.7.3 doesn't answer at all: the
+   guest sees only `connected=no`.
+2. Both on Tailscale, in the same network? The host's IP in the guest's `HostAddress`?
+3. The guest runs `tailscale ping 100.x.y.z` in PowerShell, with the host's IP. No reply means Tailscale itself isn't
    connecting the two PCs: fix that first.
-3. A reply, but still `connected=no`: Windows Firewall on the host is the likely cause, because `tailscale ping`
+4. A reply, but still `connected=no`: Windows Firewall on the host is the likely cause, because `tailscale ping`
    doesn't pass through it. See below.
 
 **Windows Firewall.** The connection is part of the game, so the firewall asks about the game (`PBZ.exe`), not Python.

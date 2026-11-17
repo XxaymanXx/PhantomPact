@@ -27,6 +27,7 @@ return function(api)
     local WIN_S, WIN_MAX = 150, 1000    -- host: this long after a boss fell here, up to this many at once are its win
     local ELSEWHERE_MAX = 3000      -- guest: flow steps of levels it isn't on kept waiting, at most
     local START_TAIL_S = 15         -- guest: what the host tells this long after a scene of its own is still that scene's
+    local FELL_S = 10               -- guest: a scene of the host's begun this soon after a boss fell there is that fall's
     -- Never sent: the game's mode, the screen's own state, and the states of a moment (a fight, a dodge, a lock-on).
     local SKIP = { "^GameMode%.", "^UI%.", "^State%.", "^Combat%.", "^Battle%.", "^Input%.", "^Camera%.", "^Ability%.",
         "^Status%.", "^Buff%.", "^Player%.State" }
@@ -732,9 +733,26 @@ return function(api)
         local net = coop.net
         local s, t = flow.start, net.target
         local hostBosses = net.hostBosses or {}
+        -- (The host tells all it has sent again to a player who links again, and in a party to everyone as anyone does:
+        -- back from a load, a trip or a drop. A start held here comes with it, and taken so, it was gone after all: it
+        -- stays held.)
+        if next(flow.startHeld) ~= nil then
+            local held, rest = {}, {}
+            for _, list in pairs(flow.startHeld) do
+                for _, q in ipairs(list) do
+                    held[q.kind .. " " .. q.item] = true
+                end
+            end
+            for _, q in ipairs(flow.queue) do
+                if not (q.host and held[q.kind .. " " .. q.item]) then
+                    rest[#rest + 1] = q
+                end
+            end
+            flow.queue = rest
+        end
         if t ~= nil and not net.partnerGone and t.Cine == true then
             if not s.open then
-                s.open, s.items, s.before, s.boss = true, {}, {}, nil
+                s.open, s.items, s.before, s.bosses, s.at = true, {}, {}, {}, now
                 for name in pairs(hostBosses) do
                     s.before[name] = true
                 end
@@ -753,15 +771,34 @@ return function(api)
                 end
             end
             flow.queue = rest
+            -- (Every boss begun in that time: one start can bring two, and kept under one name the start went as
+            -- that one fell, the other alive and not started here. Not a fight of this player's own, told to the host
+            -- from here: its start ran in this world. The fourth review.)
             for name in pairs(hostBosses) do
-                if not s.before[name] then
-                    s.boss = name
+                if not s.before[name] and not (net.ownAnnounced or {})[name] then
+                    s.bosses[name] = true
                 end
             end
             if s.endAt and now - s.endAt >= START_TAIL_S then
-                local boss = s.boss
-                if boss and #s.items > 0 and not net.hostKilled[boss] and unstarted(boss) then
-                    local held = flow.startHeld[boss] or {}
+                local waits = {}
+                for name in pairs(s.bosses) do
+                    if not net.hostKilled[name] and unstarted(name) then
+                        waits[#waits + 1] = name
+                    end
+                end
+                -- (Not a scene a boss's fall began: what it told is that fall's win (279), and a next phase's start
+                -- with it, which this world runs by its own fall only. Held under the next phase, a guest down or away
+                -- at the fall had none of the win till that phase fell there, and none at all if the session ended
+                -- first. The fourth review.)
+                for name, at in pairs(net.killedAt or {}) do
+                    if at >= s.at - FELL_S and net.bossFell and net.bossFell[name] then
+                        waits = {}
+                    end
+                end
+                table.sort(waits)
+                local boss = table.concat(waits, " and ")
+                if #waits > 0 and #s.items > 0 then
+                    local held = flow.startHeld[boss] or { bosses = waits }
                     for _, q in ipairs(s.items) do
                         held[#held + 1] = q
                     end
@@ -777,8 +814,13 @@ return function(api)
             end
         end
         for boss, held in pairs(flow.startHeld) do
-            local beaten = net.hostKilled[boss] == true
-            if beaten or not unstarted(boss) then
+            -- (Each of them beaten there or started here.)
+            local beaten, done = true, true
+            for _, name in ipairs(held.bosses) do
+                beaten = beaten and net.hostKilled[name] == true
+                done = done and (net.hostKilled[name] == true or not unstarted(name))
+            end
+            if done then
                 for _, q in ipairs(held) do
                     flow.queue[#flow.queue + 1] = q
                 end

@@ -190,6 +190,9 @@ return function(api)
     -- word, as is one last seen open before a load or time alone on the map. Doors only: a lever is as it was. The main
     -- session's second review, 11-16. shutHere: name -> true; openAt: name -> when a look last saw it open.
     local shutHere, openAt = {}, {}
+    -- shutSeenAt: name -> when a look last saw it shut. A guest's press counts from there: one made while nobody else
+    -- was on the map, or in a quiet, is seen at the first look after, more than PRESS_S on. (The fourth review.)
+    local shutSeenAt = {}
     -- A guest tells only an opening of its own player's doing: one within PRESS_S of their walk up to a switch (the end
     -- of the game's own walk to it, as a press begins). A door or lever a guest's world opens by itself (a scene's, a
     -- quest step's, a fight's end there, that guest further on in the story) opened the host's copy, and wrote that
@@ -198,11 +201,6 @@ return function(api)
     -- that opens more than PRESS_S after its lever. The third review.)
     local PRESS_S = 20
     blockers.walkedUpAt = -1e9
-    pcall(function()
-        RegisterHook("/Script/ProjectPBZ.PBZSwitchBase:FinishMoveToAsync", function()
-            blockers.walkedUpAt = os.clock()
-        end)
-    end)
 
     local function sharedSwitch(s)
         local ok, cn = pcall(function() return s:GetClass():GetFName():ToString() end)
@@ -217,6 +215,19 @@ return function(api)
         return true, cn
     end
 
+    -- (A walk up to a shared one only: a chest's, a pile's or a bell's is no press of a door or a lever.)
+    pcall(function()
+        RegisterHook("/Script/ProjectPBZ.PBZSwitchBase:FinishMoveToAsync", function(self)
+            local ok, shared = pcall(function()
+                local thing = self:get()
+                return valid(thing) and sharedSwitch(thing)
+            end)
+            if ok and shared then
+                blockers.walkedUpAt = os.clock()
+            end
+        end)
+    end)
+
     -- (A door of the game's, BP_BlockBase and what's made of it: single and double doors, block gates. Open is its own
     -- DoorOpen: a player's opening never sets the switch's CurSwitchState, and neither does the word's own call. So a
     -- door one player opened was never told, and stayed shut in the partner's world: on the bench, 11-16, the key door
@@ -230,8 +241,18 @@ return function(api)
     -- no door's once DOOR_MISSES looks, a second apart, found none.)
     local DOOR_MISSES = 3
     local doorClass, doorMiss = {}, {}      -- class -> true (doors) or false (none); class -> { n, at } while unknown
+    -- (Nor has every class a CurSwitchState: a wharf, a stinger trigger, a cage or a broken bell has none, the census of
+    -- 11-16, and was asked for it at every look all the same. A class that's no door's and never read one can't read
+    -- open: it's asked nothing more. The fourth review.)
+    local stateClass = {}                   -- class -> true once a CurSwitchState of its read true or false
     local function isOpen(s, cn)
+        if cn and doorClass[cn] == false and not stateClass[cn] then
+            return false, false
+        end
         local ok, v = pcall(function() return s.CurSwitchState end)
+        if cn and ok and type(v) == "boolean" then
+            stateClass[cn] = true
+        end
         if ok and v == true then
             return true
         end
@@ -270,7 +291,7 @@ return function(api)
     local function onSwitchMap()
         if net.localMap ~= switchMap then
             switchSeen, switchMap = {}, net.localMap
-            shutHere, openAt = {}, {}
+            shutHere, openAt, shutSeenAt = {}, {}, {}
             local st = mapState(switchMap)
             openNow, pending = st.open, st.pending
         end
@@ -290,6 +311,7 @@ return function(api)
         -- themselves, its flags with it, as the host's chests aren't opened for them (coop.lua's OC). Opened by word, it
         -- had the host's flags written into their save with every naming, 20 s apart. The third review.)
         if flags and api.story and api.story.follow == false and not coop.isHost() then
+            shutHere[name] = true       -- (passed over at the host's next words, as one this world's game shut is)
             return false
         end
         pcall(function() s:SwitchWithoutPlaySequence() end)
@@ -360,9 +382,10 @@ return function(api)
                         end
                     end
                     openNow[name] = open or nil
-                    local was = switchSeen[name]
+                    local was, shutSeen = switchSeen[name], shutSeenAt[name]
                     switchSeen[name] = open
-                    if was == false and open and (coop.isHost() or now - blockers.walkedUpAt <= PRESS_S) then
+                    shutSeenAt[name] = not open and now or nil
+                    if was == false and open and (coop.isHost() or blockers.walkedUpAt >= (shutSeen or now) - PRESS_S) then
                         local okL, at = pcall(function() return s:K2_GetActorLocation() end)
                         if okL and at and api.distance(at, here) <= NEAR_CM then
                             blockers.sent = blockers.sent + 1
@@ -478,7 +501,7 @@ return function(api)
             log(string.format("%d chains and switches waited for here: forgotten (%s).", held, why))
         end
         byMap, seen, switchSeen = {}, {}, {}
-        shutHere, openAt = {}, {}
+        shutHere, openAt, shutSeenAt = {}, {}, {}
         seenMap, switchMap = false, false
         owed, brokenNow, openNow, pending = {}, {}, {}, {}
     end

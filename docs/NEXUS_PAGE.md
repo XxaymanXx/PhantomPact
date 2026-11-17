@@ -57,7 +57,7 @@ You should now have a [b]PBZCoop[/b] folder in [b]platform\steam\ue4ss\Mods[/b].
 Start the game and load your saves, the host first, then follow the F5 tutorial below.
 The first time you host, Windows asks whether the game may use the network: click [b]Allow[/b]. That window can open behind the game, so Alt+Tab if the guest can’t connect.
 
-[b]Updating:[/b] everyone closes the game, extracts the new version over the old one, then presses HOST or GUEST in F5 again.
+[b]Updating:[/b] everyone closes the game first (while it runs, the old main.dll stays in place), extracts the new version over the old one, then presses HOST or GUEST in F5 again.
 [b]Playing alone:[/b] press [b]LEAVE[/b] in F5.
 [b]To uninstall:[/b] delete [b]platform\steam\ue4ss\Mods\PBZCoop[/b] from the game folder.
 
@@ -106,7 +106,7 @@ Press [b]Esc[/b], [b]F5[/b] or the [b]X[/b] to close the panel.
 [*]Shared dust, and bells that bring you together
 [*]The game doesn’t pause while you’re linked, in the F5 panel or the game’s own menu: enemies keep coming
 [*]Partner compass, your partner on the map, and tips when they connect, go down or wander off
-[*]Elden Ring–style co-op difficulty: enemies and bosses get 50% more health and 30% more posture with a partner, bosses twice their guard bar, and super armour so two players can't stun-lock them
+[*]Elden Ring–style co-op difficulty: enemies and bosses get 50% more health and 30% more posture with a partner online, bosses twice their guard bar, and super armour so two players can't stun-lock them
 [*]PvP duels with the game’s own block, parry and dodge: turn it on under [b]MORE[/b] in F5
 [/list]
 
@@ -124,7 +124,7 @@ This is a beta: four real players haven’t played this version together yet. Pl
 
 [color=#ff2222][size=5][b]Two Players On One PC (In Testing)[/b][/size][/color]
 
-Split-screen local co-op is in the same download, with no internet or second PC needed. Each player uses a pad, or player 1 uses the keyboard and mouse and player 2 a pad. You share one save, backpack and dust.
+Split-screen local co-op is in the same download, with no internet or second PC needed. Each player uses a pad, or player 1 uses the keyboard and mouse and player 2 a pad. You share one save, backpack and dust. Local co-op keeps the difficulty you chose and the game's own enemy numbers.
 
 [b]1. Turn On Local Mode[/b]
 Press [b]F5 > MORE > Mode > LOCAL[/b] and restart the game. Or open platform\steam\ue4ss\Mods\PBZCoop\PhantomPact.ini in Notepad and set [b]Role = Local[/b]. To go back, press [b]MULTIPLAYER[/b] in the F4 panel.
@@ -174,6 +174,7 @@ Online co-op needs none of these pad steps. If your pads stop working in other g
 [color=#ff2222][size=5][b]Not Connecting?[/b][/size][/color]
 
 [list]
+[*]Everyone on this Phantom Pact version? A host on 1.7.3 or older doesn't answer at all
 [*]Did the host allow the game through Windows Firewall? That window can open behind the game
 [*]The guide in the zip, Phantom Pact - INSTALL.md, has a Connection problems section
 [*]Still stuck: post your [b]ue4ss\UE4SS.log[/b], [b]ue4ss\Mods\PBZCoop\net_status.txt[/b] and [b]ue4ss\Mods\PBZCoop\relay_log.txt[/b] in the Bugs tab
@@ -208,6 +209,8 @@ Online co-op needs none of these pad steps. If your pads stop working in other g
 [*]启动游戏并读取存档,房主先进,然后按下面的 F5 面板教程操作。
 [*]第一次开房时,Windows 会询问游戏能否使用网络,请点击[b]允许[/b]。这个窗口可能在游戏后面,连不上时按 Alt+Tab 查看。
 [/list]
+
+[b]更新:[/b]先关闭游戏,再把新版本解压覆盖旧版本。所有人都要使用相同版本:1.7.3 及更早的版本无法与这个版本连接。
 
 [b]F5 面板教程[/b]
 
