@@ -47,9 +47,14 @@ local function ghostOf(pc, slot)
 end
 
 -- This player's own hit: a move of theirs, then their copy loses health. A copy that loses health with no move isn't their hit.
+-- (If it lands: none does on a figure on the player's own side, fakepc's Fake.lands. Says whether it did.)
 local function swing(pc, e, health)
     pc.env.PBZ.game.noteLocalMove()
+    if not Fake.lands(e) then
+        return false
+    end
     Fake.setHealth(e, health)
+    return true
 end
 
 local function field(o, name)
@@ -836,6 +841,86 @@ local function guestRunsItsBoss()
     allErrors(u)
 end
 
+-- A guest's own game writing its copy of the host's boss back to its base numbers (Xiao Xue's did every few seconds
+-- on the bench, 16482 over co-op's 24723; a difficulty set again does it to every enemy): no blow of the guest's. Its
+-- drop, weighed as one while the guest swung, took all of co-op's share off the host's boss at once, and its guard
+-- with it. (The sixth review's V3.)
+local function aCopyWrittenBack()
+    part("a copy's numbers written back by its own game")
+    local list = { { "boss", "BP_Monster_Boss_C", 3000.0, 3000.0, 100.0, 5000, 400, true } }
+    local function attr(e, name)
+        return rawget(e, "__fields").AttributeSetBase[name]
+    end
+    local function writeBase(e, hp, posture)    -- (the game's own write: health and its most, the guard bar too if given)
+        for _, n in ipairs({ "Health", "Health_Max" }) do
+            Fake.put(attr(e, n), "CurrentValue", hp)
+            Fake.put(attr(e, n), "BaseValue", hp)
+        end
+        for _, n in ipairs(posture and { "Shachi", "Shachi_Max" } or {}) do
+            Fake.put(attr(e, n), "CurrentValue", posture)
+            Fake.put(attr(e, n), "BaseValue", posture)
+        end
+    end
+    local function hpOf(e)
+        return (select(1, Fake.health(e)))
+    end
+    local s = Session.new(SIM_SCRIPTS, { "Host", "Guest" }, false, list, "CoopBossPosture = 200\n")
+    local h, g = s.pcs[1], s.pcs[2]
+    s:run(4)
+    Session.moveTo(h, 2800, 2900)
+    Session.moveTo(g, 3200, 3100)
+    s:run(4)
+    h.hudLayout:RegisterBossHPBar(Session.enemyOn(h, "boss"))
+    s:run(3)
+    local onH, onG = Session.enemyOn(h, "boss"), Session.enemyOn(g, "boss")
+    swing(g, onG, hpOf(onG) - 50)
+    s:run(1)
+    local before, guard = hpOf(onH), attr(onH, "Shachi").CurrentValue
+    check(before == 7450, "(a blow of the guest's, 50: off the host's boss, " .. before .. ")")
+    g.env.PBZ.game.noteLocalMove()              -- (the guest still swinging)
+    writeBase(onG, 5000, 400)
+    s:run(1)
+    check(hpOf(onH) == before and attr(onH, "Shachi").CurrentValue == guard and count(g.sent, "^E D ") == 1,
+        "the guest's own game writes its copy back to base as the guest swings: no blow, the host's boss keeps its health and its guard ("
+            .. hpOf(onH) .. ", " .. tostring(attr(onH, "Shachi").CurrentValue) .. ")")
+    s:run(3)
+    check(math.abs(hpOf(onG) - hpOf(onH)) < 1 and select(2, Fake.health(onG)) == select(2, Fake.health(onH)),
+        "and the copy is back at the host's numbers (" .. hpOf(onG) .. " of " .. tostring(select(2, Fake.health(onG))) .. ")")
+    g.env.PBZ.game.noteLocalMove()
+    writeBase(onG, 5000)
+    s:run(0.2)
+    local was = hpOf(onH)
+    swing(g, onG, hpOf(onG) - 50)
+    s:run(0.5)
+    check(hpOf(onH) == was - 50, "a blow while the copy still stands at its base lands all the same (" .. was - hpOf(onH) .. ")")
+    allErrors(s)
+
+    -- A party: two guests' games write theirs in one turn, both swinging: the boss was ended with no blow struck.
+    local p = Session.new(SIM_SCRIPTS, { "Host", "Guest", "Guest" }, true, list, "CoopBossPosture = 200\n")
+    local ph, pa, pb = p.pcs[1], p.pcs[2], p.pcs[3]
+    p:run(4)
+    Session.moveTo(ph, 2800, 2900)
+    Session.moveTo(pa, 3200, 3100)
+    Session.moveTo(pb, 3100, 2800)
+    p:run(4)
+    ph.hudLayout:RegisterBossHPBar(Session.enemyOn(ph, "boss"))
+    p:run(3)
+    local bossH = Session.enemyOn(ph, "boss")
+    for _, pc in ipairs({ pa, pb }) do
+        swing(pc, Session.enemyOn(pc, "boss"), hpOf(Session.enemyOn(pc, "boss")) - 50)
+    end
+    p:run(1)
+    local held = hpOf(bossH)
+    for _, pc in ipairs({ pa, pb }) do
+        pc.env.PBZ.game.noteLocalMove()
+        writeBase(Session.enemyOn(pc, "boss"), 5000)
+    end
+    p:run(1)
+    check(hpOf(bossH) == held and field(bossH, "dead") ~= true,
+        "a party, two guests' games writing theirs at once: the host's boss keeps its health (" .. held .. " -> " .. hpOf(bossH) .. ")")
+    allErrors(p)
+end
+
 -- Three or more players. A party has no handing over (its relay carries enemy lines from the host alone), but the host's
 -- game wakes enemies for its own player alone all the same: one by a guest some way from the host slept there, and on
 -- every guest's screen with it, a boss a guest went in to first too. The host's line says it's asleep there now, and each
@@ -1201,6 +1286,60 @@ local function aPartysBystander()
     check(brain(shot) == true and floor(shot) == 0 and net(xh).fightOf["sp:boss"] == 4,
         "a guest's own bar from 40 m, a partner nearer, and a blow of theirs from there: theirs, awake, and told")
     allErrors(x)
+    -- The same blow at one the game gives a boss's bar and the codex doesn't call a boss (the hook man): a boss only
+    -- while its bar is up, and a held copy's bar is taken down at once, so its blows set no mark and wore down the copy
+    -- asleep on the host, which never fought back. A blow marks any copy asleep on the host. (The sixth review's V6.)
+    do
+        local e = party({ { "elite", "BP_Monster_GoldMaskMan_C", 2000.0, 3000.0, 100.0, 5000, 400 } })
+        local eh, ec = e.pcs[1], e.pcs[4]
+        Session.moveTo(eh, -6000, 0)
+        Session.moveTo(e.pcs[3], -5800, 100)
+        Session.moveTo(e.pcs[2], 5500, 3000)
+        Session.moveTo(ec, 6000, 3000)
+        e:run(3)
+        local far = Session.enemyOn(ec, "elite")
+        ec.hudLayout:RegisterBossHPBar(far)
+        e:run(4)
+        swing(ec, far, select(1, Fake.health(far)) - 300)
+        e:run(1.5)
+        ec.hudLayout:RegisterBossHPBar(far)         -- (the game's bar again, as the copy, theirs now, takes them on)
+        e:run(4)
+        check(brain(far) == true and floor(far) == 0 and net(eh).fightOf["sp:elite"] == 4,
+            "the same blow at one with the game's bar that the codex doesn't call a boss: theirs, awake, and told ("
+                .. tostring(brain(far)) .. ", " .. tostring(net(eh).fightOf["sp:elite"]) .. ")")
+        allErrors(e)
+    end
+    -- A watcher who struck it half a minute ago (no death and no rest since), walked off past 45 m and is back 43 m
+    -- from it as a nearer partner's fight is about to begin. By the mark of that old blow their copy was theirs again
+    -- at once, woken with no bar and no new blow, and its stray bar told the fight as theirs. A blow of the last few
+    -- seconds counts, not the mark. (The sixth review's V5.)
+    do
+        local o = party(list)
+        local oh, ob, oc = o.pcs[1], o.pcs[3], o.pcs[4]
+        Session.moveTo(oh, -6000, 0)
+        Session.moveTo(o.pcs[2], -5800, 100)
+        Session.moveTo(ob, -1500, 3000)             -- (the fighter-to-be 35 m off, no fight yet)
+        Session.moveTo(oc, 2300, 3000)              -- (the watcher by the boss, earlier)
+        o:run(4)
+        local strayO, ownO = Session.enemyOn(oc, "boss"), Session.enemyOn(ob, "boss")
+        swing(oc, strayO, select(1, Fake.health(strayO)) - 200)
+        o:run(2)
+        Session.moveTo(oc, 7200, 3000)              -- (away past 45 m: no death, no rest)
+        o:run(30)
+        Session.moveTo(oc, 6300, 3000)              -- (back, 43 m off)
+        o:run(3)
+        check(net(oc).struck["sp:boss"] == true and brain(strayO) == false and floor(strayO) == 1,
+            "a watcher who struck it half a minute ago, back 43 m from it with a partner nearer: held, with no bar and no new blow")
+        oc.hudLayout:RegisterBossHPBar(strayO)
+        o:run(1.5)
+        Session.moveTo(ob, 2100, 2900)
+        ob.hudLayout:RegisterBossHPBar(ownO)
+        o:run(3)
+        check(count(oc.sent, "^E B sp:boss") == 0 and net(oh).fightOf["sp:boss"] == 3,
+            "their stray bar before the fight of the one nearer begins: told to nobody, the fight the fighter's on the host ("
+                .. tostring(net(oh).fightOf["sp:boss"]) .. ")")
+        allErrors(o)
+    end
 
     -- A watcher's stray bar with the one about to fight still 35 m off, not told yet; then their own fight begins:
     -- nearer is nearer, beside it or not. (Counted only within 30 m or in a fight, the watcher's copy was made theirs,
@@ -3189,6 +3328,17 @@ local function reviewOfTheBuild()
         check(count(oh.logs, "another version's") == 0 and count(oh.logs, "script error") == 0, "the host's own install says nothing of it")
         allErrors(od)
     end
+    -- The other half (the fifth review's V13): this version's main.dll starts no relay for a start file whose protocol
+    -- isn't its own, compared as text (main_dll.cpp's run_from). The sim's relay reads the role alone: with that line
+    -- lost or written another way, nobody's online co-op started while every other check passed. (The sixth review's V9.)
+    do
+        local ps = Session.new(SIM_SCRIPTS, { "Host", "Guest" }, false, list)
+        ps:run(2)
+        check(everyone(ps, function(pc)
+            return (pc.startText or ""):match("\nprotocol=([^\n]*)") == tostring(ps.relay.protocol)
+        end), "each start file names these scripts' protocol as main.dll reads it (protocol=" .. tostring(ps.relay.protocol) .. ")")
+        allErrors(ps)
+    end
 
     -- A hold let go takes off the hold's own floor alone: one the game set as the hold ended (the host's own fight begun,
     -- its bar up; everything handed over going back, the guest's S) is its script's to keep, 193. (The third review's
@@ -4091,15 +4241,58 @@ local function bossStartsHere()
     check(has(eg.storyGuids, GUID) and count(eg.logs, "is taken now: started in this world") == 1,
         "and the guest's own scene runs it")
     allErrors(e)
-    -- (What that costs: whatever the host tells is in a guest's world 4 s later than it was.)
+    -- (What that costs: whatever the host tells is in a guest's world 6 s later than it was.)
     local y, yh, yg = world()
     local toldY = tellNow(y, yh, "Map_Xigu-BP_FlowActor_C_8")
-    y:run(2)
+    y:run(4)
     local early = has(yg.storyGuids, "Map_Xigu-BP_FlowActor_C_8")
     y:run(4)
     check(toldY and not early and has(yg.storyGuids, "Map_Xigu-BP_FlowActor_C_8"),
-        "with no scene after it, a step the host tells is taken in the guest's world 4 to 6 s on, not at once")
+        "with no scene after it, a step the host tells is taken in the guest's world 6 to 8 s on, not at once")
     allErrors(y)
+    -- A slower trigger: on the bench the hook man's ran its step 5 s before its scene (11-17), and a slower PC or a
+    -- hitch takes longer. Told 5.5 s before it, the guest's tick just after the host's look (the worst), it's held all
+    -- the same. (The sixth review's V4: with 4 s it was taken, the guest's own start gone.)
+    local function flowLoop(pc)             -- (flowsync's once-a-second loop)
+        for _, loop in ipairs(pc.loops) do
+            for i = 1, 20 do
+                local n, v = debug.getupvalue(loop.fn, i)
+                if not n then
+                    break
+                end
+                if n == "where" and type(v) == "string" and v:find("flowsync.lua", 1, true) then
+                    return loop
+                end
+            end
+        end
+    end
+    local m, mh, mg = world()
+    for _, pc in ipairs(m.pcs) do
+        Session.scene(pc, false)            -- (the game's scene manager there all along: the host sees its scene at once)
+    end
+    flowLoop(mg).at = flowLoop(mh).at + 0.05
+    m:run(4)
+    local toldM = count(mh.logs, "here, told the others")
+    step(mh, GUID)
+    for _ = 1, 8 * 60 do
+        if count(mh.logs, "here, told the others") > toldM then
+            break
+        end
+        m:run(1 / 60)
+    end
+    m:run(5.5)
+    Session.scene(mh, true)
+    step(mh, STEP)
+    mh.globalTags[#mh.globalTags + 1] = FLAG
+    m:run(14)
+    Session.scene(mh, false)
+    ai(mh, "AI.State.Combat")
+    onSide(mh, "Faction.Enemy", 0)
+    bossStart(m)
+    m:run(20)
+    check(not has(mg.storyGuids, GUID) and count(mg.logs, "left for this world's own start of it") == 1,
+        "the trigger's step told 5.5 s before its scene: held with the start, the guest's own trigger kept")
+    allErrors(m)
     -- The guest on another map as that step is told: a step of the host's level was put by for their arrival at once,
     -- where the scene's window never saw it, and taken the moment they came over, by F3 or a bell: their own trigger
     -- spent before they reached it. Put by only once it's old. (The fifth review's V4.)
@@ -4207,6 +4400,37 @@ local function bossStartsHere()
         allErrors(t3)
     end
 
+    -- What the side is for: the late guest's blows land on their copy and come off the boss in the host's world, and
+    -- the copy's land on them. On a figure none does, either way, and nothing is told of one: the fake goes by the
+    -- side as the game does (the fifth review's G4; 326 and 343 couldn't be seen in the sim till then).
+    do
+        local v, vh, vg = world()
+        local function blow(pc, e, damage)      -- (an enemy's blow at this PC's own player: off their health, if it lands)
+            if not Fake.lands(e) then
+                return false
+            end
+            Fake.setHealth(pc.pawn, select(1, Fake.health(pc.pawn)) - damage)
+            return true
+        end
+        local copy, hosts = Session.enemyOn(vg, "boss"), Session.enemyOn(vh, "boss")
+        local had, sent = select(1, Fake.health(copy)), count(vg.sent, "^E D ")
+        local figure = swing(vg, copy, had - 200)
+        v:run(2)
+        check(not figure and not blow(vg, copy, 30) and select(1, Fake.health(copy)) == had and count(vg.sent, "^E D ") == sent,
+            "a figure nobody has started: no blow of the guest's lands on it and none of its on the guest, nothing told")
+        scene(v, vh)
+        bossStart(v)
+        v:run(6)
+        local hadH, hadG = select(1, Fake.health(hosts)), select(1, Fake.health(vg.pawn))
+        local landed = swing(vg, copy, select(1, Fake.health(copy)) - 200)
+        v:run(2)
+        check(landed and select(1, Fake.health(hosts)) == hadH - 200 and count(vg.sent, "^E D ") == sent + 1,
+            "the host's fight on, the guest come late: their blow lands on their copy, and is off the boss in the host's world ("
+                .. tostring(landed) .. ", " .. hadH - select(1, Fake.health(hosts)) .. ")")
+        check(blow(vg, copy, 30) and select(1, Fake.health(vg.pawn)) == hadG - 30, "and the copy's blow lands on the late guest")
+        allErrors(v)
+    end
+
     -- Both walk in together: each world runs its own, nothing is kept back.
     local b, bh, bg = world()
     Session.scene(bg, true)
@@ -4262,8 +4486,7 @@ local function bossStartsHere()
     onSide(jh, "Faction.Enemy", 0)
     bossStart(j)
     j:run(3)
-    local late = Session.enemyOn(jg, "boss")
-    swing(jg, late, select(1, Fake.health(late)) - 50)     -- (in it: a blow of its own, as hostDiesFirst has it)
+    net(jg).joinedBoss = "sp:boss"                  -- (in it: walked in at its wall; no blow lands on a figure)
     j:run(3)
     local before = side(jg)
     Session.die(jh)
@@ -4463,6 +4686,59 @@ local function bossStartsHere()
         and count(lg.logs, "left for this world's own start of it") == 1,
         "the guest's own elite falls 4 s into the host's start scene: the start is still held in the guest's world")
     allErrors(l)
+    -- The same fall a second into the host's scene, and 5 s before it: a fight of the guest's own, which the host never
+    -- joined, began no scene of the host's whenever it fell. Counted within the 10 s before the scene or in its first
+    -- seconds, it let the whole start go. (The sixth review's V8.)
+    for _, lead in ipairs({ 0.2, -5 }) do
+        local o = Session.new(SIM_SCRIPTS, { "Host", "Guest" }, false, FELL)
+        local oh, og = o.pcs[1], o.pcs[2]
+        o:run(4)
+        Session.moveTo(oh, 0, 0)
+        Session.moveTo(og, 4000, 0)
+        o:run(2)
+        for _, pc in ipairs(o.pcs) do
+            pc.env.PBZ.game.isStoryLevel = function(level) return level == "Map_Xigu" end
+            ai(pc, "None")
+            onSide(pc, "Faction.Player", 1)
+        end
+        o:run(8)
+        local own = Session.enemyOn(og, "elite")
+        og.hudLayout:RegisterBossHPBar(own)
+        o:run(3)
+        local function falls()
+            swing(og, own, select(1, Fake.health(own)) - 300)
+            o:run(0.5)
+            swing(og, own, 0)
+            o:run(0.6)
+            Fake.put(own, "dead", true)
+            o:run(0.4)
+            og.hudLayout:UnRegisterBossHPBar(own)
+        end
+        if lead < 0 then
+            falls()
+            o:run(-lead)
+        end
+        Session.scene(oh, true)
+        step(oh, GUID)
+        step(oh, STEP)
+        oh.globalTags[#oh.globalTags + 1] = FLAG
+        if lead >= 0 then
+            o:run(lead)
+            falls()
+            o:run(12.3)
+        else
+            o:run(14)
+        end
+        Session.scene(oh, false)
+        ai(oh, "AI.State.Combat")
+        onSide(oh, "Faction.Enemy", 0)
+        bossStart(o)
+        o:run(22)
+        check(not has(og.storyGuids, GUID) and not has(og.storyGuids, STEP) and not has(og.globalTags, FLAG)
+            and count(og.logs, "left for this world's own start of it") == 1,
+            "the guest's own elite falls " .. (lead < 0 and "5 s before" or "a second into") .. " the host's start scene: the start is still held")
+        allErrors(o)
+    end
 
     -- A boss of phases: the first falls with the guest away, its fall's scene tells its win, and the next phase's bar
     -- comes up as that scene ends. The win is no start: held under the next phase, the guest had none of it till that
@@ -4492,6 +4768,56 @@ local function bossStartsHere()
         and count(pg.logs, "left for this world's own start of it") == 0,
         "a phase falls, its fall's scene tells its win, the next phase's bar comes up: the win is taken, not held as a start")
     allErrors(p)
+
+    -- A fight both are in, the guest's own bar up first (its scene ended first), then the host's: the first phase's fall
+    -- is the host's fight's too, and its win's steps are taken, the guest down at the fall. (A guard that left out every
+    -- fall of a fight this player had told held the win under the next phase again: the sixth review's V8.)
+    do
+        local t = Session.new(SIM_SCRIPTS, { "Host", "Guest" }, false, {
+            { "boss", "BP_Monster_Boss_C", 3000.0, 3000.0, 100.0, 5000, 400, true },
+            { "boss2", "BP_Monster_Boss_C", 3300.0, 3000.0, 100.0, 5000, 400, true },
+        })
+        local th, tg = t.pcs[1], t.pcs[2]
+        t:run(4)
+        Session.moveTo(th, 2500, 2500)
+        Session.moveTo(tg, 2800, 2500)
+        t:run(2)
+        for _, pc in ipairs(t.pcs) do
+            pc.env.PBZ.game.isStoryLevel = function() return false end
+        end
+        local function aiOf(pc, id, state)
+            local c = rawget(field(Session.enemyOn(pc, id), "Controller"), "__fields").SGameAIComponent
+            c.CurrentStateTag = { TagName = { ToString = function() return state end } }
+        end
+        local WON, NEXT, DOWN = "AAAA0000BBBB1111CCCC2222DDDD3333", "EEEE4444FFFF5555AAAA6666BBBB7777", "boss.phase1.down"
+        aiOf(tg, "boss2", "None")
+        tg.hudLayout:RegisterBossHPBar(Session.enemyOn(tg, "boss"))
+        t:run(1)
+        th.hudLayout:RegisterBossHPBar(Session.enemyOn(th, "boss"))
+        t:run(3)
+        Session.die(tg)
+        t:run(3)
+        local first = Session.enemyOn(th, "boss")
+        Fake.setHealth(first, 0)
+        Fake.put(first, "dead", true)
+        t:run(1)
+        th.hudLayout:UnRegisterBossHPBar(first)
+        t:run(1)
+        Session.scene(th, true, "Seq023")
+        step(th, WON)
+        step(th, NEXT)
+        th.globalTags[#th.globalTags + 1] = DOWN
+        t:run(14)
+        Session.scene(th, false)
+        aiOf(th, "boss2", "AI.State.Combat")
+        th.hudLayout:RegisterBossHPBar(Session.enemyOn(th, "boss2"))
+        t:run(12)
+        Session.revive(tg)
+        t:run(60)
+        check(has(tg.storyGuids, WON) and has(tg.storyGuids, NEXT) and has(tg.globalTags, DOWN),
+            "a fight both are in, the guest's bar up first, the guest down as the first phase falls: its win is taken, not held under the next phase")
+        allErrors(t)
+    end
 end
 
 local function doorsOpenedBefore()
@@ -5073,7 +5399,7 @@ local function ownRing()
     Session.moveTo(pg, 30000 - 800, 0)
     p:run(4)
     table.insert(ph.globalTags, "zddy.other.flag")
-    p:run(16)
+    p:run(20)
     check(pg.storyMarks["zddy.other.flag"] == true, "by a bell no other player rang, the host's flow comes as ever")
     allErrors(p)
     -- The guest's own first ring wakes the bell at the touch, and its scene starts some 5 s on: the host's flag that waited
@@ -5124,7 +5450,7 @@ local function ownRing()
     table.insert(ra.bellIds, BELL)
     r:run(8)
     table.insert(rh.globalTags, "zddy.party.flag")
-    r:run(20)           -- (the host's look, and 349's 4 s on the guests)
+    r:run(20)           -- (the host's look, and 349's 6 s on the guests)
     check(rb.storyMarks["zddy.party.flag"] == true and not rb.storyMarks[BELL],
         "a party: by a bell only another guest rang, the host's flag comes as ever (the bell stays theirs to ring)")
     allErrors(r)
@@ -8488,26 +8814,67 @@ local function followTheHost()
     allErrors(b)
 
     -- A sync started again later in the same run of the game (the guest left and came back, or its link dropped and
-    -- rose): what's counted stays as it is, so the bombs and herbs used since aren't refilled. A story thing, or a piece
-    -- that adds to the player, which the host found meanwhile and this bag has none of, comes all the same: it isn't used
-    -- up as it's used, and nothing else brings it. (The bench, 11-17: an elite's Sha-Chi Amber Shard.)
+    -- rose): what's counted stays as it is, so the bombs and herbs used since aren't refilled. A story thing there's
+    -- one of, which the host found meanwhile and this bag never held, comes all the same: nothing else brings it. Not
+    -- one this bag had and used since (a key spent at its door, a thing handed in: the host keeps its own), and not a
+    -- piece or a story thing made of several: four shards are an amber as the fourth comes, and the host's chest or
+    -- this world's own copy of the find pays it too. (The bench, 11-17; the sixth review's V1 and V2.)
     local k, kh, kg = pair(nil, function(ph)
         Session.gainItem(ph, "Weapon_Material_01", 3)
+        Session.gainItem(ph, "I_RELIC_3", 1)
+        Session.gainItem(ph, "I_RELIC_4", 1)
     end)
     k:run(70)                                   -- (past the run's first minute)
-    check(Session.items(kg, "Weapon_Material_01") == 3, "(the first joining: what the host has, counted)")
+    check(Session.items(kg, "Weapon_Material_01") == 3 and Session.items(kg, "I_RELIC_3") == 1
+        and Session.items(kg, "I_RELIC_4") == 1, "(the first joining: what the host has, counted)")
     kg.bag:RemovePropsFromBackPack(2, kg.env.FName("Weapon_Material_01"))       -- (used since)
+    kg.bag:RemovePropsFromBackPack(1, kg.env.FName("I_RELIC_3"))    -- (a key spent at its door: the host's opens by the word)
+    kg.bag:RemovePropsFromBackPack(1, kg.env.FName("I_RELIC_4"))    -- (handed in)
     Session.command(kg, "netoff")
     k:run(2)
     kh.bag:AddPropsToBackPack(1, kh.env.FName("I_KEY_9"), false)                -- (found by the host meanwhile)
     kh.bag:AddPropsToBackPack(2, kh.env.FName("Weapon_Material_02"), false)
+    kh.bag:AddPropsToBackPack(1, kh.env.FName("Item_Piece_002"), false)         -- (an elite's shard)
+    kh.bag:AddPropsToBackPack(1, kh.env.FName("K_TOKEN_9"), false)              -- (a token's half)
     Session.command(kg, "neton client")
     k:run(20)
     check(Session.items(kg, "I_KEY_9") == 1, "back in the same run: a story thing the host found meanwhile comes")
     check(Session.items(kg, "Weapon_Material_01") == 1 and Session.items(kg, "Weapon_Material_02") == 0,
         "and nothing that's counted: what was used stays used, a material found meanwhile stays the host's ("
             .. Session.items(kg, "Weapon_Material_01") .. ", " .. Session.items(kg, "Weapon_Material_02") .. ")")
+    check(Session.items(kg, "Item_Piece_002") == 0 and Session.items(kg, "K_TOKEN_9") == 0,
+        "nor a piece, or a story thing made of several: what pays its find pays it, once ("
+            .. Session.items(kg, "Item_Piece_002") .. ", " .. Session.items(kg, "K_TOKEN_9") .. ")")
+    for _ = 1, 2 do
+        Session.command(kg, "netoff")
+        k:run(2)
+        Session.command(kg, "neton client")
+        k:run(20)
+    end
+    check(Session.items(kg, "I_RELIC_3") == 0 and Session.items(kg, "I_RELIC_4") == 0 and Session.items(kh, "I_RELIC_3") == 1
+        and Session.items(kg, "I_KEY_9") == 1,
+        "three syncs on: a story thing this bag had and used stays used, a key spent at its door, a thing handed in ("
+            .. Session.items(kg, "I_RELIC_3") .. ", " .. Session.items(kg, "I_RELIC_4") .. ")")
     allErrors(k)
+
+    -- A chest the host opened while the guest was away, a shard in it: the guest's own copy, seen shut once they're
+    -- back, pays it by the host's word, once. (The bag gave it too, at the sync's start: two shards for one chest.)
+    local z, zh, zg = pair()
+    z:run(70)
+    Session.command(zg, "netoff")
+    z:run(2)
+    local theirs = Fake.chest(zh, "BP_Chest_C_31", 600.0, 0.0, 100.0, "Xigu.Piece")
+    Fake.put(theirs, "CurSwitchState", true)
+    zh.bag:AddPropsToBackPack(1, zh.env.FName("Item_Piece_002"), false)
+    z:run(2)
+    Session.command(zg, "neton client")
+    z:run(8)
+    local mine = Fake.chest(zg, "BP_Chest_C_31", 600.0, 0.0, 100.0, "Xigu.Piece")
+    z:run(70)
+    check(field(mine, "CurSwitchState") == true and Session.items(zg, "Item_Piece_002") == 1 and Session.items(zh, "Item_Piece_002") == 1,
+        "a chest with a shard the host opened while the guest was away: one shard for the guest, by the chest ("
+            .. Session.items(zg, "Item_Piece_002") .. ")")
+    allErrors(z)
 
     local c, ch, cg = pair()
     ch.storyUpTo(all)
@@ -10668,10 +11035,22 @@ local function localTargets()
     local steered = pc.env.PBZ.game.aim.steered
     local addr = e:GetAddress()
     check(steered[addr] ~= nil, "(it's steered between the two)")
+    -- (Nothing of the game's is kept of it between turns: its body and its picker were, and each is asked of the game
+    -- at every turn now. The main session's look at issue 18.)
+    local keeps = 0
+    for _, v in pairs(steered[addr] or {}) do
+        if type(v) == "table" or type(v) == "userdata" then
+            keeps = keeps + 1
+        end
+    end
+    check(keeps == 0, "what's kept of a steered enemy between turns is numbers and names: nothing of the game's (" .. keeps .. ")")
+    local heldWait = field(field(e, "picker"), "SwitchTargetCooldown")
     Session.moveTo(pc, 4000, 300)
     Fake.put(p2, "loc", { X = 4200.0, Y = 300.0, Z = 100.0 })
     s:run(3)
-    check(steered[addr] == nil, "both walk 37 m from it: let go, its picker its own again")
+    check(steered[addr] == nil and heldWait > 1.5 and field(field(e, "picker"), "SwitchTargetCooldown") == 1.5,
+        "both walk 37 m from it: let go, its picker its own again (its wait " .. tostring(heldWait) .. " s steered, "
+            .. tostring(field(field(e, "picker"), "SwitchTargetCooldown")) .. " s after)")
     Session.moveTo(pc, 100, 300)
     Fake.put(p2, "loc", { X = 600.0, Y = 300.0, Z = 100.0 })
     s:run(2)
@@ -10734,9 +11113,14 @@ local function localTargets()
     end
     check(tpc.env.PBZ.game.aim.steered[te:GetAddress()] ~= nil and field(te, "target") == tp2,
         "(an enemy steered to player 2 by their blows)")
+    local loadWait = field(field(te, "picker"), "SwitchTargetCooldown")
     Session.loadMap(tpc)
     check(next(tpc.env.PBZ.game.aim.steered) == nil and next(tpc.env.PBZ.game.aim.dmg) == nil,
         "a load with an enemy steered: let go as the load begins, nothing kept past it")
+    -- (By the list as it stood at its last turn, no search as the map goes: the enemy still there has its wait back.)
+    check(loadWait > 1.5 and field(field(te, "picker"), "SwitchTargetCooldown") == 1.5,
+        "and its picker's own wait is back as the load begins (" .. tostring(loadWait) .. " s steered, "
+            .. tostring(field(field(te, "picker"), "SwitchTargetCooldown")) .. " s after)")
     t:run(3)
     allErrors(t)
 end
@@ -11719,6 +12103,25 @@ local function panelApply()
     Session.command(apc, "panel press 760 510")
     a:run(1)
     check(cfg(apc, "players") == "2", "the pad plugged in: applied")
+    -- Player 2's card off their slot (the fake has no mouse: the panel's own choice, by its upvalue). Their line names
+    -- a controller alone: the keyboard is player 1's. (The check before this one said the line through lang.lua and
+    -- never asked the panel for it: the sixth review's V11.)
+    local function upvalue(fn, wanted)
+        for i = 1, type(fn) == "function" and 255 or 0 do
+            local n, v = debug.getupvalue(fn, i)
+            if n == nil or n == wanted then
+                return v
+            end
+        end
+    end
+    local choice = upvalue(((upvalue(apc.env.PBZ.arena.blocker, "api") or {}).panel or {}).command, "choice")
+    if choice then
+        choice.p2 = nil
+    end
+    Session.command(apc, "panel press 760 510")
+    a:run(0.5)
+    check(choice ~= nil and count(apc.logs, "Status: APPLY waits for player 2: drag a controller onto their slot%.") == 1,
+        "player 2's card off their slot: the click names a controller alone")
     allErrors(a)
 end
 
@@ -13247,18 +13650,18 @@ local function syncRaces()
 end
 
 -- art/arabic.tsv, where the Arabic comes from (tools/make_lang_ar.py): id -> { en = its English, ar = its Arabic }, and
--- the ids in the file's order.
+-- the ids in the file's order. (unchecked: its notes begin UNCHECKED, the author's check still to come.)
 local function arabicRows()
     local T, ids = {}, {}
     local f = io.open(SIM_REPO .. "/art/arabic.tsv", "rb")
     if f then
         local first = true
         for line in (f:read("a") .. "\n"):gmatch("([^\n]*)\n") do
-            local id, en, ar = line:gsub("\r$", ""):match("^([^\t]*)\t([^\t]*)\t([^\t]*)")
+            local id, en, ar, notes = line:gsub("\r$", ""):match("^([^\t]*)\t([^\t]*)\t([^\t]*)\t?([^\t]*)")
             if first then
                 first = false
             elseif id and id ~= "" then
-                T[id] = { en = en, ar = ar }
+                T[id] = { en = en, ar = ar, unchecked = (notes or ""):find("^UNCHECKED") ~= nil }
                 ids[#ids + 1] = id
             end
         end
@@ -13500,10 +13903,12 @@ local function arabic()
         end
         return made(id, table.unpack(e, 1, k)), fill(id, table.unpack(a, 1, k))
     end
-    local rows, errors, tips = 0, {}, {}
+    local rows, errors, tips, waiting = 0, {}, {}, {}
     for _, id in ipairs(ids) do
         local r = T[id]
-        if id:find("^tip%.relayerr%.") then             -- the relay's own words: only ever after a head (below)
+        if r.unchecked then                             -- not shipped till the author has checked it (below)
+            waiting[#waiting + 1] = id
+        elseif id:find("^tip%.relayerr%.") then         -- the relay's own words: only ever after a head (below)
             errors[#errors + 1] = id
         elseif not (id:find("%.art%.") or id:find("^match%.banner%.") or id == "match.mate" or id:find("^weapon%.")
             or NOT_SAID[id]) then
@@ -13536,6 +13941,16 @@ local function arabic()
         end
     end
     verdict(string.format("each of the tsv's %d rows said on its own, made as the code makes it: the tsv's Arabic", rows))
+    -- A row the author hasn't checked yet (its notes begin UNCHECKED) isn't shipped: lang_ar.lua has none of it, and
+    -- its line stays English till then. (The author's rule; the sixth review's G2.)
+    local shipped = {}
+    for _, id in ipairs(waiting) do
+        if ar.say(T[id].en) ~= T[id].en then
+            shipped[#shipped + 1] = id
+        end
+    end
+    check(#shipped == 0, string.format("a row the author hasn't checked yet isn't in lang_ar.lua, its line English till then "
+        .. "(%d waiting%s)", #waiting, #shipped > 0 and (", SHIPPED: " .. table.concat(shipped, ", ")) or ""))
 
     -- The panel's line (onlinepanel.lua), piece by piece: two players, then more, each player saying who they are.
     local n = #said
@@ -14131,6 +14546,7 @@ return function(print_, scripts)
     farEnemy()
     guestRunsWhatsNearIt()
     guestRunsItsBoss()
+    aCopyWrittenBack()
     asleepOnTheHost()
     aPartysBystander()
     farEnemiesStay()

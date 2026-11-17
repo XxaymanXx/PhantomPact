@@ -332,6 +332,7 @@ Fake.ITEMS = {
     { "I_RELIC_4", "NarrativeItem" },
     { "I_RELIC_5", "NarrativeItem" },
     { "K_TOKEN_9", "NarrativeItem", nil, "2" },
+    { "Item_Piece_002", "AddAttribute" },       -- (a Sha-Chi Amber Shard: four make an amber)
 }
 
 -- The player's skill tree (PBZAbilityNodesComponent), as the bench measured it on 11-07: 32 nodes; ActivateNode by its
@@ -561,6 +562,22 @@ end
 function Fake.health(a)
     local set = rawget(a, "__fields").AttributeSetBase
     return set.Health.CurrentValue, set.Health_Max.CurrentValue, set.Shachi_Max.CurrentValue
+end
+
+-- Whether a blow lands between this enemy and a player, either way: by its side, as in the game. A boss the game hasn't
+-- started is a figure on the player's own side (Faction.Player, its controller's team 1), and nothing lands between it
+-- and a player (the bench, 11-17: 326, 343). With the team alone an enemy's nothing landed either (326); the faction
+-- alone was never tried, and is taken for not landing here, so a switch half made shows. (The fifth review's G4: the
+-- fake took any blow whatever the side, and what 343 is for couldn't be seen in it.)
+function Fake.lands(e)
+    local f = rawget(e, "__fields")
+    local side = f.faction and rawget(f.faction, "__fields")
+    local controller = f.Controller and rawget(f.Controller, "__fields")
+    local team = controller and controller.Team
+    if not side or side.faction == nil or not team then
+        return true         -- (no enemy of the fake's: as ever)
+    end
+    return side.faction ~= "Faction.Player" and team.TeamID ~= 1
 end
 
 local function hatredOf(pc, owner)
@@ -1030,6 +1047,8 @@ Fake.LEVEL_LOOT = {
         .. 'Probability=1.000000)),ItemLevel=B))' },
     { "Xigu.AC_Deflect", '((EnemyLevel=0,LootDusts=,LootItems=,Weapons=,Medicines=,Accessories=((AccessoryID="AC_Deflect",'
         .. 'Probability=1.000000)),ItemLevel=S))' },
+    { "Xigu.Piece", '((EnemyLevel=0,LootDusts=,LootItems=((ItemId="Item_Piece_002",MinAmount=1,MaxAmount=1,'
+        .. 'Probability=1.000000)),Weapons=,Medicines=,Accessories=,ItemLevel=B))' },
 }
 
 function Fake.sceneManager(pc)

@@ -202,11 +202,22 @@ def read(path):
 T = read(TSV)
 
 
+# A row the mod's author hasn't checked yet: its notes begin UNCHECKED. A whole line of that kind is left out of
+# lang_ar.lua (the game says it in English till then); a piece of a line can't be left out by itself.
+left_out = []
+
+
+def unchecked(rid):
+    return ((T.get(rid) or {}).get("notes") or "").startswith("UNCHECKED")
+
+
 def get(rid):
     row = T.get(rid)
     if row is None or not row.get("arabic"):
         problems.append("%s: not in %s, or no Arabic" % (rid, TSV))
         return {"english": "", "arabic": ""}
+    if unchecked(rid):
+        problems.append("%s: marked UNCHECKED in the tsv, and a piece of a line can't be left out by itself" % rid)
     return row
 
 
@@ -275,6 +286,9 @@ def lines():
         rows = []
         for item in ids:
             rid, how = item if isinstance(item, tuple) else (item, None)
+            if unchecked(rid):
+                left_out.append(rid)
+                continue
             english, arabic = get(rid)["english"], get(rid)["arabic"]
             if how == "before number":       # 'PLAYER %d': the code says say("PLAYER ") .. slot
                 if not (english.endswith("%d") and arabic.endswith("%d")):
@@ -416,6 +430,8 @@ def main():
     with open(OUT, "w", encoding="utf-8", newline="\n") as fh:
         fh.write("\n".join(out) + "\n")
     print("wrote %s: %d lines, %d parts" % (os.path.normpath(OUT), n_lines, n_parts))
+    for rid in left_out:
+        print("  left out, not yet checked by the author: " + rid)
     return 0
 
 

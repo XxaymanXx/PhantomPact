@@ -297,7 +297,8 @@ end
 function Relay:step(now)
     for _, pc in ipairs(self.pcs) do
         if pc.files["net_start.txt"] then
-            pc.relay = pc.files["net_start.txt"]:match("role=(%w+)")
+            pc.startText = pc.files["net_start.txt"]        -- (what main.dll reads, kept for a test: its protocol line)
+            pc.relay = pc.startText:match("role=(%w+)")
             pc.files["net_start.txt"] = nil
         end
     end

@@ -6,7 +6,9 @@ played through all ten regions of the story with player 2's presses injected, an
 
 ## Setup
 
-1. Install the mod as for online play (INSTALL.md).
+1. Install the mod as for online play (INSTALL.md). To update, close the game first: while it runs, the old `main.dll`
+   stays in place under the new files, local co-op doesn't say so, and pad 2's Options opens player 1's menu till you
+   close the game and extract once more. The new `PhantomPact.ini` has `Role = Off`: set Mode to LOCAL again (step 2).
 2. In the game press F5, then MORE, and set Mode to LOCAL. It works from the next start, so restart the game. (Or in
    `platform\steam\ue4ss\Mods\PBZCoop\PhantomPact.ini` set `Role = Local` before you start.) `Joysticks = 2` there means one pad
    per player, the default. `Joysticks = 1` means keyboard and mouse for player 1, the pad for player 2.

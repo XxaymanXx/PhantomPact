@@ -100,7 +100,9 @@ With more than two players:
 - If a guest drops out the others play on. If the host leaves, it's over for everyone.
 - Enemies are shared near the host, and near a guest up to 120 m from the host. Further off the host's game leaves them
   asleep, so each guest out there fights a copy of their own, and the first kill counts for everyone. A guest watching
-  such a fight from more than 30 m off sees the enemy stand still: step closer to be in it.
+  such a fight from more than 30 m off sees the enemy stand still: step closer to be in it. A story boss is the
+  exception: in a fight another guest began without the host, one your own world hasn't started takes no blow from
+  you, and deals none, till its opening scene has played for you too, as you go in.
 - PvPvE and Revive stay off. PvP matches (F6) work with up to six, in two teams.
 - The host sends about 50-100 KB/s with three guests, so a slow upload will show.
 

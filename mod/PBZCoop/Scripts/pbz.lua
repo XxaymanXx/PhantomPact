@@ -378,8 +378,10 @@ return function(api)
 
     -- Guest copies of the host's enemies: their own AI stays out of it (puppets.lua). The game starts a stopped AI again
     -- by itself, so this is asked again and again: pass the brain it returned last time.
-    -- Each link checked, every time: one not possessed yet (or any more) has no controller, and a call on nothing is a
-    -- crash pcall doesn't catch. Not kept between calls either: a brain kept by its address could be something else's.
+    -- Each link checked, every time: one not possessed yet (or any more) has no controller. (A call on nothing is a
+    -- Lua error, and a pcall catches it. What none catches is nothing handed into one of the game's own calls, or to
+    -- one of UE4SS's own, GetFName: read from UE4SS's code, 11-17.) Not kept between calls either: a brain kept by its
+    -- address could be something else's.
     function game.brainOf(actor)
         if not valid(actor) then
             return nil
@@ -4035,16 +4037,20 @@ return function(api)
         aim.healAt[slot or 2] = os.clock()
     end
 
-    -- An enemy no longer steered: its picker's own wait back, if it's still that enemy (address and name). It looks again at
-    -- its next chance, as it would have.
-    function aim.release(addr)
+    -- An enemy no longer steered: its picker's own wait back, if it's still that enemy (by name). It looks again at its
+    -- next chance, as it would have. actor: the enemy at that address now, from this turn; with none it's only forgotten.
+    -- (Nothing of the game's is kept from a turn before: a body the game had destroyed and freed, and its picker, were read
+    -- and written here when its address came round again or at a rest. The strict sim of issue 18.)
+    function aim.release(addr, actor)
         local f = aim.steered[addr]
         aim.steered[addr] = nil
-        if f then
+        if f and actor ~= nil then
             pcall(function()
-                if valid(f.actor) and f.actor:GetAddress() == addr and f.actor:GetFName():ToString() == f.fname
-                    and valid(f.picker) then
-                    f.picker.SwitchTargetCooldown = f.orig
+                if valid(actor) and actor:GetFName():ToString() == f.fname then
+                    local picker = targetPicker(actor)
+                    if valid(picker) then
+                        picker.SwitchTargetCooldown = f.orig
+                    end
                 end
             end)
         end
@@ -4053,42 +4059,51 @@ return function(api)
     -- (Each steered enemy's own wait back: kept at ours, every enemy ever steered took 15 s to change targets for the rest of
     -- the session.)
     function game.forgetFocus()
-        for addr in pairs(aim.steered) do
-            aim.release(addr)
+        -- (The ones still in the world, by the list as it stands: every steered one was on it at its last turn, and
+        -- one gone since is only forgotten. No search of the world here: this runs as a map goes, too.)
+        if next(aim.steered) then
+            local list, addrs = game.enemiesSoFar()
+            for i, e in ipairs(list) do
+                if aim.steered[addrs[i]] then
+                    aim.release(addrs[i], e)
+                end
+            end
         end
         aim.steered, aim.dmg, aim.healAt = {}, {}, {}
     end
 
     -- One enemy done with (dead, or nobody near it): its wait back, its damage forgotten.
-    function game.unfocus(addr)
-        aim.release(addr)
+    function game.unfocus(addr, actor)
+        aim.release(addr, actor)
         aim.dmg[addr] = nil
     end
 
-    -- The entry for an enemy steered now (the one kept if it's still this enemy's, by address and name), its own picker held
-    -- off.
+    -- The entry for an enemy steered now (the one kept if it's still this enemy's and its picker's, by name and address),
+    -- its own picker held off. The picker is asked of the enemy each turn and handed back with the entry, never kept in it:
+    -- the game makes an enemy's scripts anew, and one kept was read after the collection had freed it.
     function aim.hold(actor, addr, on, now)
         local f = aim.steered[addr]
         local fname = nil
         pcall(function() fname = actor:GetFName():ToString() end)
-        if not (f and valid(f.picker) and f.fname == fname) then
-            f = { picker = targetPicker(actor), actor = actor, fname = fname, orig = aim.GAME_WAIT_S, slot = on and on.slot,
-                since = now }
-            if f.picker == nil then
-                return nil
-            end
+        local picker = targetPicker(actor)
+        if picker == nil then
+            return nil
+        end
+        local at = picker:GetAddress()
+        if not (f and f.fname == fname and f.pickerAt == at) then
+            f = { pickerAt = at, fname = fname, orig = aim.GAME_WAIT_S, slot = on and on.slot, since = now }
             aim.steered[addr] = f
             pcall(function()
-                local wait = f.picker.SwitchTargetCooldown
+                local wait = picker.SwitchTargetCooldown
                 -- (Not a wait that was already ours: given back as its own, it never turned by itself again.)
                 if wait and wait < aim.GAME_HOLD_S then
                     f.orig = wait
                 end
-                f.picker.SwitchTargetCooldown = aim.GAME_HOLD_S
+                picker.SwitchTargetCooldown = aim.GAME_HOLD_S
             end)
         end
-        pcall(function() f.picker.LastSwitchTime = api.gs():GetTimeSeconds(actor) end)
-        return f
+        pcall(function() picker.LastSwitchTime = api.gs():GetTimeSeconds(actor) end)
+        return f, picker
     end
 
     -- Who of those near scores most, and by how much over `on` (nil: over nobody). A tie stays with `on`.
@@ -4126,7 +4141,7 @@ return function(api)
         end
     end
 
-    function aim.turn(actor, f, best, near)
+    function aim.turn(actor, f, best, near, picker)
         local now = os.clock()
         local hatred = actor.BP_PBZHatredManagerComponent
         if not valid(hatred) or hatred:CheckCanHatredTarget(best.body) == false then
@@ -4140,8 +4155,8 @@ return function(api)
                     hatred:RemoveActorFromHatredList(who.body)
                 end
             end
-            f.picker.LastSwitchTime = 0
-            f.picker:TrySwitchTarget()
+            picker.LastSwitchTime = 0
+            picker:TrySwitchTarget()
         end)
         for _, who in ipairs(near) do      -- (whatever happened above, the others go back on its list)
             if who ~= best then
@@ -4174,7 +4189,7 @@ return function(api)
             end
         end
         if #near == 0 then
-            game.unfocus(addr)
+            game.unfocus(addr, actor)
             return
         end
         local d = aim.lately(addr, now)
@@ -4190,7 +4205,7 @@ return function(api)
         end
         d.hp, d.seen, d.taken = hp, now, 0
         if #near < 2 then
-            aim.release(addr)
+            aim.release(addr, actor)
             return
         end
         local target = currentTarget(actor)
@@ -4202,10 +4217,10 @@ return function(api)
             end
         end
         if not player then
-            aim.release(addr)       -- (after nobody, or after something that isn't a player here: not ours to steer)
+            aim.release(addr, actor)    -- (after nobody, or after something that isn't a player here: not ours to steer)
             return
         end
-        local f = aim.hold(actor, addr, on, now)
+        local f, picker = aim.hold(actor, addr, on, now)
         if f == nil then
             return
         end
@@ -4215,7 +4230,7 @@ return function(api)
             -- won't make, with something else nearer on its list, isn't asked for every second.)
             if now - (f.forcedAt or -1e9) >= aim.MOVE_WAIT_S then
                 f.forcedAt = now
-                aim.turn(actor, f, best, near)
+                aim.turn(actor, f, best, near, picker)
             end
             return
         end
@@ -4230,7 +4245,7 @@ return function(api)
         if (busy and now - f.wantSince < aim.MOVE_WAIT_S) or now < (f.retryAt or 0) then
             return
         end
-        aim.turn(actor, f, best, near)
+        aim.turn(actor, f, best, near, picker)
     end
 
     -- Local co-op (Role = Local): the same rule for two players on one PC. There the game's own picker was all there
@@ -4268,9 +4283,10 @@ return function(api)
             swung[slot] = now - (localAim.movedAt[slot] or -1e9) <= aim.OWN_HIT_S
         end
         local list, addrs = game.listEnemies(true)     -- (afresh: a list a second old can be the map before a load's)
-        local seen = {}
+        local seen, live = {}, {}
         for i, e in ipairs(list) do
             local addr = addrs[i]
+            live[addr] = e
             if valid(e) and not game.isDead(e) then
                 local x, y, z, _, _, _, _, _, hp = game.read(e, addr)
                 local at = x and x == x and { X = x, Y = y, Z = z }
@@ -4301,12 +4317,12 @@ return function(api)
         -- after it died, for a later enemy at its address. The third review.)
         for addr in pairs(aim.dmg) do
             if not seen[addr] then
-                game.unfocus(addr)
+                game.unfocus(addr, live[addr])
             end
         end
         for addr in pairs(aim.steered) do
             if not seen[addr] then
-                game.unfocus(addr)
+                game.unfocus(addr, live[addr])
             end
         end
     end
@@ -6302,6 +6318,19 @@ return function(api)
             have[kind .. ":" .. id] = tonumber(n)
         end
         local came = 0
+        -- (What this bag has ever held: its entries, one back at 0 among them (game.hadItem), read once, when first asked.)
+        local ever = nil
+        local function heldBefore(id)
+            if ever == nil then
+                ever = {}
+                pcall(function()
+                    bp.Inventories:ForEach(function(k)
+                        ever[k:get():ToString()] = true
+                    end)
+                end)
+            end
+            return ever[id] == true
+        end
         for _, e in ipairs(entries) do
             local kind, id, n = e:match("^(%a):([%w_%-]+):(%d+)$")
             n = n and math.min(tonumber(n), 9999)
@@ -6310,10 +6339,13 @@ return function(api)
             if kind == "p" and counts ~= false and n and n > (mine or 0) then
                 game.grantLoot(pawn, id, nil, n - (mine or 0), true)
                 came = came + 1
-            elseif kind == "p" and n and mine == nil and game.keepsake(id) then
-                -- (A sync started again: a story thing, or a piece that adds to the player, which the host found while
-                -- this player was away and this bag has none of. It isn't used up as it's used, and nothing else brings
-                -- it: an elite's Sha-Chi Amber Shard stayed the host's alone. The bench, 11-17.)
+            elseif kind == "p" and n and mine == nil and game.oneOfAKind(id) and not heldBefore(id) then
+                -- (A sync started again: a story thing there's one of, which the host found while this player was away
+                -- and this bag never held. Not one it had and used since, a key spent at its door, a thing handed in:
+                -- the host keeps its own, and it came back at every sync. Nor a piece, what pieces make, or a story
+                -- thing made of several: none here says nothing of what's owed (four shards are an amber as the fourth
+                -- comes), and the host's chest or this world's own copy of the find pays it too. The sixth review; on
+                -- the bench a player back after 25 minutes took 90 things at once, three ambers among them.)
                 game.grantLoot(pawn, id, nil, n, true)
                 came = came + 1
             elseif kind == "m" and id == "Hulu" and mine == nil then
@@ -6375,16 +6407,6 @@ return function(api)
         return once ~= nil and once[id] == true
     end
 
-    -- A story thing, or a piece that adds to the player (the item table's ItemDetailType NarrativeItem or AddAttribute: 85
-    -- and 7 of its 235 plain items, the bench of 11-17; its 110 materials are spent as they're used): one has it or
-    -- hasn't. game.mergeBag.
-    game.KEEP_DETAILS = { NarrativeItem = true, AddAttribute = true }
-    function game.keepsake(id)
-        game.isPetal(id)        -- (the table read once: game.flowers.keeps with it)
-        local keeps = game.flowers.keeps
-        return keeps ~= nil and keeps[id] == true
-    end
-
     -- A Memory Flower's petal, by the game's item table (ItemType MemoryFlowerPetal), read once (game.flowers.once too).
     function game.isPetal(id)
         local fl = game.flowers
@@ -6414,9 +6436,8 @@ return function(api)
                 end
                 -- (Read once, even with no such column: an item that isn't a petal goes grantLoot's own way.)
                 local set, once, n, m = {}, {}, 0, 0
-                fl.petals, fl.once, fl.keeps = set, once, {}
+                fl.petals, fl.once = set, once
                 local kinds = lib:GetDataTableColumnAsString(t, FName("ItemType"))
-                local details = lib:GetDataTableColumnAsString(t, FName("ItemDetailType"))
                 for i = 1, #ids do
                     local kind = text(kinds[i])
                     if kind == "MemoryFlowerPetal" then
@@ -6424,9 +6445,6 @@ return function(api)
                     end
                     if game.ONCE_TYPES[kind] then
                         once[text(ids[i])], m = true, m + 1
-                    end
-                    if details[i] ~= nil and game.KEEP_DETAILS[text(details[i])] then
-                        fl.keeps[text(ids[i])] = true
                     end
                 end
                 log("Memory Flower petals in the game's table: " .. n .. "; things it keeps once a save: " .. m .. ".")
