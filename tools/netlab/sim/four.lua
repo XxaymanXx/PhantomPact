@@ -661,11 +661,20 @@ local function guestRunsWhatsNearIt()
     check(select(1, Fake.health(onG)) == left - 100, "and lands there")
     s:run(1)
     check(select(1, Fake.health(onG)) == left - 100 and select(1, Fake.health(onH)) == left - 100, "once, on both")
+    -- (Handed back with no movement part at that moment, a boss as a scene began, the bench of 11-17: nothing is set on
+    -- it. Each field set so was an error line in the game's log.)
+    local cmcH = field(onH, "CharacterMovement")
+    rawset(cmcH, "__alive", false)
+    Fake.put(cmcH, "bOrientRotationToMovement", "as it was")
     Session.moveTo(g, 12500, 2400)     -- together
     Fake.put(onG, "loc", { X = 12800.0, Y = 1500.0, Z = 100.0 })
     s:run(2)
     check(count(h.sent, "^E RUN sp:byguest 0$") == 1 and net(g).mine["sp:byguest"] == nil, "together again: the host's game runs it")
     check(brain(onH) == true and brain(onG) == false, "its AI back on the host, the guest's copy following the host's again")
+    check(field(cmcH, "bOrientRotationToMovement") == "as it was",
+        "handed back with no movement part just then: nothing is set on it (" .. tostring(field(cmcH, "bOrientRotationToMovement")) .. ")")
+    rawset(cmcH, "__alive", true)
+    Fake.put(cmcH, "bOrientRotationToMovement", true)
     check(gap(at(onH), at(onG)) < 200, "from where it stood, with no jump")
     check(select(1, Fake.health(onH)) == select(1, Fake.health(onG)), "and with what it had left in the guest's game")
     Session.moveTo(h, 3000, 2500)      -- apart again
