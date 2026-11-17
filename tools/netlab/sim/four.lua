@@ -10703,10 +10703,22 @@ local function localTargets()
     local steered = pc.env.PBZ.game.aim.steered
     local addr = e:GetAddress()
     check(steered[addr] ~= nil, "(it's steered between the two)")
+    -- (Nothing of the game's is kept of it between turns: its body and its picker were, and each is asked of the game
+    -- at every turn now. The main session's look at issue 18.)
+    local keeps = 0
+    for _, v in pairs(steered[addr] or {}) do
+        if type(v) == "table" or type(v) == "userdata" then
+            keeps = keeps + 1
+        end
+    end
+    check(keeps == 0, "what's kept of a steered enemy between turns is numbers and names: nothing of the game's (" .. keeps .. ")")
+    local heldWait = field(field(e, "picker"), "SwitchTargetCooldown")
     Session.moveTo(pc, 4000, 300)
     Fake.put(p2, "loc", { X = 4200.0, Y = 300.0, Z = 100.0 })
     s:run(3)
-    check(steered[addr] == nil, "both walk 37 m from it: let go, its picker its own again")
+    check(steered[addr] == nil and heldWait > 1.5 and field(field(e, "picker"), "SwitchTargetCooldown") == 1.5,
+        "both walk 37 m from it: let go, its picker its own again (its wait " .. tostring(heldWait) .. " s steered, "
+            .. tostring(field(field(e, "picker"), "SwitchTargetCooldown")) .. " s after)")
     Session.moveTo(pc, 100, 300)
     Fake.put(p2, "loc", { X = 600.0, Y = 300.0, Z = 100.0 })
     s:run(2)
@@ -10769,9 +10781,14 @@ local function localTargets()
     end
     check(tpc.env.PBZ.game.aim.steered[te:GetAddress()] ~= nil and field(te, "target") == tp2,
         "(an enemy steered to player 2 by their blows)")
+    local loadWait = field(field(te, "picker"), "SwitchTargetCooldown")
     Session.loadMap(tpc)
     check(next(tpc.env.PBZ.game.aim.steered) == nil and next(tpc.env.PBZ.game.aim.dmg) == nil,
         "a load with an enemy steered: let go as the load begins, nothing kept past it")
+    -- (By the list as it stood at its last turn, no search as the map goes: the enemy still there has its wait back.)
+    check(loadWait > 1.5 and field(field(te, "picker"), "SwitchTargetCooldown") == 1.5,
+        "and its picker's own wait is back as the load begins (" .. tostring(loadWait) .. " s steered, "
+            .. tostring(field(field(te, "picker"), "SwitchTargetCooldown")) .. " s after)")
     t:run(3)
     allErrors(t)
 end

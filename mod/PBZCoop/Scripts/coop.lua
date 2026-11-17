@@ -1068,7 +1068,7 @@ return function(api)
             -- that id on its first turn.)
             net.guestKilled[name] = nil
             handover.asleep[name] = nil
-            game.unfocus(addr)      -- (who hit it is forgotten: a later enemy may get its address)
+            game.unfocus(addr, actor)   -- (who hit it is forgotten: a later enemy may get its address)
             if net.guestRuns[name] then
                 handover.drop(actor, addr, name)
             end
