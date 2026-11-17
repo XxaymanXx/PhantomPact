@@ -328,6 +328,7 @@ Fake.ITEMS = {
     { "I_RELIC_4", "NarrativeItem" },
     { "I_RELIC_5", "NarrativeItem" },
     { "K_TOKEN_9", "NarrativeItem", nil, "2" },
+    { "Item_Piece_002", "AddAttribute" },       -- (a Sha-Chi Amber Shard: four make an amber)
 }
 
 -- The player's skill tree (PBZAbilityNodesComponent), as the bench measured it on 11-07: 32 nodes; ActivateNode by its
@@ -1042,6 +1043,8 @@ Fake.LEVEL_LOOT = {
         .. 'Probability=1.000000)),ItemLevel=B))' },
     { "Xigu.AC_Deflect", '((EnemyLevel=0,LootDusts=,LootItems=,Weapons=,Medicines=,Accessories=((AccessoryID="AC_Deflect",'
         .. 'Probability=1.000000)),ItemLevel=S))' },
+    { "Xigu.Piece", '((EnemyLevel=0,LootDusts=,LootItems=((ItemId="Item_Piece_002",MinAmount=1,MaxAmount=1,'
+        .. 'Probability=1.000000)),Weapons=,Medicines=,Accessories=,ItemLevel=B))' },
 }
 
 function Fake.sceneManager(pc)

@@ -6318,6 +6318,19 @@ return function(api)
             have[kind .. ":" .. id] = tonumber(n)
         end
         local came = 0
+        -- (What this bag has ever held: its entries, one back at 0 among them (game.hadItem), read once, when first asked.)
+        local ever = nil
+        local function heldBefore(id)
+            if ever == nil then
+                ever = {}
+                pcall(function()
+                    bp.Inventories:ForEach(function(k)
+                        ever[k:get():ToString()] = true
+                    end)
+                end)
+            end
+            return ever[id] == true
+        end
         for _, e in ipairs(entries) do
             local kind, id, n = e:match("^(%a):([%w_%-]+):(%d+)$")
             n = n and math.min(tonumber(n), 9999)
@@ -6326,10 +6339,13 @@ return function(api)
             if kind == "p" and counts ~= false and n and n > (mine or 0) then
                 game.grantLoot(pawn, id, nil, n - (mine or 0), true)
                 came = came + 1
-            elseif kind == "p" and n and mine == nil and game.keepsake(id) then
-                -- (A sync started again: a story thing, or a piece that adds to the player, which the host found while
-                -- this player was away and this bag has none of. It isn't used up as it's used, and nothing else brings
-                -- it: an elite's Sha-Chi Amber Shard stayed the host's alone. The bench, 11-17.)
+            elseif kind == "p" and n and mine == nil and game.oneOfAKind(id) and not heldBefore(id) then
+                -- (A sync started again: a story thing there's one of, which the host found while this player was away
+                -- and this bag never held. Not one it had and used since, a key spent at its door, a thing handed in:
+                -- the host keeps its own, and it came back at every sync. Nor a piece, what pieces make, or a story
+                -- thing made of several: none here says nothing of what's owed (four shards are an amber as the fourth
+                -- comes), and the host's chest or this world's own copy of the find pays it too. The sixth review; on
+                -- the bench a player back after 25 minutes took 90 things at once, three ambers among them.)
                 game.grantLoot(pawn, id, nil, n, true)
                 came = came + 1
             elseif kind == "m" and id == "Hulu" and mine == nil then
@@ -6391,16 +6407,6 @@ return function(api)
         return once ~= nil and once[id] == true
     end
 
-    -- A story thing, or a piece that adds to the player (the item table's ItemDetailType NarrativeItem or AddAttribute: 85
-    -- and 7 of its 235 plain items, the bench of 11-17; its 110 materials are spent as they're used): one has it or
-    -- hasn't. game.mergeBag.
-    game.KEEP_DETAILS = { NarrativeItem = true, AddAttribute = true }
-    function game.keepsake(id)
-        game.isPetal(id)        -- (the table read once: game.flowers.keeps with it)
-        local keeps = game.flowers.keeps
-        return keeps ~= nil and keeps[id] == true
-    end
-
     -- A Memory Flower's petal, by the game's item table (ItemType MemoryFlowerPetal), read once (game.flowers.once too).
     function game.isPetal(id)
         local fl = game.flowers
@@ -6430,9 +6436,8 @@ return function(api)
                 end
                 -- (Read once, even with no such column: an item that isn't a petal goes grantLoot's own way.)
                 local set, once, n, m = {}, {}, 0, 0
-                fl.petals, fl.once, fl.keeps = set, once, {}
+                fl.petals, fl.once = set, once
                 local kinds = lib:GetDataTableColumnAsString(t, FName("ItemType"))
-                local details = lib:GetDataTableColumnAsString(t, FName("ItemDetailType"))
                 for i = 1, #ids do
                     local kind = text(kinds[i])
                     if kind == "MemoryFlowerPetal" then
@@ -6440,9 +6445,6 @@ return function(api)
                     end
                     if game.ONCE_TYPES[kind] then
                         once[text(ids[i])], m = true, m + 1
-                    end
-                    if details[i] ~= nil and game.KEEP_DETAILS[text(details[i])] then
-                        fl.keeps[text(ids[i])] = true
                     end
                 end
                 log("Memory Flower petals in the game's table: " .. n .. "; things it keeps once a save: " .. m .. ".")

@@ -17,7 +17,6 @@ return {
         ["PhantomPact.ini: HostAddress has a character that can't be used (\" % & | < > ^). Leave it empty to join any friend who's hosting."] = "يحتوي HostAddress في PhantomPact.ini على رمز غير مسموح به (\" % & | < > ^). اتركه فارغًا للانضمام إلى أي صديق يستضيف.",  -- f5.words.ini_bad_char
         ["this game update isn't tested with this Phantom Pact version; some co-op features may fail."] = "لم يُختبر تحديث اللعبة هذا مع إصدار Phantom Pact الحالي، وقد تتعطل بعض ميزات اللعب التعاوني.",  -- tip.conn.build
         ["Couldn't start the relay: dlls\\main.dll can't be reached. Reinstall Phantom Pact, check your antivirus didn't remove it, and use the UE4SS build from the install guide."] = "تعذّر تشغيل وحدة الاتصال: لا يمكن الوصول إلى dlls\\main.dll. أعد تثبيت Phantom Pact، وتأكد من أن برنامج مكافحة الفيروسات لم يحذفه، واستخدم إصدار UE4SS المذكور في دليل التثبيت.",  -- tip.conn.no_dll
-        ["Couldn't start the relay: dlls\\main.dll is another version's (was the game open while Phantom Pact was updated?). Close the game, extract the zip again, then start the game."] = "تعذّر تشغيل وحدة الاتصال: dlls\\main.dll من إصدار آخر (هل كانت اللعبة مفتوحة أثناء تحديث Phantom Pact؟). أغلق اللعبة، واستخرج الملف المضغوط مرة أخرى، ثم شغّل اللعبة.",  -- tip.conn.other_dll
         -- PvP (F6)
         ["Putting the last match back: a moment."] = "جارٍ إرجاعك من النزال السابق: انتظر لحظة.",  -- f6.words.restoring
         ["too late to finish them: the match is over."] = "فات أوان الإجهاز عليه: انتهى النزال.",  -- tip.pvp.too_late

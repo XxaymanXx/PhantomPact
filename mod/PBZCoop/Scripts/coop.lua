@@ -1212,9 +1212,14 @@ return function(api)
             end
             -- (A guest in that boss's fight: see net.fightingHere. Any hit, a parry's posture too. A host's on a boss of
             -- the guest's fight, which the guest's game runs, the same: from near it, the boss is this game's from then on,
-            -- handover.hostIn.)
-            if net.partnerBosses[id] or (isClient() and game.isBoss and game.isBoss(enemy)) then
+            -- handover.hostIn. And on a party's guest, any one asleep on the host: one the game gives a boss's bar and
+            -- the codex doesn't call a boss (the hook man) is a boss only while its bar is up, and a held copy's bar is
+            -- taken down at once, handover.byHere: its blows from 40 m set no mark, and wore down a copy that never
+            -- fought back. The sixth review.)
+            if net.partnerBosses[id] or (isClient() and game.isBoss and game.isBoss(enemy))
+                or (net.party and isClient() and (net.remoteEnemies[id] or {}).Asleep == true) then
                 net.struck[id] = true
+                net.struckAt[id] = os.clock()   -- (the blow itself, for handover.byHere)
             end
         end
     end
@@ -1537,7 +1542,12 @@ return function(api)
                 -- (Onto its floor by any amount: a copy the host's line left at 1.3 fell to 1 with no report at all, and every
                 -- hit after read as nothing, the enemy taking hits for good.)
                 local onFloor = net.heldAlive[addr] ~= nil and hp <= HELD_HP + 0.01 and prev.hp > hp + 0.01
-                if dHp > 0.5 or dPosture > 0.5 or onFloor then
+                -- (Not with its most health down since the last turn too: this world's own game set its numbers again,
+                -- a boss's base written back (Xiao Xue's on the bench, 16482 over co-op's 24723), no blow. Told as one,
+                -- it took all of co-op's share off the host's boss at once, a third of her health, and two guests'
+                -- at once could end a boss with no blow struck. The host's line puts both numbers back. The sixth review.)
+                local written = prev.maxhp ~= nil and maxhp ~= nil and maxhp < prev.maxhp - 1
+                if (dHp > 0.5 or dPosture > 0.5 or onFloor) and not written then
                     if ghostsHit() and (net.pvp or dHp <= 0.5) then
                         -- The host's swing, replayed here: the host's own world already took it.
                         undoHit(actor, prev.hp, prev.posture)
@@ -1636,6 +1646,7 @@ return function(api)
                 end
                 if game.setMaxHealth and r.MaxHp and maxhp and math.abs(r.MaxHp - maxhp) > 1 then
                     game.setMaxHealth(actor, r.MaxHp)
+                    maxhp = r.MaxHp     -- (what's kept for the next turn: the mod's own write is no write of the game's)
                 end
                 -- (Never below the floor it's held at: the host's line can say 0 before its K comes, and a copy written to 0
                 -- reads as dead here without the game's death ever running. The forest's last boss then died in the guest's
@@ -1697,7 +1708,7 @@ return function(api)
             if net.mine[name] then
                 handover.share(name, actor, addr)
             end
-            nextSeen[name] = { hp = hp, posture = posture, addr = addr }
+            nextSeen[name] = { hp = hp, posture = posture, addr = addr, maxhp = maxhp }
         elseif (net.hitHere[name] or net.mine[name]) and not net.hostKilled[name] and not net.guestKillSent[name] then
             -- It died here before the host had it loaded (we were far apart): the host's copy follows. In a party so does
             -- that of any guest near it. An enemy past the host's reach has no owner: it sleeps on the host, so each guest
@@ -1905,7 +1916,7 @@ return function(api)
     -- fight" for a copy that's this game's already, or for the player nearest it (their own fight, begun by the game from
     -- further off): not for a watcher's, whose bar comes of such a moment. Nearest by where each was last told to be,
     -- shown or not; whether a partner's fight is told yet is no test (the watcher's bar came first, on the bench).
-    handover.BY_CM, handover.BY_FAR_CM = 3000, 4500
+    handover.BY_CM, handover.BY_FAR_CM, handover.STRUCK_S = 3000, 4500, 5
     handover.live = {}          -- guest: enemy address -> its name, while this game runs its own copy of it
     -- (Any partner nearer, in a fight or not: the one about to fight, 35 m off and not told yet, is nearer than a
     -- watcher whose stray bar comes then. Counted only within 30 m or in a fight, the watcher's copy was made theirs
@@ -1936,9 +1947,14 @@ return function(api)
             -- (And one this player struck from within the game's own 45 m, no partner's fight on: theirs, whoever's
             -- nearer. Held, the blows of one 40 m off, a thrown blade's or a cannon's, went to the host and wore the
             -- boss down while its copy stood still, nobody in its fight. A stray bar is no blow. The fifth review.)
+            -- (A blow of the last few seconds, not the mark, which stays till a death or a rest: one who struck it,
+            -- walked off alive and came back 43 m from it had their copy woken before any bar, a nearer partner about
+            -- to fight it; its stray bar then told the fight as theirs, the fighter's own untold, and as they left it
+            -- ended the fighter's on the host. The sixth review.)
             yes = gap <= (was and handover.BY_FAR_CM or handover.BY_CM) or net.joinedBoss == name
                 or (own and (was or (net.partnerBosses[name] == nil and handover.nobodyNearer(at, gap))))
-                or (net.struck[name] and gap <= handover.BY_FAR_CM and net.partnerBosses[name] == nil)
+                or ((net.struckAt[name] or -1e9) > os.clock() - handover.STRUCK_S and gap <= handover.BY_FAR_CM
+                    and net.partnerBosses[name] == nil)
             local now, c = os.clock(), handover.calm[addr]
             -- (A partner's fight with it shown here: its copy isn't calmed meanwhile. Calmed, the game ended "its fight"
             -- and took the bar down, the mirror with it: the watcher saw no bar for the fight. The bench.)
@@ -2116,13 +2132,16 @@ return function(api)
         end
         -- A drop since the last turn is weighed as a guest weighs one on its copies of the host's (syncEnemy).
         local prev = handover.seen[name]
+        local _, maxhp = game.getHealth(actor)
         if prev and prev.addr == addr and prev.hp and hp then
             local dHp = prev.hp - hp
             local dPosture = (prev.posture and posture) and (prev.posture - posture) or 0
             -- (Onto its floor by any amount, as syncEnemy weighs it: a blow onto the floor of half a point or less was told
             -- to nobody, and every blow after read as nothing, the host unable to finish it till the guest did.)
             local onFloor = hp <= HELD_HP + 0.01 and prev.hp > hp + 0.01
-            if dHp > 0.5 or dPosture > 0.5 or onFloor then
+            -- (Not with its most health down too: this world's own game set its numbers again, as syncEnemy has it.)
+            local written = prev.maxhp ~= nil and maxhp ~= nil and maxhp < prev.maxhp - 1
+            if (dHp > 0.5 or dPosture > 0.5 or onFloor) and not written then
                 if (ghostsHit() and dHp <= 0.5) or ((dHp > 0.5 or onFloor) and not ownHit(actor)) then
                     undoHit(actor, prev.hp, prev.posture)
                     hp, posture = prev.hp, prev.posture
@@ -2136,15 +2155,15 @@ return function(api)
             end
         end
         if r == nil then
-            handover.seen[name] = { hp = hp, posture = posture, addr = addr }
+            handover.seen[name] = { hp = hp, posture = posture, addr = addr, maxhp = maxhp }
             return true             -- (the guest's first line is on its way)
         end
         if api.puppets then
             api.puppets.follow(name, actor, r)
         end
-        local _, maxhp = game.getHealth(actor)
         if game.setMaxHealth and maxhp and math.abs(r.MaxHp - maxhp) > 1 then
             game.setMaxHealth(actor, r.MaxHp)
+            maxhp = r.MaxHp
         end
         -- (Never below half a point over its floor, as syncEnemy writes it, and lifted off the floor with no killing blow
         -- told: written to the guest's 1.2, a blow after read as nothing.)
@@ -2169,7 +2188,7 @@ return function(api)
             game.setPosture(actor, r.Posture)
             posture = r.Posture
         end
-        handover.seen[name] = { hp = hp, posture = posture, addr = addr }
+        handover.seen[name] = { hp = hp, posture = posture, addr = addr, maxhp = maxhp }
         return true
     end
 
@@ -2795,6 +2814,10 @@ return function(api)
             end
             local fought = net.hostBosses[name] or net.partnerBosses[name] or net.pendingBosses[name]
             local wasBoss = fought or (valid(actor) and game.isBoss and game.isBoss(actor))
+            -- (A fight of this player's own the host never joined, by the bars told: its fall began no scene of the
+            -- host's. One both were in, this player's bar up first, is the host's fight too. flowsync.lua's holdStarts.)
+            net.ownFell = net.ownFell or {}
+            net.ownFell[name] = (net.ownAnnounced or {})[name] and not net.partnerBosses[name] or nil
             net.hostBosses[name] = nil
             if wasBoss and not quiet then
                 net.bossFell = net.bossFell or {}
@@ -5439,6 +5462,7 @@ return function(api)
     -- waiting on nobody, while that player's own F 1 kept the copy up. Never a joiner's watch.
     net.FIGHT_NEAR_CM = 10000
     net.struck = net.struck or {}         -- boss id -> true: this player hit it in this fight, or it went for them
+    net.struckAt = net.struckAt or {}     -- enemy id -> os.clock() of this player's last blow on it (handover.byHere)
     function net.fightingHere(pawn)
         if net.watchingFight then
             return false

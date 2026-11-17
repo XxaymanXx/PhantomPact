@@ -28,7 +28,7 @@ return function(api)
     local ELSEWHERE_MAX = 3000      -- guest: flow steps of levels it isn't on kept waiting, at most
     local START_TAIL_S = 15         -- guest: what the host tells this long after a scene of its own is still that scene's
     local FELL_S = 10               -- guest: a scene of the host's begun this soon after a boss fell there is that fall's
-    local YOUNG_S = 4               -- guest: what the host tells is taken once it's this old (a scene may be about to begin)
+    local YOUNG_S = 6               -- guest: what the host tells is taken once it's this old (a scene may be about to begin)
     -- Never sent: the game's mode, the screen's own state, and the states of a moment (a fight, a dodge, a lock-on).
     local SKIP = { "^GameMode%.", "^UI%.", "^State%.", "^Combat%.", "^Battle%.", "^Input%.", "^Camera%.", "^Ability%.",
         "^Status%.", "^Buff%.", "^Player%.State" }
@@ -763,9 +763,12 @@ return function(api)
             end
             s.endAt = nil
             -- (A scene begun within FELL_S of a boss's fall is that fall's. Not a fall while it plays or after: a
-            -- partner's elite, or this player's own, falling then took a story boss's start for a win's, 326 again.)
+            -- partner's elite, or this player's own, falling then took a story boss's start for a win's, 326 again.
+            -- Nor the fall of a fight of this player's own the host never joined, whenever it came: within those 10 s
+            -- before the scene, or in its first seconds, it let the whole start go all the same. The sixth review.)
             for name, at in pairs(net.killedAt or {}) do
-                if at >= s.sceneAt - FELL_S and at <= s.sceneAt + 2 and net.bossFell and net.bossFell[name] then
+                if at >= s.sceneAt - FELL_S and at <= s.sceneAt + 2 and net.bossFell and net.bossFell[name]
+                    and not (net.ownFell or {})[name] then
                     s.fell = true
                 end
             end
@@ -973,9 +976,10 @@ return function(api)
             game.granting = false
             return
         end
-        -- (What the host told a moment ago waits: a story trigger runs its own step a second or two before its scene,
-        -- and told in that gap the step was taken here before the scene's window opened: this world's trigger gone, its
-        -- boss never started, 326 again in one start out of three. A few seconds old, the window has caught it.)
+        -- (What the host told a moment ago waits: a story trigger runs its own step before its scene, 1 to 3 s on the
+        -- bench for the bosses held here and 5 s at the hook man's, and told in that gap the step was taken here before
+        -- the scene's window opened: this world's trigger gone, its boss never started, 326 again. A few seconds old,
+        -- the window has caught it. 4 s held a step told up to 3.9 s before its scene, 6 holds to 5.8: the sixth review.)
         local ripe = 0
         for _, q in ipairs(flow.queue) do
             ripe = ripe + (young(q) and 0 or 1)
