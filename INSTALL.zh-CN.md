@@ -60,7 +60,7 @@ UE4SS 控制台会显示 `Phantom Pact Host: co-op on`(或 Guest),连接成功�
 - PvPvE 和复活保持关闭。PvP 比赛(F6)最多支持六人,分成两队。
 - 有三名客人时,房主每秒大约发送 50 到 100 KB,上传太慢时会有影响。
 
-- **更新:** 双方都要更新。先关闭游戏(游戏运行时,旧的 `main.dll` 会留在原处),再把新版本解压覆盖旧版本,然后重新设置 `Role` 和 `HostAddress`。旧版本留在 `PBZCoop` 文件夹里的内容(`relay` 文件夹,以及 `net_in.txt`、`net_out.txt` 和 `net_events` 文件)已经不再使用,可以删除。
+- **更新:** 双方都要更新。先关闭游戏(游戏运行时,旧的 `main.dll` 会留在原处),再把新版本解压覆盖旧版本,然后重新设置 `Role` 和 `HostAddress`。如果游戏提示 `dlls\main.dll 是其他版本的`,说明更新时游戏开着:请关闭游戏,再解压一次。旧版本留在 `PBZCoop` 文件夹里的内容(`relay` 文件夹,以及 `net_in.txt`、`net_out.txt` 和 `net_events` 文件)已经不再使用,可以删除。
 - **单人游玩:** 设置 `Role = Off`。
 - **卸载:** 删除 `platform\steam\ue4ss\Mods\PBZCoop` 文件夹。
 

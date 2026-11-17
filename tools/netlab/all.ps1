@@ -102,6 +102,14 @@ Step 'netsim' {
     $good = $upload -gt 0 -and $upload -lt 185
     "  $(if ($good) { 'ok  ' } else { 'FAIL' }) six players at 120 FPS: the host uploads $upload KB/s (limit 185)"
     if (-not $good) { [void]$failed.Add('netsim, party') }
+    # Three players above 60 FPS: a place held for its budget rides the host's next packet. Sent by itself a few ms before
+    # that packet, it was a fifth more lone places: 387 packets a second from the host in this run, 365 now.
+    $out = & (Join-Path $PSScriptRoot 'netsim.ps1') -Run '--players 3 --enemies 8 --rtt 80 --jitter 10 --loss 1 --fps 120' -Seconds 120 -Work (Join-Path $private 'netsim')
+    $bytes = $out | Where-Object { $_ -match '^new bytes ' } | Select-Object -First 1
+    $hostPackets = if ($bytes -match 'host_packets_s=([\d.]+)') { [double]$Matches[1] } else { -1 }
+    $good = $hostPackets -gt 0 -and $hostPackets -lt 376
+    "  $(if ($good) { 'ok  ' } else { 'FAIL' }) three players at 120 FPS: $hostPackets packets a second from the host (limit 376)"
+    if (-not $good) { [void]$failed.Add('netsim, three players') }
 }
 
 if (-not $NoRestart) { Step 'restart-test' {

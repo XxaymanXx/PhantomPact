@@ -23,11 +23,14 @@ function Session.shippedIni()
     return text
 end
 
-function Session.new(scripts, roles, party, enemies, extraIni, wholeIni)
+-- early(pc, i): the test's hand on a PC before its scripts start (another version's main.dll, say).
+function Session.new(scripts, roles, party, enemies, extraIni, wholeIni, early)
     local self = setmetatable({ pcs = {}, relay = Relay.new(party) }, Session)
-    -- The relay says the version of these scripts, as a real build does.
+    -- The relay says the version of these scripts, and their protocol, as a real build does.
     local main = assert(io.open(scripts .. "/main.lua", "rb"))
-    self.relay.version = main:read("a"):match('local VERSION = "([^"]+)"')
+    local text = main:read("a")
+    self.relay.version = text:match('local VERSION = "([^"]+)"')
+    self.relay.protocol = tonumber(text:match("local PROTOCOL = (%d+)"))
     main:close()
     self.relay.mapOf = function(pc)
         local host = self.relay:host()
@@ -47,6 +50,9 @@ function Session.new(scripts, roles, party, enemies, extraIni, wholeIni)
         Fake.pickup(pc, "pickup2", "R_501", 90000.0, 0.0, 100.0)
         Fake.chest(pc, "BP_Chest_C_1", 400.0, 400.0, 100.0)
         self.pcs[i] = pc
+        if early then
+            early(pc, i)
+        end
     end
     for _, pc in ipairs(self.pcs) do
         Fake.start(pc)

@@ -106,6 +106,8 @@ With more than two players:
 
 - **Updating:** both players update. Close the game first: while it runs, the old `main.dll` stays in place under the
   new files. Then extract the new version over the old one, and set `Role` / `HostAddress` again.
+  If the game says `dlls\main.dll is another version's`, it was open during the update: close it and extract
+  once more.
   What an older version left in the `PBZCoop` folder (the `relay` folder, and `net_in.txt`, `net_out.txt` and the
   `net_events` files) isn't used any more; you can delete it.
 - **Playing alone:** set `Role = Off`.

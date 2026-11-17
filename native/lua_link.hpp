@@ -92,6 +92,17 @@ extern "C" __declspec(dllexport) int pp_wall(void* lua) {
     return 1;
 }
 
+// The relay's protocol (relay.hpp's PROTOCOL). The scripts ask, and leave online co-op off with another version's
+// main.dll: one a running game kept loaded while the mod was updated under it. (1.7.3's and older have no such call.)
+extern "C" __declspec(dllexport) int pp_protocol(void* lua) {
+    using namespace lua_link;
+    const Api* a = api();
+    if (!a) return 0;
+    const State s{lua};
+    a->set_number(&s, relay::PROTOCOL);
+    return 1;
+}
+
 // pp_state(x, y, z, yaw, vx, vy, vz, hp, maxhp, map, flags): the local player, sent at once.
 extern "C" __declspec(dllexport) int pp_state(void* lua) {
     using namespace lua_link;

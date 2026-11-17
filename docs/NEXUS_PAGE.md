@@ -57,7 +57,7 @@ You should now have a [b]PBZCoop[/b] folder in [b]platform\steam\ue4ss\Mods[/b].
 Start the game and load your saves, the host first, then follow the F5 tutorial below.
 The first time you host, Windows asks whether the game may use the network: click [b]Allow[/b]. That window can open behind the game, so Alt+Tab if the guest can’t connect.
 
-[b]Updating:[/b] everyone extracts the new version over the old one, then presses HOST or GUEST in F5 again.
+[b]Updating:[/b] everyone closes the game, extracts the new version over the old one, then presses HOST or GUEST in F5 again.
 [b]Playing alone:[/b] press [b]LEAVE[/b] in F5.
 [b]To uninstall:[/b] delete [b]platform\steam\ue4ss\Mods\PBZCoop[/b] from the game folder.
 

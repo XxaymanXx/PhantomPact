@@ -26,6 +26,8 @@ return function(scriptDir)
             "这个游戏版本尚未用当前的 Phantom Pact 测试过,部分联机功能可能失效。",
         ["Couldn't start the relay: dlls\\main.dll can't be reached. Reinstall Phantom Pact, check your antivirus didn't remove it, and use the UE4SS build from the install guide."] =
             "无法启动联机模块:找不到 dlls\\main.dll。请重新安装 Phantom Pact,检查杀毒软件是否删除了它,并使用安装说明里的 UE4SS 版本。",
+        ["Couldn't start the relay: dlls\\main.dll is another version's (was the game open while Phantom Pact was updated?). Close the game, extract the zip again, then start the game."] =
+            "无法启动联机模块:dlls\\main.dll 是其他版本的(更新 Phantom Pact 时游戏是否开着?)。请关闭游戏,重新解压压缩包,再启动游戏。",
         -- PvP (F6)
         ["Putting the last match back: a moment."] = "正在还原上一场对决,请稍候。",
         ["too late to finish them: the match is over."] = "来不及处决了:对决已经结束。",
