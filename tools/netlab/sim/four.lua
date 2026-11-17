@@ -13602,7 +13602,7 @@ local function arabicRows()
             if first then
                 first = false
             elseif id and id ~= "" then
-                T[id] = { en = en, ar = ar, unchecked = (notes or ""):find("^UNCHECKED") ~= nil }
+                T[id] = { en = en, ar = ar, unchecked = (notes or ""):find("^UNCHECKED") ~= nil, notes = notes or "" }
                 ids[#ids + 1] = id
             end
         end
@@ -13884,9 +13884,19 @@ local function arabic()
     verdict(string.format("each of the tsv's %d rows said on its own, made as the code makes it: the tsv's Arabic", rows))
     -- A row the author hasn't checked yet (its notes begin UNCHECKED) isn't shipped: lang_ar.lua has none of it, and
     -- its line stays English till then. (The author's rule; the sixth review's G2.)
+    -- (A picture's row: the picture its notes name isn't in the mod's art folder.)
     local shipped = {}
     for _, id in ipairs(waiting) do
-        if ar.say(T[id].en) ~= T[id].en then
+        if id:find("%.art%.") then
+            local picture = T[id].notes:match("art/(%w+/[%w_]+%.png)")
+            local f = picture and io.open(SIM_REPO .. "/mod/PBZCoop/art/" .. picture, "rb")
+            if f then
+                f:close()
+            end
+            if f or not picture then
+                shipped[#shipped + 1] = id .. (picture and "" or " (its notes name no picture)")
+            end
+        elseif ar.say(T[id].en) ~= T[id].en then
             shipped[#shipped + 1] = id
         end
     end
@@ -14138,6 +14148,18 @@ local function arabicScreens()
     check(lang ~= nil and lang.code == "ar" and lang.say("Not connected.") == ar("f5.words.not_connected"),
         "Language = Arabic: the mod says a line as the tsv has it (main.lua loads lang_ar.lua): "
         .. tostring(lang and lang.say("Not connected.")))
+    -- Player 2's menu badge (loadout.lua): the Arabic picture if it's in the mod, the English one while a new one waits
+    -- for the author's check, out of the mod. (The fake's files go by their names.)
+    local badge = h.env.PBZ.loadout and h.env.PBZ.loadout.badgePicture
+    if badge then
+        local without = badge(2)
+        h.files["ar_player_menu_2.png"] = "png"
+        local with = badge(2)
+        h.files["ar_player_menu_2.png"] = nil
+        check(without == "panel/player_menu_2.png" and with == "panel/ar_player_menu_2.png",
+            "player 2's menu badge in Arabic: the English picture while the Arabic one isn't in the mod, the Arabic once it is ("
+                .. tostring(without) .. ", " .. tostring(with) .. ")")
+    end
     if not (lang and game.arabicTip and game.arabicText and game.ownText) then
         return                                  -- (old scripts: no Arabic to show)
     end
