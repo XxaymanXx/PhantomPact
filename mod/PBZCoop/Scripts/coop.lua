@@ -821,6 +821,18 @@ return function(api)
                 game.hideBossBar(actor)
             end
         end
+        -- (A figure put on the enemy's side for this fight, still alive and not started here: back as it stood. pbz.lua's
+        -- game.enemySide.)
+        if game.ownSide then
+            local back = valid(actor) and game.ownSide(actor)
+            if shown and valid(shown.actor) and shown.actor:GetAddress() == shown.addr
+                and not (valid(actor) and actor:GetAddress() == shown.addr) then
+                back = game.ownSide(shown.actor) or back
+            end
+            if back then
+                log(name .. " is as the game had it again: not started in this world, its own start still to come.")
+            end
+        end
         if at and game.setBossFog then
             game.setBossFog(at, false)
         end
@@ -4397,6 +4409,7 @@ return function(api)
         end
         if not net.partnerBosses[name] then
             sendEvent("B", name)
+            net.fightRetellAt = os.clock() + 4.0        -- (a bar that only blinked: tellFight)
             net.bossesTold = net.bossesTold or {}
             net.bossesTold[name] = true     -- (any sit puts it back to full health, this player down or not: net.sitBossesToFull)
             if isClient() then
@@ -4580,6 +4593,12 @@ return function(api)
                             fname = select(2, pcall(function() return boss:GetFName():ToString() end)) }
                     end
                     game.keepBossBar(boss)
+                    -- (One the game hasn't started in this world, a figure on the player's own side: no blow landed
+                    -- on it, none of its own on this player. pbz.lua's game.enemySide. A guest's copy only: the
+                    -- host's is its own game's to start and to run.)
+                    if isClient() and game.enemySide and game.enemySide(boss) == "put" then
+                        log(name .. " isn't started in this world: on the enemy's side while the other player's fight with it lasts.")
+                    end
                 end
             end
         end
@@ -5435,6 +5454,15 @@ return function(api)
         if net.fightingHere(localPawn()) or net.holdWanted
             or (net.toldFighting and (game.inCutscene() or net.holdLooking)) then
             net.fightHereAt = now
+        end
+        -- (A bar that went up and came down between two looks here, a figure's as its player arrives by it: its B went
+        -- out, no F 1 followed, and nothing ended its mirror in the other worlds: their bar up and their walls shut
+        -- for a fight that never was. The bench, 11-17: Wan Jun's and Peng Meng's bars, up for 0.04 and 0.07 s. So
+        -- the fight's state is told again a moment after every B: "no fight", if that's what it is, ends there what
+        -- the B began.)
+        if net.fightRetellAt and now >= net.fightRetellAt then
+            net.fightRetellAt = nil
+            net.fightToldAt = 0
         end
         local fighting = now - (net.fightHereAt or -FIGHT_GAP_S) < FIGHT_GAP_S
         -- Down in the fight and waiting for it (F 2): the game took this player's bar down as they died, and "no fight"

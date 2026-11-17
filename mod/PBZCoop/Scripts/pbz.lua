@@ -418,6 +418,67 @@ return function(api)
         end)
         return ok and type(tag) == "string" and tag or nil
     end
+    -- A boss the game hasn't started yet is a figure on the player's own side (Faction.Player, its controller's team
+    -- 1) till its own start in this world, a scene's, makes it an enemy: no blow lands on it, and none of its own on a
+    -- player. This world's copy of one a partner is fighting follows that fight's moves and health all the same, and a
+    -- player who wasn't in the start could neither hurt it nor be hurt by it, whatever they did ("for some bosses,
+    -- after the host enters, the guest can't deal damage", "my friend is host and i guest, the boss cant hit me"). On
+    -- the bench, 11-17, A-Hua of Xigu, whose start is no trigger a late guest can walk into: none of the guest's blows
+    -- landed and none of the boss's; its copy put on the enemy's side by hand, 6 of theirs landed in 25 s and 10 of
+    -- its own, and the guest's blow that killed it paid both players. So: on the enemy's side for as long as the
+    -- partner's fight lasts (enemySide), and back as it stood if that fight ends with it alive and still not started
+    -- here (ownSide): its own start is this world's to run. One the game has started is never touched.
+    -- (No locals of this file's own for it: the file's main function is at Lua's limit of 200.)
+    game.ENEMY_SIDE, game.ENEMY_TEAM = "Faction.Enemy", 0
+    game.sided = {}             -- copy's address -> { fname, faction, team }: as it stood before enemySide
+    function game.factionOf(actor)
+        local fc = actor:GetComponentByClass(StaticFindObject("/Script/SGameCombatSystem.FactionComponent"))
+        return valid(fc) and fc or nil
+    end
+    -- "put" if it was put there now, true if it stood there already, false for one that isn't a figure (or can't be read).
+    function game.enemySide(actor)
+        if not valid(actor) or game.isDead(actor) or game.aiState(actor) ~= "None" then
+            return false
+        end
+        local ok, how = pcall(function()
+            local fc = game.factionOf(actor)
+            if not fc then
+                return false
+            end
+            local now = fc:GetCurrnetFaction().TagName:ToString()
+            if now == game.ENEMY_SIDE then
+                return true
+            end
+            local controller = actor:GetController()
+            local team = controller.Team.TeamID
+            fc:SetFaction({ TagName = FName(game.ENEMY_SIDE) })
+            controller:BlueprintSetGenericTeamId({ TeamID = game.ENEMY_TEAM })
+            game.sided[actor:GetAddress()] = { fname = actor:GetFName():ToString(), faction = now, team = team }
+            return "put"
+        end)
+        return ok and how or false
+    end
+    -- True if it was put back. (Another body at that address since, a dead one, or one started here meanwhile: left.)
+    function game.ownSide(actor)
+        if not valid(actor) then
+            return false
+        end
+        local addr = actor:GetAddress()
+        local was = game.sided[addr]
+        game.sided[addr] = nil
+        if not was or game.isDead(actor) or game.aiState(actor) ~= "None" then
+            return false
+        end
+        local ok, done = pcall(function()
+            if actor:GetFName():ToString() ~= was.fname then
+                return false
+            end
+            game.factionOf(actor):SetFaction({ TagName = FName(was.faction) })
+            actor:GetController():BlueprintSetGenericTeamId({ TeamID = was.team })
+            return true
+        end)
+        return ok and done == true
+    end
     -- A copy put back to idle, the game's own way: its fight with this player is over in this world, and the game takes
     -- them out of that fight itself. (The bench, 11-16: StopAI then StartAI leaves it in AI.State.Idle with its fight
     -- ended. So never an enemy this game runs: that ends its fight for everyone.) True if it was in one.

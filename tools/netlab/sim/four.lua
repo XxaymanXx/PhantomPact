@@ -3807,7 +3807,16 @@ local function bossStartsHere()
         local c = rawget(field(Session.enemyOn(pc, "boss"), "Controller"), "__fields").SGameAIComponent
         c.CurrentStateTag = { TagName = { ToString = function() return state end } }
     end
-    local function scene(s, pc)         -- (the story's scene in this PC's world: its steps, its flag)
+    local function side(pc)             -- (its boss's side there: its faction, its controller's team)
+        local e = Session.enemyOn(pc, "boss")
+        return tostring(field(field(e, "faction"), "faction")) .. " " .. tostring(rawget(field(e, "Controller"), "__fields").Team.TeamID)
+    end
+    local function onSide(pc, faction, team)
+        local e = Session.enemyOn(pc, "boss")
+        Fake.put(field(e, "faction"), "faction", faction)
+        rawget(field(e, "Controller"), "__fields").Team.TeamID = team
+    end
+    local function scene(s, pc)         -- (the story's scene in this PC's world: its steps, its flag, the boss an enemy)
         Session.scene(pc, true)
         step(pc, GUID)
         step(pc, STEP)
@@ -3815,12 +3824,14 @@ local function bossStartsHere()
         s:run(14)
         Session.scene(pc, false)
         ai(pc, "AI.State.Combat")
+        onSide(pc, "Faction.Enemy", 0)
     end
     local function world()
         local s, h, g = pair()
         for _, pc in ipairs(s.pcs) do
             pc.env.PBZ.game.isStoryLevel = function(level) return level == "Map_Xigu" end
             ai(pc, "None")
+            onSide(pc, "Faction.Player", 1)     -- (a figure till its scene: on the player's own side)
         end
         s:run(8)
         return s, h, g
@@ -3834,6 +3845,11 @@ local function bossStartsHere()
     check(has(h.storyGuids, GUID) and not has(g.storyGuids, GUID) and not has(g.storyGuids, STEP) and not has(g.globalTags, FLAG),
         "the host walks in alone: none of its start's flow steps and flags is taken in the guest's world")
     check(count(g.logs, "left for this world's own start of it") == 1, "said once in the guest's log")
+    -- (And the guest's copy, a figure on the player's own side, is an enemy for as long as the host's fight lasts: no
+    -- blow landed on it, and none of its own on the guest. The bench, 11-17, A-Hua.)
+    check(side(g) == "Faction.Enemy 0" and count(g.logs, "isn't started in this world: on the enemy's side") == 1,
+        "the guest's copy of it, not started there: on the enemy's side while the host's fight lasts (" .. side(g) .. ")")
+    check(side(h) == "Faction.Enemy 0", "(the host's own is as its scene left it)")
     step(h, "Map_Xigu-BP_FlowActor_C_7")                    -- (something else the host's flow does, the fight on)
     s:run(14)
     check(has(g.storyGuids, "Map_Xigu-BP_FlowActor_C_7"), "what the host's flow does after that is taken as ever")
@@ -3855,6 +3871,37 @@ local function bossStartsHere()
         and count(wg.logs, "is taken now: beaten in the host's world") == 1,
         "the host beats the boss, the guest never in: the start's steps are taken then, as before")
     allErrors(w)
+
+    -- The host's fight over with the boss alive (the host left, or lost), the guest's copy never started: back on the
+    -- player's own side, as the game had it, its own start still to come.
+    local f, fh, fg = world()
+    scene(f, fh)
+    bossStart(f)
+    f:run(6)
+    check(side(fg) == "Faction.Enemy 0", "(on the enemy's side through the host's fight)")
+    fh.hudLayout:UnRegisterBossHPBar(Session.enemyOn(fh, "boss"))
+    f:run(6)
+    check(side(fg) == "Faction.Player 1" and count(fg.logs, "is as the game had it again") == 1,
+        "the host's fight over, the boss alive: the guest's figure is back on the player's own side (" .. side(fg) .. ")")
+    allErrors(f)
+    -- A guest whose own scene comes during the host's fight: the game's own start makes it an enemy, and it's left so.
+    local o, oh, og = world()
+    scene(o, oh)
+    bossStart(o)
+    o:run(6)
+    scene(o, og)
+    oh.hudLayout:UnRegisterBossHPBar(Session.enemyOn(oh, "boss"))
+    o:run(6)
+    check(side(og) == "Faction.Enemy 0" and count(og.logs, "is as the game had it again") == 0,
+        "started in the guest's world meanwhile: left as the game has it when the host's fight ends")
+    allErrors(o)
+    -- The other way round, the guest's scene first: the host's own figure is the host's game's to start, never touched.
+    local r, rh, rg = world()
+    scene(r, rg)
+    rg.hudLayout:RegisterBossHPBar(Session.enemyOn(rg, "boss"))
+    r:run(8)
+    check(side(rh) == "Faction.Player 1", "the guest's fight, the host's copy not started: left on its own side (" .. side(rh) .. ")")
+    allErrors(r)
 
     -- Both walk in together: each world runs its own, nothing is kept back.
     local b, bh, bg = world()
@@ -3883,6 +3930,21 @@ local function bossStartsHere()
     check(has(ng.storyGuids, "Map_Xigu-BP_FlowActor_C_8") and count(ng.logs, "left for this world's own start") == 0,
         "and are taken")
     allErrors(n)
+
+    -- A figure's bar that only blinks in the host's world, up and down between two looks (as its player arrives by
+    -- it: the bench, 11-17, Wan Jun's and Peng Meng's): its B went out, nothing ended the mirror, and the guest stood
+    -- with a bar up and the walls shut for a fight that never was.
+    local k, kh, kg = world()
+    local blink = Session.enemyOn(kh, "boss")
+    kh.hudLayout:RegisterBossHPBar(blink)
+    kh.hudLayout:UnRegisterBossHPBar(blink)
+    k:run(2)
+    check(net(kg).partnerBosses["sp:boss"] == true, "(a bar that blinks on the host: its fight is shown on the guest)")
+    k:run(8)
+    check(net(kg).partnerBosses["sp:boss"] == nil and count(kg.logs, "is over there: over here too") == 1
+        and side(kg) == "Faction.Player 1",
+        "and ended there a few seconds on, the host in no fight: no bar, no walls, the figure as it was (" .. side(kg) .. ")")
+    allErrors(k)
 end
 
 local function doorsOpenedBefore()
