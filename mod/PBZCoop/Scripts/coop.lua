@@ -5458,11 +5458,12 @@ return function(api)
         -- (A bar that went up and came down between two looks here, a figure's as its player arrives by it: its B went
         -- out, no F 1 followed, and nothing ended its mirror in the other worlds: their bar up and their walls shut
         -- for a fight that never was. The bench, 11-17: Wan Jun's and Peng Meng's bars, up for 0.04 and 0.07 s. So
-        -- the fight's state is told again a moment after every B: "no fight", if that's what it is, ends there what
-        -- the B began.)
+        -- a moment after a B with no fight told since, "no fight" is told again: it ends there what the B began.)
         if net.fightRetellAt and now >= net.fightRetellAt then
             net.fightRetellAt = nil
-            net.fightToldAt = 0
+            if not net.toldFighting then
+                net.fightToldAt = 0
+            end
         end
         local fighting = now - (net.fightHereAt or -FIGHT_GAP_S) < FIGHT_GAP_S
         -- Down in the fight and waiting for it (F 2): the game took this player's bar down as they died, and "no fight"
