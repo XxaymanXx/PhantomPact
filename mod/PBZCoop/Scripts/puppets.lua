@@ -228,7 +228,12 @@ return function(api)
             end
             if valid(p.actor) and not game.isDead(p.actor) then
                 pcall(function()
+                    -- (One with no movement part at that moment, a boss as a scene began (the bench, 11-17): nothing to
+                    -- put back. Set all the same, each field was an error line in the game's log.)
                     local cmc = p.actor.CharacterMovement
+                    if not valid(cmc) then
+                        return
+                    end
                     cmc.bOrientRotationToMovement = true
                     if p.walkSpeed then
                         cmc.MaxWalkSpeed = p.walkSpeed      -- (else it keeps the last speed it was steered at)
@@ -491,8 +496,10 @@ return function(api)
             -- Only one thing may turn a copy: the game would turn it to where it's walking, this file to where the host's
             -- enemy looks, and the two pulling at each other every frame made it twitch. (The game's moves keep putting
             -- this back.)
-            cmc.bOrientRotationToMovement = false
-            cmc.MaxWalkSpeed = math.min(MAX_SPEED, speed)
+            if valid(cmc) then              -- (none: see release)
+                cmc.bOrientRotationToMovement = false
+                cmc.MaxWalkSpeed = math.min(MAX_SPEED, speed)
+            end
             actor:AddMovementInput({ X = vx / speed, Y = vy / speed, Z = 0.0 }, 1.0, false)
             if dist > NUDGE_CM then
                 actor:K2_SetActorLocation({ X = cur.X + dx * NUDGE_SHARE, Y = cur.Y + dy * NUDGE_SHARE,
