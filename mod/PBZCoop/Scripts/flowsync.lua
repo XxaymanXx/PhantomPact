@@ -28,6 +28,7 @@ return function(api)
     local ELSEWHERE_MAX = 3000      -- guest: flow steps of levels it isn't on kept waiting, at most
     local START_TAIL_S = 15         -- guest: what the host tells this long after a scene of its own is still that scene's
     local FELL_S = 10               -- guest: a scene of the host's begun this soon after a boss fell there is that fall's
+    local YOUNG_S = 4               -- guest: what the host tells is taken once it's this old (a scene may be about to begin)
     -- Never sent: the game's mode, the screen's own state, and the states of a moment (a fight, a dodge, a lock-on).
     local SKIP = { "^GameMode%.", "^UI%.", "^State%.", "^Combat%.", "^Battle%.", "^Input%.", "^Camera%.", "^Ability%.",
         "^Status%.", "^Buff%.", "^Player%.State" }
@@ -243,7 +244,7 @@ return function(api)
         end
         for item in items:gmatch("%S+") do
             if #item <= 200 then
-                flow.queue[#flow.queue + 1] = { kind = kind, item = item, host = from == nil }
+                flow.queue[#flow.queue + 1] = { kind = kind, item = item, host = from == nil, at = os.clock() }
             end
         end
     end
@@ -930,13 +931,28 @@ return function(api)
             game.granting = false
             return
         end
+        -- (What the host told a moment ago waits: a story trigger runs its own step a second or two before its scene,
+        -- and told in that gap the step was taken here before the scene's window opened: this world's trigger gone, its
+        -- boss never started, 326 again in one start out of three. A few seconds old, the window has caught it.)
+        local now, ripe = os.clock(), 0
+        local function young(q)
+            return q.host and q.at ~= nil and now - q.at < YOUNG_S
+        end
+        for _, q in ipairs(flow.queue) do
+            ripe = ripe + (young(q) and 0 or 1)
+        end
+        if ripe == 0 and next(flow.pending) == nil then
+            return
+        end
         -- (Only bells waiting: theirs alone are read, not the thousands of flags, once a second.)
-        local have = #flow.queue > 0 and read() or { t = {}, n = {}, b = woken }
+        local have = ripe > 0 and read() or { t = {}, n = {}, b = woken }
         local done, kept, lost = 0, {}, 0
         game.granting = true        -- (what a flow step hands out isn't sent back as found)
         for _, q in ipairs(flow.queue) do
             local key = q.kind .. " " .. q.item
-            if have[q.kind][q.item] then
+            if young(q) then
+                kept[#kept + 1] = q
+            elseif have[q.kind][q.item] then
                 flow.again[key] = nil
             else
                 local ok = pcall(function()
