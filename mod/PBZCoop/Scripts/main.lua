@@ -474,7 +474,8 @@ local function openLink()
         end
         link[name] = fn
     end
-    for _, name in ipairs({ "layout", "read", "pointer", "paste", "party", "player", "send_to", "pad_grab" }) do      -- only ever faster: without them, reads go through UE4SS (pad_grab: pad 2's Options, localcoop.lua)
+    for _, name in ipairs({ "layout", "read", "pointer", "paste", "party", "player", "send_to", "pad_grab", "read_stats",
+        "read_look" }) do      -- only ever faster: without them, reads go through UE4SS (pad_grab: pad 2's Options, localcoop.lua)
         link[name] = package.loadlib(dll, "pp_" .. name)
     end
     if not link.now() then
@@ -751,6 +752,21 @@ LoopInGameThreadWithDelay(500, function()
     if text then
         for line in text:gmatch("[^\r\n]+") do
             runCommand(line)
+        end
+    end
+    -- What main.dll's fast reads met (native/lua_link.hpp), once a minute when it changed. Passed over: an address gone
+    -- stale, looked at and not read, no harm. One caught at a guard page is the harm the look keeps out: said loudly.
+    local link = api.link
+    if link and link.read_stats and os.clock() >= (api.readsAt or 0) then
+        api.readsAt = os.clock() + 60
+        local ok, over, caught, guard, paged = pcall(link.read_stats)
+        if ok and type(over) == "number" and over + caught + guard + paged > 0 then
+            local said = string.format("%d passed over, %d caught, %d not paged in", over, caught, paged)
+                .. (guard > 0 and string.format(", and %d AT A GUARD PAGE", guard) or "")
+            if said ~= api.readsSaid then
+                api.readsSaid = said
+                log("Fast reads so far: " .. said .. ".")
+            end
         end
     end
     return false

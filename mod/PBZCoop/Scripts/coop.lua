@@ -696,7 +696,10 @@ return function(api)
             end
             reach.at = reach.at + 1
             local x, y, z = nil, nil, nil
-            if addr ~= net.ghostAddr and not net.ghostSlots[addr] then    -- (an address a ghost took over from an enemy, until facts are cleared)
+            -- (Asked first whether it's still there: the list is up to half a second old, and its enemies can be gone by
+            -- now, a rest's or a death's refresh, a camp put away. Read by its address all the same, the fast read went
+            -- through whatever that memory holds now.)
+            if addr ~= net.ghostAddr and not net.ghostSlots[addr] and valid(e) then    -- (an address a ghost took over from an enemy, until facts are cleared)
                 x, y, z = game.where(e, addr)
             end
             if x ~= nil and (inReach(x, y, z, origin) or (origin2 ~= nil and inReach(x, y, z, origin2))

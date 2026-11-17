@@ -1131,7 +1131,12 @@ return function(api)
         end
         hm:RemoveActorFromHatredList(p1)
         local out = {}
-        pcall(function() StaticFindObject("/Script/SGameAI.Default__SGameAIFunctionLibrary"):GetTargetActor(e.Controller, out) end)
+        pcall(function()
+            local controller = e.Controller        -- (asked first: with none, the game's own call took nothing, pbz.lua's currentTarget)
+            if valid(controller) then
+                StaticFindObject("/Script/SGameAI.Default__SGameAIFunctionLibrary"):GetTargetActor(controller, out)
+            end
+        end)
         if valid(out.Target) and out.Target:GetAddress() == p1:GetAddress() then
             local picker = nil
             e.Controller.SGameAIComponent.SpawnedAIScripts:ForEach(function(_, sc)
@@ -1177,7 +1182,12 @@ return function(api)
             return
         end
         local out = {}
-        pcall(function() StaticFindObject("/Script/SGameAI.Default__SGameAIFunctionLibrary"):GetTargetActor(e.Controller, out) end)
+        pcall(function()
+            local controller = e.Controller        -- (asked first: with none, the game's own call took nothing, pbz.lua's currentTarget)
+            if valid(controller) then
+                StaticFindObject("/Script/SGameAI.Default__SGameAIFunctionLibrary"):GetTargetActor(controller, out)
+            end
+        end)
         local p2 = state.p2Pawn
         local toP2 = valid(out.Target) and valid(p2) and out.Target:GetAddress() == p2:GetAddress()
         local pc1 = getPlayer1()

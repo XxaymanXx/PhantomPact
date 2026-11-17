@@ -303,6 +303,25 @@ struct Layout {
     ptrdiff_t root = 0, location = 0, rotation = 0, attach_parent = 0;  // actor -> scene component -> its fields
     ptrdiff_t movement = 0, velocity = 0, mode = 0;                     // actor -> movement component -> its fields
     ptrdiff_t attributes = 0, health = 0, max_health = 0, posture = 0;  // actor -> attribute set -> CurrentValue floats
+    // The bytes read of each of the four, from its lowest field to the end of its highest: what's looked at first (span).
+    ptrdiff_t actor_from = 0, root_from = 0, movement_from = 0, attributes_from = 0;
+    size_t actor_bytes = 0, root_bytes = 0, movement_bytes = 0, attributes_bytes = 0;
+
+    void span() {
+        const auto over = [](std::initializer_list<std::pair<ptrdiff_t, size_t>> fields, ptrdiff_t& from, size_t& bytes) {
+            ptrdiff_t lo = fields.begin()->first, hi = lo;
+            for (const auto& [at, size] : fields) {
+                lo = std::min(lo, at);
+                hi = std::max(hi, at + static_cast<ptrdiff_t>(size));
+            }
+            from = lo;
+            bytes = static_cast<size_t>(hi - lo);
+        };
+        over({{root, 8}, {movement, 8}, {attributes, 8}}, actor_from, actor_bytes);
+        over({{attach_parent, 8}, {location, 24}, {rotation + 8, 8}}, root_from, root_bytes);
+        over({{velocity, 24}, {mode, 1}}, movement_from, movement_bytes);
+        over({{health, 4}, {max_health, 4}, {posture, 4}}, attributes_from, attributes_bytes);
+    }
 };
 inline Layout layout;
 
@@ -316,6 +335,72 @@ inline bool bad_read(DWORD code) {
     return code == EXCEPTION_ACCESS_VIOLATION || code == STATUS_GUARD_PAGE_VIOLATION || code == EXCEPTION_IN_PAGE_ERROR;
 }
 
+// What these reads met, for the log (pp_read_stats). The game thread's alone.
+struct ReadStats {
+    long long passed_over = 0;      // not read: a page not there, not readable, or a guard page
+    long long caught = 0;           // an access violation caught all the same: the page went between the look and the read
+    long long guard = 0;            // a guard page touched (none, with the look first)
+    long long paged = 0;            // a page that couldn't be paged in
+};
+inline ReadStats read_stats;
+inline bool look_first = true;      // pp_read_look(0): the reads as they were, for a test that counts what they meet
+
+inline int caught_read(DWORD code) {
+    if (!bad_read(code)) return EXCEPTION_CONTINUE_SEARCH;
+    (code == STATUS_GUARD_PAGE_VIOLATION ? read_stats.guard : code == EXCEPTION_IN_PAGE_ERROR ? read_stats.paged : read_stats.caught)++;
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
+// Whether these bytes can be read with no harm done: committed, readable, and no guard page. A caught read still does
+// harm at a guard page: the touch takes the guard off, and where that was the guard of another thread's stack, that
+// thread can't grow its stack past it any more: an access violation there some seconds on, in nothing of ours, the
+// game gone with no Lua error (a report on 1.7.3, Windows 10: the host's game gone a few seconds after a guest was
+// back, five times). An address gone stale is whatever its memory holds now, and what's behind a pointer read off it can
+// be anywhere. So each page is looked at first and never touched: about a microsecond a look, four a character.
+// (from, to: the bounds of the region the span begins in, for the look to keep.)
+inline bool readable(uintptr_t at, size_t bytes, uintptr_t* from = nullptr, uintptr_t* to = nullptr) {
+    constexpr DWORD READS = PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE |
+                            PAGE_EXECUTE_WRITECOPY;
+    const uintptr_t end = at + bytes;
+    if (at < 0x10000 || end < at) return false;
+    for (bool first = true; at < end; first = false) {
+        MEMORY_BASIC_INFORMATION m;
+        if (!VirtualQuery(reinterpret_cast<LPCVOID>(at), &m, sizeof m)) return false;
+        if (m.State != MEM_COMMIT || (m.Protect & (PAGE_GUARD | PAGE_NOACCESS)) || !(m.Protect & READS)) return false;
+        const uintptr_t base = reinterpret_cast<uintptr_t>(m.BaseAddress);
+        if (first && from && to) *from = base, *to = base + m.RegionSize;
+        at = base + m.RegionSize;
+    }
+    return true;
+}
+
+// A look is kept half a second: the same few regions hold every character read, sixty times a second, and a look
+// each time was 2 microseconds a character against 10 nanoseconds without. What's kept can hardly turn harmful
+// meanwhile: a page found committed with no guard gets a guard by being freed and handed out again as a stack (a
+// stack's own guard moves down into pages that were only reserved), or by someone's VirtualProtect, both rare and
+// neither likely inside half a second; freed alone it's an access violation, caught, no harm. Only the region looked
+// at is kept, by its own bounds: a stack's guard page is a region of its own and gets a look of its own.
+struct Look {
+    uintptr_t from = 0, to = 0;
+    ULONGLONG at = 0;
+};
+constexpr ULONGLONG LOOK_KEPT_MS = 500;
+inline std::array<Look, 256> looks;     // by the address's 64 KB block
+
+inline bool looked(uintptr_t at, size_t bytes) {
+    if (!look_first) return true;
+    const ULONGLONG now = GetTickCount64();
+    Look& kept = looks[(at >> 16) & 255];
+    if (at >= kept.from && at + bytes <= kept.to && at + bytes >= at && now - kept.at < LOOK_KEPT_MS) return true;
+    uintptr_t from = 0, to = 0;
+    if (!readable(at, bytes, &from, &to)) {
+        read_stats.passed_over++;
+        return false;
+    }
+    kept = {from, to, now};
+    return true;
+}
+
 template <typename T>
 inline T field(uintptr_t object, ptrdiff_t offset) {
     return *reinterpret_cast<const T*>(object + offset);
@@ -325,10 +410,15 @@ inline T field(uintptr_t object, ptrdiff_t offset) {
 // that, so the caller asks the game. No C++ objects in here: __try can't live with their unwinding.
 inline bool read_character(uintptr_t actor, const Layout& l, Character& out) {
     __try {
+        if (!looked(actor + l.actor_from, l.actor_bytes)) return false;
         const auto root = field<uintptr_t>(actor, l.root);
         const auto movement = field<uintptr_t>(actor, l.movement);
         const auto attributes = field<uintptr_t>(actor, l.attributes);
-        if (!root || !movement || !attributes || field<uintptr_t>(root, l.attach_parent)) return false;
+        if (!root || !movement || !attributes) return false;
+        if (!looked(root + l.root_from, l.root_bytes) || !looked(movement + l.movement_from, l.movement_bytes) ||
+            !looked(attributes + l.attributes_from, l.attributes_bytes))
+            return false;
+        if (field<uintptr_t>(root, l.attach_parent)) return false;
         out.x = field<double>(root, l.location);
         out.y = field<double>(root, l.location + 8);
         out.z = field<double>(root, l.location + 16);
@@ -341,15 +431,16 @@ inline bool read_character(uintptr_t actor, const Layout& l, Character& out) {
         out.max_hp = field<float>(attributes, l.max_health);
         out.posture = field<float>(attributes, l.posture);
         return true;
-    } __except (bad_read(GetExceptionCode()) ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
+    } __except (caught_read(GetExceptionCode())) {
         return false;
     }
 }
 
 inline uintptr_t read_pointer(uintptr_t object, ptrdiff_t offset) {
     __try {
+        if (!looked(object + offset, sizeof(uintptr_t))) return 0;
         return field<uintptr_t>(object, offset);
-    } __except (bad_read(GetExceptionCode()) ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
+    } __except (caught_read(GetExceptionCode())) {
         return 0;
     }
 }
@@ -376,8 +467,30 @@ extern "C" __declspec(dllexport) int pp_layout(void* lua) {
     l.health = next();
     l.max_health = next();
     l.posture = next();
+    l.span();
     l.known = true;
     layout = l;
+    return 0;
+}
+
+// pp_read_stats(): what the reads met since the start: passed over (a page not there, not readable or a guard page),
+// and caught all the same: access violations, guard pages, pages that couldn't be paged in.
+extern "C" __declspec(dllexport) int pp_read_stats(void* lua) {
+    using namespace lua_link;
+    const Api* a = api();
+    if (!a) return 0;
+    const State s{lua};
+    for (long long v : {read_stats.passed_over, read_stats.caught, read_stats.guard, read_stats.paged}) a->set_number(&s, static_cast<double>(v));
+    return 4;
+}
+
+// pp_read_look(0 or 1): the look before each read off, as the reads were before it, or on again. For a test alone.
+extern "C" __declspec(dllexport) int pp_read_look(void* lua) {
+    using namespace lua_link;
+    const Api* a = api();
+    if (!a) return 0;
+    const State s{lua};
+    if (a->top(&s) >= 1) look_first = a->get_number(&s, 1) != 0;
     return 0;
 }
 
