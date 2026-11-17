@@ -919,6 +919,36 @@ local function aCopyWrittenBack()
     check(hpOf(bossH) == held and field(bossH, "dead") ~= true,
         "a party, two guests' games writing theirs at once: the host's boss keeps its health (" .. held .. " -> " .. hpOf(bossH) .. ")")
     allErrors(p)
+
+    -- The same write in the host's own world (the bench of 11-17: her health and its most back to base every few
+    -- seconds, her posture left as it was). To the scaling that's a new body: scaled again, and its guard bar was
+    -- multiplied again at each write, 34443 to 72 billion in a minute. Its health rises again; its guard bar, still
+    -- what it was given, stays. With two players and with three.
+    for _, roles in ipairs({ { "Host", "Guest" }, { "Host", "Guest", "Guest" } }) do
+        local w = Session.new(SIM_SCRIPTS, roles, #roles > 2, list, "CoopBossPosture = 200\n")
+        local wh = w.pcs[1]
+        w:run(4)
+        Session.moveTo(wh, 2800, 2900)
+        Session.moveTo(w.pcs[2], 3200, 3100)
+        w:run(4)
+        wh.hudLayout:RegisterBossHPBar(Session.enemyOn(wh, "boss"))
+        w:run(3)
+        local onW = Session.enemyOn(wh, "boss")
+        local most, guard = select(2, Fake.health(onW)), attr(onW, "Shachi_Max").CurrentValue
+        for _ = 1, 5 do
+            writeBase(onW, 5000)
+            w:run(3)
+        end
+        check(most > 5000 and select(2, Fake.health(onW)) == most and attr(onW, "Shachi_Max").CurrentValue == guard,
+            #roles .. " players, the host's own game writes its boss's health back five times: scaled again each time, its "
+                .. "guard bar as it was (" .. tostring(guard) .. " -> " .. tostring(attr(onW, "Shachi_Max").CurrentValue) .. ")")
+        writeBase(onW, 5000, 400)       -- (a new body's numbers: its posture at base too)
+        w:run(3)
+        check(select(2, Fake.health(onW)) == most and attr(onW, "Shachi_Max").CurrentValue == guard,
+            "and written back with its posture too, as a new body is: its guard bar scaled again, once ("
+                .. tostring(attr(onW, "Shachi_Max").CurrentValue) .. ")")
+        allErrors(w)
+    end
 end
 
 -- Three or more players. A party has no handing over (its relay carries enemy lines from the host alone), but the host's
