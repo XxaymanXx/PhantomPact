@@ -8,6 +8,7 @@
 //                                       and frame rates: how far behind it shows, and how smoothly (latency.hpp)
 #include "relay.hpp"
 #include "latency.hpp"
+#include "lua_link.hpp"
 
 #include <limits>
 #include <queue>
@@ -2203,6 +2204,83 @@ void test_party_riding() {
     check(sees(b.box, 2, out) && out.x > last - 60 && alone >= 2 * 20 && alone <= 2 * 34, what);
 }
 
+// main.dll's fast reads (lua_link.hpp) at memory that's gone, and at a guard page: an address gone stale is whatever
+// its memory holds now. Caught, a read at a guard page still took the guard off (the last three checks: the reads as
+// they were), and where that was another thread's stack guard, that thread couldn't grow its stack any more. The look
+// first passes such a page over and never touches it.
+void test_fast_reads() {
+    using namespace lua_link;
+    std::puts("main.dll's fast reads:");
+    const auto guarded = [](const void* at) {
+        MEMORY_BASIC_INFORMATION m;
+        VirtualQuery(at, &m, sizeof m);
+        return (m.Protect & PAGE_GUARD) != 0;
+    };
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    const size_t page = si.dwPageSize;
+    auto* mem = static_cast<char*>(VirtualAlloc(nullptr, 4 * page, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+    DWORD old = 0;
+    char* guard = mem + page;
+    VirtualProtect(guard, page, PAGE_READWRITE | PAGE_GUARD, &old);
+    char* gone = mem + 3 * page;
+    VirtualFree(gone, page, MEM_DECOMMIT);
+    read_stats = {};
+    look_first = true;
+
+    check(read_pointer(reinterpret_cast<uintptr_t>(guard), 16) == 0 && read_stats.passed_over == 1 && read_stats.guard == 0 &&
+              guarded(guard),
+          "a pointer at a guard page: passed over, nothing caught, and the page keeps its guard");
+    check(read_pointer(reinterpret_cast<uintptr_t>(gone), 0) == 0 && read_stats.passed_over == 2 && read_stats.caught == 0,
+          "a page that's gone: passed over");
+    check(read_pointer(0, 8) == 0 && read_pointer(0x1000, 8) == 0, "an empty address: nothing");
+    *reinterpret_cast<uintptr_t*>(mem + 64) = 0x1122334455667788ull;
+    check(read_pointer(reinterpret_cast<uintptr_t>(mem), 64) == 0x1122334455667788ull, "a good page: read");
+    check(read_pointer(reinterpret_cast<uintptr_t>(guard) - 4, 0) == 0 && guarded(guard),
+          "a pointer half in a guard page: passed over");
+
+    Layout l;
+    l.root = 0x10;
+    l.movement = 0x18;
+    l.attributes = 0x20;
+    l.attach_parent = 0x8;
+    l.location = 0x20;
+    l.rotation = 0x40;
+    l.velocity = 0x10;
+    l.mode = 0x30;
+    l.health = 0x4;
+    l.max_health = 0x8;
+    l.posture = 0xc;
+    l.span();
+    auto* actor = reinterpret_cast<uintptr_t*>(mem + 256);
+    actor[2] = reinterpret_cast<uintptr_t>(guard);              // its scene component "is" the guard page
+    actor[3] = reinterpret_cast<uintptr_t>(mem + 1024);
+    actor[4] = reinterpret_cast<uintptr_t>(mem + 2048);
+    Character c{};
+    const long long before = read_stats.passed_over;
+    check(!read_character(reinterpret_cast<uintptr_t>(actor), l, c) && read_stats.passed_over == before + 1 && guarded(guard),
+          "a character whose scene component is a guard page: passed over, the guard kept");
+    actor[2] = reinterpret_cast<uintptr_t>(mem + 512);
+    *reinterpret_cast<double*>(mem + 512 + 0x20) = 123.5;
+    *reinterpret_cast<float*>(mem + 2048 + 0x4) = 77.0f;
+    check(read_character(reinterpret_cast<uintptr_t>(actor), l, c) && c.x == 123.5 && c.hp == 77.0, "a whole character: read");
+    // (A look is kept half a second: a page that goes meanwhile is an access violation, caught, and no more.)
+    char* later = mem + 2 * page;
+    *reinterpret_cast<uintptr_t*>(later + 8) = 42;
+    const bool was = read_pointer(reinterpret_cast<uintptr_t>(later), 8) == 42;
+    VirtualFree(later, page, MEM_DECOMMIT);
+    check(was && read_pointer(reinterpret_cast<uintptr_t>(later), 8) == 0 && read_stats.caught == 1 && read_stats.guard == 0,
+          "a page that goes within a kept look: caught, nothing read");
+
+    look_first = false;
+    check(read_pointer(reinterpret_cast<uintptr_t>(guard), 16) == 0 && read_stats.guard == 1, "as the reads were: a pointer at a guard page is caught");
+    check(!guarded(guard), "and the page has lost its guard: the harm a caught read still does");
+    check(read_pointer(reinterpret_cast<uintptr_t>(gone), 0) == 0 && read_stats.caught == 2, "as they were: a page that's gone is caught");
+    look_first = true;
+    read_stats = {};
+    VirtualFree(mem, 0, MEM_RELEASE);
+}
+
 int run_tests(int argc, wchar_t** argv) {
     test_timeline();
     test_timeline_odd();
@@ -2223,6 +2301,7 @@ int run_tests(int argc, wchar_t** argv) {
     test_copies_last();
     test_six();
     test_party_edges();
+    test_fast_reads();
     if (opt_number(argc, argv, L"--sockets", 1) != 0) {
         try {
             test_sockets(static_cast<int>(opt_number(argc, argv, L"--port", 47960)));

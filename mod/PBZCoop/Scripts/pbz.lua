@@ -3930,10 +3930,15 @@ return function(api)
         return found
     end
 
+    -- (Its controller asked first: an enemy with none, put away by its spawner or between two bodies, went into the
+    -- game's own call as nothing, and what the game does with nothing there no pcall catches.)
     local function currentTarget(actor)
         local out = {}
         local ok = pcall(function()
-            StaticFindObject("/Script/SGameAI.Default__SGameAIFunctionLibrary"):GetTargetActor(actor.Controller, out)
+            local controller = actor.Controller
+            if valid(controller) then
+                StaticFindObject("/Script/SGameAI.Default__SGameAIFunctionLibrary"):GetTargetActor(controller, out)
+            end
         end)
         return ok and valid(out.Target) and out.Target or nil
     end
@@ -4361,7 +4366,12 @@ return function(api)
         for _, actor in pairs(enemies) do
             if valid(actor) and not game.isDead(actor) then
                 pcall(function()
+                    -- (Its hatred part and its picker asked first, as its controller is: this runs over every enemy
+                    -- listed, a camp put away among them, each time a partner goes silent or their figure is hidden.)
                     local hatred = actor.BP_PBZHatredManagerComponent
+                    if not valid(hatred) then
+                        return
+                    end
                     hatred:RemoveActorFromHatredList(ghost)
                     local target = currentTarget(actor)
                     if target and target:GetAddress() == ghost:GetAddress() then
@@ -4369,8 +4379,10 @@ return function(api)
                             hatred:AddActorToHatredList(pawn, {})
                         end
                         local picker = targetPicker(actor)
-                        picker.LastSwitchTime = 0
-                        picker:TrySwitchTarget()
+                        if valid(picker) then
+                            picker.LastSwitchTime = 0
+                            picker:TrySwitchTarget()
+                        end
                     end
                 end)
             end
