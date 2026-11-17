@@ -190,9 +190,8 @@ return function(api)
     -- word, as is one last seen open before a load or time alone on the map. Doors only: a lever is as it was. The main
     -- session's second review, 11-16. shutHere: name -> true; openAt: name -> when a look last saw it open.
     local shutHere, openAt = {}, {}
-    -- shutSeenAt: name -> when a look last saw it shut. A guest's press counts from there: one made while nobody else
-    -- was on the map, or in a quiet, is seen at the first look after, more than PRESS_S on. (The fourth review.)
-    local shutSeenAt = {}
+    -- lookedAt: the last look at them all, a partner on the map. A guest's press counts from there: one made while nobody
+    -- else was on the map, or in a quiet, is seen at the first look after, more than PRESS_S on. (The fourth review.)
     -- A guest tells only an opening of its own player's doing: one within PRESS_S of their walk up to a switch (the end
     -- of the game's own walk to it, as a press begins). A door or lever a guest's world opens by itself (a scene's, a
     -- quest step's, a fight's end there, that guest further on in the story) opened the host's copy, and wrote that
@@ -291,7 +290,7 @@ return function(api)
     local function onSwitchMap()
         if net.localMap ~= switchMap then
             switchSeen, switchMap = {}, net.localMap
-            shutHere, openAt, shutSeenAt = {}, {}, {}
+            shutHere, openAt = {}, {}
             local st = mapState(switchMap)
             openNow, pending = st.open, st.pending
         end
@@ -361,6 +360,7 @@ return function(api)
     local function watchSwitches(here, alone)
         onSwitchMap()
         local now = os.clock()
+        local since = alone and now or (blockers.lookedAt or now)
         for _, s in ipairs(FindAllOf("PBZSwitchBase") or {}) do
             local shared, cn
             if valid(s) then
@@ -382,10 +382,9 @@ return function(api)
                         end
                     end
                     openNow[name] = open or nil
-                    local was, shutSeen = switchSeen[name], shutSeenAt[name]
+                    local was = switchSeen[name]
                     switchSeen[name] = open
-                    shutSeenAt[name] = not open and now or nil
-                    if was == false and open and (coop.isHost() or blockers.walkedUpAt >= (shutSeen or now) - PRESS_S) then
+                    if was == false and open and (coop.isHost() or blockers.walkedUpAt >= since - PRESS_S) then
                         local okL, at = pcall(function() return s:K2_GetActorLocation() end)
                         if okL and at and api.distance(at, here) <= NEAR_CM then
                             blockers.sent = blockers.sent + 1
@@ -395,6 +394,9 @@ return function(api)
                     end
                 end
             end
+        end
+        if not alone then
+            blockers.lookedAt = now
         end
     end
 
@@ -501,7 +503,7 @@ return function(api)
             log(string.format("%d chains and switches waited for here: forgotten (%s).", held, why))
         end
         byMap, seen, switchSeen = {}, {}, {}
-        shutHere, openAt, shutSeenAt = {}, {}, {}
+        shutHere, openAt = {}, {}
         seenMap, switchMap = false, false
         owed, brokenNow, openNow, pending = {}, {}, {}, {}
     end

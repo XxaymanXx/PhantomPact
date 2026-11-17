@@ -561,6 +561,7 @@ local api = {
     onGameThread = onGameThread,
     state = state,
     version = VERSION,
+    protocol = PROTOCOL,
 }
 api.lang = dofile(SCRIPT_DIR .. "lang.lua")(SCRIPT_DIR)
 api.game = dofile(SCRIPT_DIR .. "pbz.lua")(api)

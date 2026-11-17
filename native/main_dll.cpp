@@ -124,6 +124,16 @@ void run_from(const std::wstring& start_path) {
     relay::Ini start = relay::read_ini(start_path);
     DeleteFileW(start_path.c_str());
     if (start["role"].empty()) return;
+    // (Scripts of another version over this main.dll: 1.7.3's or older, extracted over it while the game ran, write no
+    // protocol, and linked through it with this version's players in their own words. Their status tip says why.)
+    if (start["protocol"] != std::to_string(relay::PROTOCOL)) {
+        const std::string stopped = "role=" + start["role"] + " connected=no stopped=yes error=dlls\\main.dll is another "
+                                    "version's (was the game open while Phantom Pact was changed?). Close the game, "
+                                    "extract the zip again, then start the game.";
+        relay::write_atomic(mod_dir + L"\\net_status.txt", stopped + "\n");
+        relay::mail.set_status(stopped);
+        return;
+    }
     DeleteFileW((mod_dir + L"\\relay_error.txt").c_str());
     const std::wstring log_path = mod_dir + L"\\relay_log.txt";
     relay::write_atomic(log_path, "");

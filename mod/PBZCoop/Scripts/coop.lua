@@ -1907,7 +1907,8 @@ return function(api)
     -- (Any partner nearer, in a fight or not: the one about to fight, 35 m off and not told yet, is nearer than a
     -- watcher whose stray bar comes then. Counted only within 30 m or in a fight, the watcher's copy was made theirs
     -- and told, and the fighter's lost fight never started over. A guest's own fight begun from further off, a
-    -- partner nearer, waits till they're within 30 m; its B is held till then (announceBoss). The fourth review.)
+    -- partner nearer, waits till they're within 30 m; its B is held till then (announceBoss) if it sleeps on the host:
+    -- told, 344's "no fight" ends it 4 s on. The fourth review.)
     function handover.nobodyNearer(at, gap)
         for _, p in ipairs(partners()) do
             local t = p.target
@@ -1929,8 +1930,12 @@ return function(api)
             -- (Nearest, for the race it was made for: no partner's fight told yet. With one told, a stray bar is that
             -- fight's mirror again whoever is nearest: the fight had moved away from where the boss sleeps on the host,
             -- where a held copy stays, and the watcher 43 m off was the nearest to theirs. The third review.)
+            -- (And one this player struck from within the game's own 45 m, no partner's fight on: theirs, whoever's
+            -- nearer. Held, the blows of one 40 m off, a thrown blade's or a cannon's, went to the host and wore the
+            -- boss down while its copy stood still, nobody in its fight. A stray bar is no blow. The fifth review.)
             yes = gap <= (was and handover.BY_FAR_CM or handover.BY_CM) or net.joinedBoss == name
                 or (own and (was or (net.partnerBosses[name] == nil and handover.nobodyNearer(at, gap))))
+                or (net.struck[name] and gap <= handover.BY_FAR_CM and net.partnerBosses[name] == nil)
             local now, c = os.clock(), handover.calm[addr]
             -- (A partner's fight with it shown here: its copy isn't calmed meanwhile. Calmed, the game ended "its fight"
             -- and took the bar down, the mirror with it: the watcher saw no bar for the fight. The bench.)
@@ -3558,10 +3563,13 @@ return function(api)
                 game.forgetMirrors()
             end
             -- (A fight shown here that isn't coming back now, its player down and waiting say, is let go: kept, its B told
-            -- again later was dropped as shown already, and the fight had a bar here and no walls.)
+            -- again later was dropped as shown already, and the fight had a bar here and no walls. Ended as any fight is,
+            -- its copy back on its own side if it was put on the enemy's for it, game.enemySide: dropped bare, a figure this
+            -- world hasn't started stayed an enemy with no fight, alone after co-op too. The fifth review.)
             for name in pairs(net.partnerBosses) do
                 if not net.pendingBosses[name] then
-                    net.partnerBosses[name], net.fightOf[name] = nil, nil
+                    endBossFight(name, enemyByName[name])
+                    net.fightOf[name] = nil
                 end
             end
             if again > 0 then
@@ -4598,8 +4606,15 @@ return function(api)
                     game.keepBossBar(boss)
                     -- (One the game hasn't started in this world, a figure on the player's own side: no blow landed
                     -- on it, none of its own on this player. pbz.lua's game.enemySide. A guest's copy only: the
-                    -- host's is its own game's to start and to run.)
-                    if isClient() and game.enemySide and game.enemySide(boss) == "put" then
+                    -- host's is its own game's to start and to run. And only one that follows the host's
+                    -- fight: a party guest's own copy of another guest's fight follows no moves, and on the
+                    -- enemy's side it was a figure that never fought back, whose death was the boss's everywhere.
+                    -- And only while that fight is told as on there, as stillFought has it: a bar that only
+                    -- blinked there tells none, and blows here till 344's end went to a figure in no fight there.)
+                    if isClient() and game.enemySide and net.hostBosses[name] and api.puppets
+                        and api.puppets.follows(boss:GetAddress())
+                        and (net.party and peerOf(net.fightOf[name] or 1).fights or (not net.party and net.partnerFighting))
+                        and game.enemySide(boss) == "put" then
                         log(name .. " isn't started in this world: on the enemy's side while the other player's fight with it lasts.")
                     end
                 end

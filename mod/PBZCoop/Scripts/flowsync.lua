@@ -758,7 +758,17 @@ return function(api)
                     s.before[name] = true
                 end
             end
+            if s.endAt or not s.sceneAt then
+                s.sceneAt = now         -- (a scene begins: the wait's first, or another in its tail)
+            end
             s.endAt = nil
+            -- (A scene begun within FELL_S of a boss's fall is that fall's. Not a fall while it plays or after: a
+            -- partner's elite, or this player's own, falling then took a story boss's start for a win's, 326 again.)
+            for name, at in pairs(net.killedAt or {}) do
+                if at >= s.sceneAt - FELL_S and at <= s.sceneAt + 2 and net.bossFell and net.bossFell[name] then
+                    s.fell = true
+                end
+            end
         elseif s.open and not s.endAt then
             s.endAt = now
         end
@@ -791,10 +801,8 @@ return function(api)
                 -- with it, which this world runs by its own fall only. Held under the next phase, a guest down or away
                 -- at the fall had none of the win till that phase fell there, and none at all if the session ended
                 -- first. The fourth review.)
-                for name, at in pairs(net.killedAt or {}) do
-                    if at >= s.at - FELL_S and net.bossFell and net.bossFell[name] then
-                        waits = {}
-                    end
+                if s.fell then
+                    waits = {}
                 end
                 table.sort(waits)
                 local boss = table.concat(waits, " and ")
@@ -815,11 +823,27 @@ return function(api)
             end
         end
         for boss, held in pairs(flow.startHeld) do
-            -- (Each of them beaten there or started here.)
-            local beaten, done = true, true
+            -- (Each of them beaten there or started here. Once one is beaten there, the host not down since, another
+            -- whose fight there is over isn't waited for: an elite the host left, a bar that only blinked, which nothing
+            -- else would end. One whose fight ended with the host down is still the host's to come back to.)
+            local beaten, done, fell, over = true, true, nil, false
             for _, name in ipairs(held.bosses) do
-                beaten = beaten and net.hostKilled[name] == true
-                done = done and (net.hostKilled[name] == true or not unstarted(name))
+                if net.hostKilled[name] then
+                    fell = math.max(fell or 0, (net.killedAt or {})[name] or 0)
+                end
+            end
+            local downAt = net.zeroSince and now or net.downSeenAt
+            local left = fell ~= nil and not (downAt and downAt >= fell)
+            for _, name in ipairs(held.bosses) do
+                local dead = net.hostKilled[name] == true
+                beaten = beaten and dead
+                if not dead and unstarted(name) then
+                    if left and not hostBosses[name] then
+                        over = true
+                    else
+                        done = false
+                    end
+                end
             end
             if done then
                 for _, q in ipairs(held) do
@@ -827,7 +851,8 @@ return function(api)
                 end
                 flow.startHeld[boss] = nil
                 log(string.format("Story flow: the start of the host's fight with %s (%d) is taken now: %s.", boss, #held,
-                    beaten and "beaten in the host's world" or "started in this world"))
+                    beaten and "beaten in the host's world"
+                        or over and "one beaten in the host's world, the others' fight there over" or "started in this world"))
             end
         end
     end
@@ -847,7 +872,13 @@ return function(api)
             flow.start, flow.startHeld = { open = false, items = {}, before = {} }, {}
             return
         end
-        holdStarts(os.clock())
+        -- (What the host told a moment ago waits: see below. One clock for the tick: a step of another level left in
+        -- the queue as told a moment ago isn't taken here as old a moment later.)
+        local now = os.clock()
+        local function young(q)
+            return q.host and q.at ~= nil and now - q.at < YOUNG_S
+        end
+        holdStarts(now)
         -- A level's own flow steps are taken on that level only. Marked done on a guest who stood on another, a level
         -- not yet played there came up with its setting up skipped, and saved so (the same harm hostTick keeps from a
         -- link's first telling; one map load of the host's sent 74 of them, and it fits the report "guest can't damage
@@ -860,7 +891,9 @@ return function(api)
             local rest = {}
             for _, q in ipairs(flow.queue) do
                 local of = q.kind == "n" and levelOfStep(q.item) or nil
-                if of and of ~= level then
+                -- (Not one told a moment ago: a scene of the host's about to begin catches it first, as below. Put
+                -- aside at once, a guest on another map took the trigger's own step there on arriving.)
+                if of and of ~= level and not young(q) then
                     if #flow.elsewhere < ELSEWHERE_MAX then
                         flow.elsewhere[#flow.elsewhere + 1] = { item = q.item, level = of }
                     end
@@ -883,6 +916,15 @@ return function(api)
         end
         if #flow.queue == 0 and next(flow.pending) == nil then
             flow.standBell, flow.standSince, flow.standSaid = nil, nil, nil
+            return
+        end
+        -- (Only what the host told a moment ago waiting: nothing to take yet, and none of the searches below, which ran
+        -- four more times for each thing told. A bell goes to its wait at once, as ever. The fifth review.)
+        local any = next(flow.pending) ~= nil
+        for _, q in ipairs(flow.queue) do
+            any = any or q.kind == "b" or not young(q)
+        end
+        if not any then
             return
         end
         local ep, bm = FindFirstOf("EventPipelineManager"), FindFirstOf("BellManager")
@@ -934,10 +976,7 @@ return function(api)
         -- (What the host told a moment ago waits: a story trigger runs its own step a second or two before its scene,
         -- and told in that gap the step was taken here before the scene's window opened: this world's trigger gone, its
         -- boss never started, 326 again in one start out of three. A few seconds old, the window has caught it.)
-        local now, ripe = os.clock(), 0
-        local function young(q)
-            return q.host and q.at ~= nil and now - q.at < YOUNG_S
-        end
+        local ripe = 0
         for _, q in ipairs(flow.queue) do
             ripe = ripe + (young(q) and 0 or 1)
         end

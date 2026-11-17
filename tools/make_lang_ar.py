@@ -24,7 +24,8 @@ PLAYERS = ["term.player%d" % n for n in range(1, 7)]
 LINES = [
     ("the panel", ["f5.words.not_connected", "f5.words.starting", "f5.words.waiting", "f5.words.looking_steam",
                    "f5.words.paste_first", "f5.words.pw_first", "f5.words.pw_set", "f5.words.pw_removed",
-                   "f5.words.ini_no_address", "f5.words.ini_bad_char", "tip.conn.build", "tip.conn.no_dll"]),
+                   "f5.words.ini_no_address", "f5.words.ini_bad_char", "tip.conn.build", "tip.conn.no_dll",
+                   "tip.conn.other_dll"]),
     ("PvP (F6)", ["f6.words.restoring", "tip.pvp.too_late", "tip.pvp.talismans"]),
     ("the partner", ["tip.partner.down", "tip.partner.back", "tip.partner.cutscene", "tip.partner.rest_join",
                      "tip.partner.rest_boss", "f5more.tip.pvpve_partner", "f5more.tip.pvpve_all",
