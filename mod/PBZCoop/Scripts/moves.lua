@@ -505,6 +505,7 @@ return function(api)
     local GEAR_DRESS_S = 0.25       -- how often the ghost is checked against the partner
     local GEAR_SWAP_S = 5.0         -- a weapon change that didn't take isn't tried again sooner
     local GEAR_SETTLE_S = 6.0       -- a new ghost is left alone this long
+    local GEAR_LOADED_S = 6.0       -- and a weapon this PC had to load isn't given to one sooner than this after
     local gear = { watchAt = 0, pathAt = 0, edgePathAt = 0 }
     local SHACHI = "Weapon.Slot.Shachi"
 
@@ -657,13 +658,35 @@ return function(api)
 
     -- Weapon configs load like montages: same paths, same cap. Not an AnimMontage, so not through the same cache, and looked up each
     -- time for the same reason: a swap is rare.
+    -- (One this PC had to load here, a partner's weapon its own player never held, is given to a figure only once it has
+    -- been loaded GEAR_LOADED_S: the second answer says it's still too new. A weapon's passive skill starts the moment
+    -- it's given, and given in the tick it was loaded its classes could still be on their way, as a new figure's were:
+    -- a call through nothing, the game gone with no line in the log. A report on 1.7.3, three players with late saves:
+    -- the host's game gone five times, each a few seconds after a guest was back. Not reproduced on the bench, where 34
+    -- weapons given the tick they were loaded did no harm: the wait costs a partner's new weapon 6 s on their figure,
+    -- once a weapon and a run of the game.)
     local function weaponConfig(path)
         local cfg = StaticFindObject(path)
         if not valid(cfg) and type(LoadAsset) == "function" and countLoad() then
             pcall(LoadAsset, path)
             cfg = StaticFindObject(path)
+            if valid(cfg) then
+                gear.loadedAt = gear.loadedAt or {}
+                gear.loadedAt[path] = os.clock()
+            end
         end
-        return valid(cfg) and isWeaponConfig(cfg) and cfg or nil
+        if not (valid(cfg) and isWeaponConfig(cfg)) then
+            return nil
+        end
+        local at = gear.loadedAt and gear.loadedAt[path]
+        if at and os.clock() - at < GEAR_LOADED_S then
+            return nil, true
+        end
+        -- (The third answer: its first giving since it was loaded here, for the log.)
+        gear.given = gear.given or {}
+        local first = at ~= nil and not gear.given[path]
+        gear.given[path] = true
+        return cfg, false, first
     end
 
     -- A new ghost, on a map that's most often only just there. A weapon's passive skill starts the moment it's given, and with its
@@ -684,8 +707,14 @@ return function(api)
         if theirs.partnerPath then
             if now >= theirs.swapAt and heldConfig(cwc) ~= theirs.partnerPath then
                 theirs.swapAt = now + GEAR_SWAP_S
-                local cfg = weaponConfig(theirs.partnerPath)
-                if cfg then
+                local cfg, soon, new = weaponConfig(theirs.partnerPath)
+                if soon then
+                    theirs.swapAt = now + 1.0       -- (loaded a moment ago: looked at again in a moment)
+                elseif cfg then
+                    if new then
+                        -- (Said before the call: if the game goes in it, this is the log's last word.)
+                        log("The ghost takes " .. theirs.partnerPath:match("([^.]+)$") .. ", new to this PC.")
+                    end
                     cwc:SetSlotWeapon(slot, math.max(cwc:GetCurrentWeaponIndex(slot, false) or 0, 0), cfg)
                     log("The ghost now holds " .. theirs.partnerPath:match("([^.]+)$") .. ".")
                 end
@@ -713,8 +742,13 @@ return function(api)
             if now >= (theirs.edgeSwapAt or 0) and not (net.pvp and cwc:IsArmed(slot) == true)
                 and heldConfig(cwc, slot) ~= theirs.edgePath then
                 theirs.edgeSwapAt = now + GEAR_SWAP_S
-                local cfg = weaponConfig(theirs.edgePath)
-                if cfg then
+                local cfg, soon, new = weaponConfig(theirs.edgePath)
+                if soon then
+                    theirs.edgeSwapAt = now + 1.0
+                elseif cfg then
+                    if new then
+                        log("The ghost takes " .. theirs.edgePath:match("([^.]+)$") .. ", new to this PC.")
+                    end
                     -- (At its current place in the slot, as the weapon above: the one in hand isn't always the first. With
                     -- a match's loadout on, the bench's players held their second, TigerCannon.)
                     cwc:SetSlotWeapon(slot, math.max(cwc:GetCurrentWeaponIndex(slot, false) or 0, 0), cfg)
