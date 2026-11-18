@@ -69,6 +69,8 @@ return function(scriptDir)
         ["only you can finish this boss, and you're down: the fight starts over."] = "只有你能终结这个首领,而你倒下了:战斗重新开始。",
         ["only the host can finish this boss, and the host is down: the fight starts over."] =
             "只有房主能终结这个首领,而房主倒下了:战斗重新开始。",
+        ["only the host can finish this boss: your killing blow doesn't count here."] = "只有房主能终结这个首领:你的致命一击在这里不算数。",
+        ["only you can finish this boss: your partner's killing blow doesn't count here."] = "只有你能终结这个首领:队友的致命一击在这里不算数。",
         ["your partner is in a boss fight: you'll join them when it's over."] = "队友正在首领战中:战斗结束后你会前往队友身边。",
         ["your partner is in a boss fight: you'll join them when it's over. F3 takes you in now."] =
             "队友正在首领战中:战斗结束后你会前往队友身边。按 F3 可立即加入。",

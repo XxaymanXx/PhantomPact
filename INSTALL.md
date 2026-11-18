@@ -259,7 +259,8 @@ Not in PvPvE yet: executions (posture break only staggers). It's for two players
 - If one of you dies during a boss fight, they watch the other until it's over, and respawn when the boss dies or the
   other dies too. A boss only the host can finish (the first map's Axemaster falls only to the host's finishing move)
   needs the host on their feet: with the host down when it comes to that, the fight starts over 20 seconds on, and
-  you're both told why.
+  you're both told why. A guest's own finishing move plays there and leaves him standing: it's the host's to make,
+  and each of you is told so.
 - If you join while the host is in a boss fight, you watch it (F3 takes you in now), and go to them when it's over; after
   30 s you're free to move. From another map there's nothing to watch: F3 takes you there now, or you go at the end.
 - Bells: the host's bells light for you when you come to them, not before.

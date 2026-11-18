@@ -102,7 +102,8 @@ online panel doesn't pause, and a pause by the game (its menu) is undone at once
   killed again in the client's refreshed world.
 - **The host dies while the client fights a boss:** the host's respawn waits, as its world is the shared one, and the
   host's boss keeps fighting the client's ghost, the client's hits still landing: the client can finish it, unless its game lets only the
-  host's own player past a floor (the first map's Axe chief). The refresh, and the boss back at full health, come only
+  host's own player past a floor (the first map's Axe chief: a client's killing blow there isn't taken, and each side
+  is told so, `FB`, 393). The refresh, and the boss back at full health, come only
   once everyone in the fight is down, the boss is dead, the client leaves, 15 minutes pass, or such a boss has stood 20 s
   at that floor since a killing blow of the client's wasn't taken there (`net.finisherWaits`): then the host's world
   refreshes, and the client's with it (`R death`).

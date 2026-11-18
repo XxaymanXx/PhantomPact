@@ -34,7 +34,7 @@ LINES = [
                      "local.tip.multiplayer_next", "tip.f3.tp_off", "tip.f3.too_late", "tip.f3.no_partner", "tip.f3.not_now",
                      "tip.f3.in_prologue", "f5more.tip.skip_how", "f5more.tip.past_prologue", "tip.f3.partner_prologue",
                      "tip.f3.cant_join", "tip.f3.position", "tip.f3.map_unknown", "tip.f3.wouldnt_go"]),
-    ("revive", ["tip.boss.hold", "tip.boss.finisher_host", "tip.boss.finisher_guest", "tip.boss.watching", "tip.boss.wall_join", "tip.boss.taking_long", "tip.boss.f3_join",
+    ("revive", ["tip.boss.hold", "tip.boss.finisher_host", "tip.boss.finisher_guest", "tip.boss.finisher_only_host", "tip.boss.finisher_only_you", "tip.boss.watching", "tip.boss.wall_join", "tip.boss.taking_long", "tip.boss.f3_join",
                 "tip.boss.no_ground", "tip.conn.clock", "revive.tip.up", "revive.tip.down", "revive.tip.partner_down",
                 "revive.tip.partner_up"]),
     ("PvP (F6)", ["f6.words.offline_short", "f6.words.offline", "f6.words.host_starts", "f6.words.nobody",
