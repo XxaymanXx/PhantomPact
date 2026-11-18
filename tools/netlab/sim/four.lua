@@ -11631,6 +11631,37 @@ local function newWeaponWaits()
             .. count(h.logs, "The ghost takes Spear, new to this PC.") .. " lines)")
     allErrors(s)
 
+    -- 399: the swing sounds' learner (PartnerHitSounds) reads a weapon this PC had to load 10 s after the load, not at
+    -- once: it began 0.7 s after it on the bench, at a sync's start, by itself (a report on 1.7.3: the game gone seconds
+    -- after two players linked, and not with the setting off).
+    local lAt = {}
+    local l, lh, lg = pair("PartnerHitSounds = On\n", function(host)
+        local find, nothing = host.env.StaticFindObject, host.env.StaticFindObject("/Nothing/Here.Here")
+        local playMontage = Fake.object(host, "Class")
+        host.env.StaticFindObject = function(path)
+            if path == SPEAR and not lAt[path] then
+                return nothing
+            end
+            if path == "/Script/LegoAbility.LGAAction_PlayMontage" then
+                return playMontage
+            end
+            return find(path)
+        end
+        host.env.LoadAsset = function(path)
+            lAt[path] = lAt[path] or host.now
+        end
+    end)
+    l:run(4)
+    Session.hold(lg, SPEAR, true)
+    local learnedAt
+    l:run(18, function()
+        learnedAt = learnedAt or (count(lh.logs, "Partner swing sounds: Spear learned") > 0 and lh.now or nil)
+    end)
+    local lwait = learnedAt and lAt[SPEAR] and learnedAt - lAt[SPEAR] or -1
+    check(lwait >= 10 and lwait <= 13,
+        string.format("its swing sounds are read 10 s after this PC loaded it, not at once: %.2f s after the load", lwait))
+    allErrors(l)
+
     -- The other way a figure's slot is shown: as the figure comes back into view (the eighth review's V8). The guest,
     -- with no Phantom Edge, goes down, puts one on that this PC has never loaded, and is up again: the slot stays
     -- hidden till the figure holds theirs. Shown as the figure was, it showed this player's own for the 6 s.

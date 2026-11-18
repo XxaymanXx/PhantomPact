@@ -702,6 +702,13 @@ return function(api)
         return os.clock() - (p.ghostAt or -1e9) >= GEAR_SETTLE_S
     end
 
+    -- How long ago this PC loaded that weapon for a partner, in seconds: nil for one it never had to load (its own
+    -- player has held it: its classes are all there). For what reads a weapon's own data, hitfx.lua's learner.
+    function moves.loadedAgo(path)
+        local at = gear.loadedAt and gear.loadedAt[path]
+        return at and os.clock() - at or nil
+    end
+
     local function dressGhost(p, now)
         local ghost, theirs = p.ghost, gearOf(p)
         if now < theirs.dressAt or not valid(ghost) or p.ghostHidden or not moves.settled(p) then

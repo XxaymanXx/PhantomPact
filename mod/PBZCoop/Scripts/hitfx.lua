@@ -336,6 +336,7 @@ return function(api)
     local LEARN_BUDGET_S = 0.001    -- a weapon's moves are learned a timeline at a time, for this long a step at most
     local LEARN_MAX = 2         -- (and so many timelines: 6 took 2-4 ms a step on the bench; the sword's 93, 1.5 s or so)
     local LEARN_EVERY_S, LEARN_WAIT_S = 0.025, 1.0  -- a step this often; looked at again this often for one not loaded yet
+    local LEARN_AFTER_LOAD_S = 10.0 -- a weapon this PC had to load is read no sooner than this after (see tooNew)
     local MAX_SWINGS_PER_S = 30 -- one partner's swing sounds played per second, at most
     local weapons = {}          -- weapon config path -> what's learned of it (strings and numbers only), see learn
 
@@ -518,6 +519,21 @@ return function(api)
     -- one weapon a step, one not loaded here yet passed over (waited on, it held up everyone's after it) and looked at
     -- again a while later. Not in the quiet after a load. (Not a tick of its own: a new one changed the order the others
     -- ran in, game calls and all.)
+    -- A weapon this PC has only just loaded for a partner, or one of a figure only just made: not read yet. Its classes
+    -- can still be on their way, and what's read through nothing takes the game with it, no line in the log; the figure
+    -- itself waits for such a weapon (moves.lua's weaponConfig, 358: a report on 1.7.3, the host's game gone seconds
+    -- after a guest was back). This read began 0.7 s after the load (the bench, run126), and at a sync's start by
+    -- itself, the only work of PartnerHitSounds that does: a report on 1.7.3, 11-19, the game gone seconds after two
+    -- players linked over Steam, and not with the setting off.
+    local function tooNew(p, path)
+        local m = api.moves
+        if not m then
+            return false
+        end
+        local ago = m.loadedAgo and m.loadedAgo(path)
+        return (ago ~= nil and ago < LEARN_AFTER_LOAD_S) or (m.settled ~= nil and not m.settled(p))
+    end
+
     local learning = false
     local function learnStep()
         learning = false
@@ -531,7 +547,7 @@ return function(api)
                     local w = weapons[path]
                     if not (w and w.done) then
                         local began = os.clock()
-                        if learn(path) then
+                        if not tooNew(p, path) and learn(path) then
                             hitfx.learnMaxMs = math.max(hitfx.learnMaxMs, (os.clock() - began) * 1000)
                             learning = true
                             game.after(LEARN_EVERY_S, learnStep)
@@ -570,6 +586,10 @@ return function(api)
     -- its end, their figure hidden or made anew (s: play, addr, figure, born, step).
     local function whoosh(p, s, evPath)
         if not hitfx.on or net.pvp or p.swingPlay ~= s.play or not p.ghostMoveAt or p.ghostAt ~= s.born then
+            return
+        end
+        -- (Not in the quiet after a load, as a partner's hit's sound isn't, HX: the world is still coming in.)
+        if os.clock() < (net.quietUntil or 0) then
             return
         end
         local figure = p.ghost
