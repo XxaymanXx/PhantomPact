@@ -1279,6 +1279,17 @@ local function aBossHeldToItsMost()
         Fake.setHealth(onH, 1000)               -- (a set of more than half its most at once: the game's own, no blow)
         s:run(1)
         check(hpOf(onH) == 1000, "set down by more than half its most at once, no blow: left as its game wrote it")
+        -- (At a floor of its game's own nothing is given back: what comes there is its script's, a phase's scene.)
+        local min = attr(onH, "Health_Min")
+        Fake.put(min, "BaseValue", 800)
+        Fake.put(min, "CurrentValue", 800)
+        Fake.setHealth(onH, 800)
+        s:run(1)
+        check(hpOf(onH) == 800, "a blow that leaves it at a floor of its game's own: nothing given back there (" .. hpOf(onH) .. ")")
+        Fake.put(min, "BaseValue", 0)
+        Fake.put(min, "CurrentValue", 0)
+        Fake.setHealth(onH, 1000)
+        s:run(1)
         local blows = 0
         while hpOf(onH) > 300 and blows < 100 do
             blow(h, onH, 300)
@@ -1288,10 +1299,12 @@ local function aBossHeldToItsMost()
         check(blows == math.ceil(700 * f / 300 - 0.001),
             "worn down by the host's blows of 300 from 1000 to under 300: " .. blows .. ", " .. f .. " times the game's own count")
         Fake.setHealth(onH, 0)
+        s:run(0.3)
+        check(hpOf(onH) == 0, "its last blow, falling, not yet dead by its game's word: nothing given back (" .. hpOf(onH) .. ")")
         Fake.put(onH, "dead", true)
         s:run(2)
         check(hpOf(onH) == 0 and field(onH, "dead") == true and count(h.sent, "^E K sp:boss") == 1,
-            "its last blow: dead, nothing given back to a dead one, told once")
+            "dead: nothing given back to a dead one, told once")
         allErrors(s)
     end
 
@@ -1329,7 +1342,7 @@ local function aBossHeldToItsMost()
     swing(g, onG, 1)
     s:run(2)
     check(hostHas > 300 and field(onH, "dead") ~= true and hpOf(onH) < hostHas
-        and count(g.logs, "The host didn't take the killing blow") == 1 and math.abs(hpOf(onG) - hpOf(onH)) < 100,
+        and count(g.logs, "The host didn't take the killing blow") == 1 and math.abs(hpOf(onG) - hpOf(onH)) < 1,
         "a copy on its floor with more left on the host's boss than its blow: a blow there, no death, the copy lifted to it ("
             .. string.format("%.1f -> %.1f, the copy %.1f", hostHas, hpOf(onH), hpOf(onG)) .. ")")
     n = 0
@@ -11689,19 +11702,38 @@ local function aBodyStillMade()
     rawset(set, "__alive", true)
     s:run(1)
     check(field(floor, "BaseValue") < 777, "there again: held at its floor as ever (" .. tostring(field(floor, "BaseValue")) .. ")")
+    -- (No attribute set at all for the while, as in the game: a write on it fails there, and here.)
+    local none = { IsValid = function() return false end }
     local boss = Fake.enemy(h, "late", "BP_Monster_Boss_C", 1700.0, 600.0, 100.0, 5000, 400, true)
     local bossSet = field(boss, "AttributeSetBase")
     local said = count(h.logs, "at 200%% poise")
-    rawset(bossSet, "__alive", false)
+    Fake.put(boss, "AttributeSetBase", none)
     s:run(1)
     h.hudLayout:RegisterBossHPBar(boss)
     s:run(3)
     check(count(h.logs, "at 200%% poise") == said, "a boss with no attributes yet: its poise isn't marked done on nothing")
-    rawset(bossSet, "__alive", true)
+    Fake.put(boss, "AttributeSetBase", bossSet)
     s:run(3)
     check(count(h.logs, "at 200%% poise") == said + 1
         and rawget(bossSet, "__fields").TakenReductionMultiplier_Poise.BaseValue == 0.5,
         "there again: its poise set, and said once (" .. count(h.logs, "at 200%% poise") - said .. ")")
+    -- (And co-op's health and guard. Looked at with no attributes it was marked scaled with nothing written: the game's
+    -- own numbers for the whole fight. The eighth review.)
+    local function most(set, name)
+        return field(field(set, name), "CurrentValue")
+    end
+    check(most(bossSet, "Health_Max") == 7500 and most(bossSet, "Shachi_Max") == 520,
+        "and co-op's health and guard with them (150%, 130% here), not the game's own for the fight (" .. tostring(most(bossSet, "Health_Max"))
+            .. ", " .. tostring(most(bossSet, "Shachi_Max")) .. ")")
+    local thug = Fake.enemy(h, "latethug", THUG, 1750.0, 500.0, 100.0, 600, 100)
+    local thugSet = field(thug, "AttributeSetBase")
+    Fake.put(thug, "AttributeSetBase", none)
+    s:run(3)
+    check(most(thugSet, "Health_Max") == 600, "an enemy with no bar and no attributes yet: nothing written (" .. tostring(most(thugSet, "Health_Max")) .. ")")
+    Fake.put(thug, "AttributeSetBase", thugSet)
+    s:run(3)
+    check(most(thugSet, "Health_Max") == 900 and most(thugSet, "Shachi_Max") == 130,
+        "there again: co-op's health and guard (" .. tostring(most(thugSet, "Health_Max")) .. ", " .. tostring(most(thugSet, "Shachi_Max")) .. ")")
     allErrors(s)
 end
 

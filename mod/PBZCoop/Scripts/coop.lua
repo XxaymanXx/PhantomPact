@@ -3209,6 +3209,12 @@ return function(api)
                 if net.deadSent[name] or (valid(actor) and game.isDead and game.isDead(actor)) then
                     sendEvent("K", name)
                 elseif valid(actor) then
+                    -- (One kept at its game's most: co-op's part of this blow given back first, as before a line of it
+                    -- goes (scaling.look). Read before that, the copy was put that part of a blow under the host's
+                    -- boss, and its next floor came that much early. The eighth review.)
+                    if api.scaling and api.scaling.capped and api.scaling.capped(actor, actor:GetAddress()) then
+                        api.scaling.look(actor)
+                    end
                     local hp = game.getHealth(actor)
                     if hp then
                         -- (Co-op's number of it, as its line says: one kept at its game's most stands for f times it.)
