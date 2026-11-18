@@ -179,7 +179,8 @@ instead of more health. It only goes up, so a boss doesn't lose health when some
 leaves. Someone who joins during a boss fight only watches, so that boss keeps its number until the fight is over, while other
 enemies rise at once. A boss whose game holds no more health than its own (one that heals itself by its own number)
 keeps its own health, and each blow takes less instead (two thirds at 150%): the fight is as long, and its bar reads
-the same.
+the same. Not one a guest went in to first, before the host was in that fight: the guest's first blow leaves it at its
+own numbers, and each blow takes its whole till it falls, the host's too.
 
 ## The host's story
 

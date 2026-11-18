@@ -4013,7 +4013,10 @@ return function(api)
             local picker = targetPicker(actor)
             local at = picker and picker:GetAddress() or nil
             local rec = copyPickers[addr]
-            if rec == nil or rec.fname ~= fname or rec.at ~= at then
+            -- (No picker found this once is no other picker: the record and the wait it holds are kept. Made anew, the
+            -- wait read back next time was this mod's own, and the copy let go never turned to another target by itself.
+            -- The eighth review's D1.)
+            if rec == nil or rec.fname ~= fname or (at ~= nil and rec.at ~= at) then
                 rec = { fname = fname, at = at }        -- (another body at that address, or another picker on this one)
                 copyPickers[addr] = rec
             end

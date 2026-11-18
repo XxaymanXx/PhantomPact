@@ -1075,6 +1075,35 @@ local function aCopyWrittenBack()
         "the host's blow the turn after the mod writes its copy's most down to the guest's line is told")
     allErrors(o)
 
+    -- The same on the host's side for its guard alone (375's host half, handover.follow: the eighth review's V10, a
+    -- rule no check held). Co-op's health at the game's own, the guard raised: the host's game writes its copy of the
+    -- guest's boss back to base as the host moves by it. No most health fell: the guard's fall was told as the host's
+    -- blow, half the guest's boss's guard gone with none struck.
+    local x = Session.new(SIM_SCRIPTS, { "Host", "Guest" }, false, { { "boss", "BP_Monster_Boss_C", 4200.0, 0.0, 100.0, 5000, 400, true } },
+        "CoopEnemyHealth = 100\nCoopBossPosture = 200\n")
+    local xh, xg = x.pcs[1], x.pcs[2]
+    x:run(4)
+    Session.moveTo(xh, 0, 0)
+    Session.moveTo(xg, 4000, 0)
+    x:run(3)
+    local copyX, runX = Session.enemyOn(xh, "boss"), Session.enemyOn(xg, "boss")
+    xg.hudLayout:RegisterBossHPBar(runX)
+    x:run(3)
+    Session.moveTo(xh, 3800, 300)
+    x:run(3)
+    local guardX, sentX = attr(runX, "Shachi").CurrentValue, count(xh.sent, "^E D ")
+    xh.env.PBZ.game.noteLocalMove()
+    for _, n in ipairs({ "Shachi", "Shachi_Max" }) do
+        Fake.put(attr(copyX, n), "CurrentValue", 400)
+        Fake.put(attr(copyX, n), "BaseValue", 400)
+    end
+    x:run(1)
+    check(net(xh).guestRuns["sp:boss"] == true and guardX > 400 and count(xh.sent, "^E D ") == sentX
+        and attr(runX, "Shachi").CurrentValue >= guardX - 1,
+        "the host's game writes its copy's guard back to base as the host moves by the guest's boss: no blow told, the "
+            .. "guest's boss keeps its guard (" .. guardX .. " -> " .. attr(runX, "Shachi").CurrentValue .. ")")
+    allErrors(x)
+
     -- The same write in the host's own world (the bench of 11-17: her health and its most back to her own, her posture
     -- left as it was). To the scaling that was a new body: scaled again, and its guard bar was multiplied again at
     -- each write, 34443 to 72 billion. Its guard bar, still what it was given, stays; and since PV1 of the seventh
@@ -11562,6 +11591,42 @@ local function newWeaponWaits()
         "let go by the game and loaded again: it waits again, and is said new again ("
             .. count(h.logs, "The ghost takes Spear, new to this PC.") .. " lines)")
     allErrors(s)
+
+    -- The other way a figure's slot is shown: as the figure comes back into view (the eighth review's V8). The guest,
+    -- with no Phantom Edge, goes down, puts one on that this PC has never loaded, and is up again: the slot stays
+    -- hidden till the figure holds theirs. Shown as the figure was, it showed this player's own for the 6 s.
+    local loadedV = {}
+    local v, vh, vg = pair(nil, function(host)
+        local find, nothing = host.env.StaticFindObject, host.env.StaticFindObject("/Nothing/Here.Here")
+        host.env.StaticFindObject = function(path)
+            if path == CANNON and not loadedV[path] then
+                return nothing
+            end
+            return find(path)
+        end
+        host.env.LoadAsset = function(path)
+            loadedV[path] = loadedV[path] or host.now
+        end
+    end)
+    Fake.put(field(vg.pawn, "Character Weapons Component"), "edgeConfig", nil)
+    v:run(4)
+    local vgear = field(net(vh).ghost, "Character Weapons Component")
+    local wasHidden = field(vgear, "edgeHidden") == true
+    Session.die(vg)
+    v:run(4)
+    Session.holdEdge(vg, CANNON, false)
+    v:run(1)
+    Session.revive(vg)
+    local heldAt, shownV
+    v:run(12, function()
+        local c = field(vgear, "edgeConfig")
+        heldAt = heldAt or (c and rawget(c, "__path") == CANNON) and vh.now or nil
+        shownV = shownV or (not heldAt and field(vgear, "edgeHidden") ~= true) or nil
+    end)
+    check(wasHidden and heldAt and not shownV and field(vgear, "edgeHidden") ~= true,
+        "a figure back in view whose partner put a Phantom Edge on meanwhile: its slot stays hidden till it holds theirs ("
+            .. tostring(wasHidden) .. ", held " .. tostring(heldAt ~= nil) .. ", shown before " .. tostring(shownV) .. ")")
+    allErrors(v)
 end
 
 local function phantomEdge()

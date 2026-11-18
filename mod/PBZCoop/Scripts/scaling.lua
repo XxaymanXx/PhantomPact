@@ -170,7 +170,9 @@ return function(api)
     -- tick; an enemy with none at the pass's look (her summoned thugs have her rule: the bench of 11-18, run167, where
     -- every blow of the host's healed them to full). Every kept body is looked at before each of its lines to the
     -- guests, which still say co-op's numbers (coop.lua's shareEnemy), and a copy of it there is kept the same way at
-    -- its own game's cut (syncEnemy). Given back: a drop, not a rise (its heals are its own); not one that leaves it
+    -- its own game's cut (syncEnemy). Given back: a drop, not a rise (its heals are its own, in its game's health: in
+    -- co-op's number each counts f times, so her heal phases last longer than co-op's health alone would make them);
+    -- not one that leaves it
     -- dead, or on a floor its game holds it at; not one of more than half its most at once, no blow (the game's set).
     local capped = {}               -- enemy address -> { name, most, f, hp }: its game's most, what it had at the last look
     local fought = {}               -- boss address -> { name, hp, max }: what it had at the last tick

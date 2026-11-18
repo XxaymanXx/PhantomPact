@@ -2725,10 +2725,23 @@ return function(api)
             return
         end
         net.mine[name] = true
+        local r = net.remoteEnemies[name]
         net.remoteEnemies[name] = nil
         local actor = enemyByName[name]
         if valid(actor) then
             local addr = actor:GetAddress()
+            -- (A copy kept at its own game's most, net.capped: back at the host's numbers as this game takes it over, to
+            -- run the old way. Kept so, it went over with co-op's part of what it had left gone, its blows here whole.
+            -- The eighth review's V6: by one narrow way, the two fights' words crossing at the start.)
+            local cap = net.capped[addr]
+            net.capped[addr] = nil
+            if cap and cap.name == name and r and r.MaxHp and r.MaxHp > cap.most + 1 and game.setMaxHealth and game.setHealth then
+                local hp = game.getHealth(actor)
+                if hp then
+                    game.setMaxHealth(actor, r.MaxHp)
+                    game.setHealth(actor, hp * r.MaxHp / cap.most)
+                end
+            end
             if net.heldAlive[addr] then
                 net.heldAlive[addr] = nil
                 game.setMinHealth(actor, 0)
