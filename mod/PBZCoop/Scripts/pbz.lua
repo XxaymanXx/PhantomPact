@@ -4570,12 +4570,17 @@ return function(api)
                 if refreshing then
                     return
                 end
+                -- (This world's enemies are new ones from this moment, half a second before that's told: coop.lua's
+                -- handlers.D takes no killing blow as one meanwhile, net.lateKill. A time, not a flag: never up for
+                -- good.)
+                game.refreshedHere = os.clock()
                 -- Blueprint hooks run after their function, so the respawn step's hook (the caller) only runs
                 -- once Refresh Monster (the callee) is done: decide a moment later, when both have reported.
                 local at = os.clock()
                 game.after(0.5, function()
                     local death = respawnRefreshAt ~= nil and math.abs(respawnRefreshAt - at) <= RESPAWN_WINDOW_S
                     respawnRefreshAt = nil
+                    game.refreshedHere = nil
                     onRest(death and "death" or "bell")
                 end)
             end)

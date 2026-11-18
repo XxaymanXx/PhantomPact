@@ -3160,6 +3160,10 @@ return function(api)
         if finisher then
             lethal = "L"
         end
+        if lethal == "L" and net.lateKill() then
+            log("Partner's killing blow on " .. tostring(name) .. " came as this world refreshed: of the one that's gone, a plain blow here.")
+            lethal, finisher = "-", false
+        end
         if lethal == "L" then
             amount = math.huge      -- the client's killing blow (its copy can't show the full damage)
             log("Partner's " .. (finisher and "finishing move" or "killing blow") .. " on " .. tostring(name)
@@ -3223,7 +3227,15 @@ return function(api)
                 and gap3d(actor:K2_GetActorLocation(), hitter) <= (lethal == "L" and OWN_HIT_CM * 2 or OWN_HIT_CM) then
                 local wasAlive = not (game.isDead and game.isDead(actor))
                 local boss = net.partnerBosses[name] or (game.isBoss and game.isBoss(actor))
-                local before = game.getHealth(actor)
+                local before, most = game.getHealth(actor)
+                -- (A killing blow on a boss with more than half its health left here, this world's bodies new within
+                -- NEW_BODY_S: of the body that's gone, read past net.lateKill's half second, the guest's word of the
+                -- refresh late and the blow told again. A plain blow, and LR says what this one has.)
+                if lethal == "L" and boss and before and most and before > most / 2
+                    and os.clock() - (net.worldNewAt or -1e9) < net.NEW_BODY_S then
+                    log(string.format("Partner's killing blow on %s isn't one here: it has %.0f of %.0f. A plain blow.", name, before, most))
+                    amount, finisher = told, false
+                end
                 -- (A boss weighs a partner's blow by the game's own rules for one: no posture in its break and fill, as it
                 -- recovers, or while it turns blows aside, and no reaction of theirs on it then. See game.partnerRefuses.)
                 local bossLike = boss or (game.bossTwin and game.bossTwin(actor)) or false
@@ -3247,7 +3259,7 @@ return function(api)
                 -- would be 193 again. The tenth review. The floor back if the game still won't let it die.)
                 local floor0 = nil
                 if finisher and boss and game.healthFloor and game.setMinHealth and before then
-                    local floor, _, most = game.healthFloor(actor), game.getHealth(actor)
+                    local floor = game.healthFloor(actor)
                     if floor >= 1 then
                         local why = (floor > HELD_HP + 0.5 and "the floor there is a phase's")
                             or (not (most and before <= math.max(floor + 1.5, most * net.EXEC_LOW)) and "it isn't low there")
@@ -3879,7 +3891,28 @@ return function(api)
             net.partnerBosses[name], net.hostBosses[name], net.fightOf[name] = s.p, s.h, s.f
             net.pendingBosses[name] = true
         end
+        net.killsFrom, net.worldNewAt = link.now() + net.LINES_AFTER_S, os.clock()      -- (net.lateKill)
         sendEvent("R", kind)
+    end
+
+    -- Host: a killing blow read now is of a body that's gone. A guest tells one as its copy stands at its floor, and
+    -- one told before the host's word of its world's refresh reached that guest is read here after the refresh, where
+    -- the new, whole body bears the name: taken, it was the fresh boss's death in both worlds, its pay out and
+    -- "beaten" in the host's save, by one plain blow (383's fight starting over, or any respawn of the host's with a
+    -- guest striking: a copy at 2 is struck till the word comes. The tenth review, on the base too). From this
+    -- world's refresh (pbz.lua's game.refreshedHere, half a second before R is told, a load's stall longer: for
+    -- REFRESH_TOLD_S at most) till LINES_AFTER_S after R has gone, the twin of a guest's half second
+    -- (net.dropHostLines): a plain blow then, and a real one is told again and taken. For NEW_BODY_S from the refresh
+    -- (net.worldNewAt) a killing blow on a boss with more than half its health left here is a plain blow too: one told
+    -- again by a guest whose word of the refresh came late (LETHAL_TRIES of them, LETHAL_AGAIN_S apart), and no boss
+    -- is brought from whole to its end in that time.
+    net.REFRESH_TOLD_S, net.NEW_BODY_S = 60.0, 10.0
+    function net.lateKill()
+        if not isHost() then
+            return false
+        end
+        local at = game.refreshedHere
+        return (at ~= nil and os.clock() - at < net.REFRESH_TOLD_S) or link.now() < (net.killsFrom or 0)
     end
 
     -- The fights of others this player is shown that are still on (their player's bar is up): names.
@@ -4011,6 +4044,9 @@ return function(api)
         end
         if game.refreshEnemies and not elsewhere then
             game.refreshEnemies()
+            if isHost() then
+                net.killsFrom, net.worldNewAt = link.now() + net.LINES_AFTER_S, os.clock()      -- (net.lateKill)
+            end
         end
         if isHost() and net.party and from and not elsewhere then
             sendEvent("RH", kind, from)     -- (the host's world refreshed for that guest's rest: the other guests' do too)
@@ -6044,6 +6080,14 @@ return function(api)
         if now - net.finisherSaySince >= net.FINISHER_TELL_AFTER_S and now - last >= net.FINISHER_TELL_S
             and net.floorRefused[waits] > last then
             net.finisherTold[waits] = now
+            -- (Not where a partner's finishing move isn't its end either, handlers.D: a phase's floor, or another phase
+            -- of it to come. Told there, the guest made one, it wasn't taken, and the word came again two minutes on.
+            -- The tenth review's read of 396.)
+            local actor = enemyByName[waits]
+            if (valid(actor) and game.healthFloor and game.healthFloor(actor) > HELD_HP + 0.5)
+                or (game.phaseAfter and game.phaseAfter(waits)) then
+                return
+            end
             sendEvent("FB", waits)
             log("A partner's killing blow on " .. waits .. " isn't its end: it falls only to a finishing move, theirs or this player's.")
             if up and api.status then
