@@ -15926,6 +15926,9 @@ local function guestsFinisher()
     check(field(pboss, "dead") ~= true and floorOf(pboss) == 2000 and select(1, Fake.health(pboss)) == 2001
         and count(ph.logs, "A finishing move on sp:boss isn't its end here: the floor there is a phase's") == 1,
         "a phase's floor, at two fifths of his health: not taken either (" .. tostring((Fake.health(pboss))) .. " left)")
+    p:run(24)
+    check(count(ph.sent, "^E FB ") == 0 and (pg.env.PBZ.status.lastShown.finisher or {}).text == nil,
+        "and nobody is told a finishing move ends him there")
     allErrors(p)
 
     -- Another phase of him to come, its spawner in the host's world (a boss of phases, a spawner each): his end there
@@ -15941,6 +15944,9 @@ local function guestsFinisher()
         and field(qboss, "dead") ~= true and floorOf(qboss) == 1
         and count(qh.logs, "A finishing move on sp:boss isn't its end here: another phase of it is to come") == 1,
         "another phase of him to come in the host's world: not taken, the floor as it was")
+    q:run(24)
+    check(count(qh.sent, "^E FB ") == 0 and (qg.env.PBZ.status.lastShown.finisher or {}).text == nil,
+        "and nobody is told a finishing move ends him there: one made wasn't taken (the tenth review's read of 396)")
     allErrors(q)
 
     -- The finishing move's one blow from over the hold's floor: the game's mark comes up there (run184: on the copy
@@ -16131,6 +16137,80 @@ local function restartWithOldLines()
     check(floorOf(vcopy) == 0 and hpOf(vcopy) == vmost and count(vg.logs, "was let go at the floor it was held at .*whole again") == 1,
         "the host's lines of him run out, his copy at the hold's floor: let go whole (" .. tostring(hpOf(vcopy)) .. ")")
     allErrors(v)
+
+    -- The host's half of it (397). A guest's killing blow told as its copy stood at 2, before the host's word of its
+    -- respawn reached it, is read by the host after its world has refreshed. By name it was the new body's, whole: the
+    -- game's own kill, the fresh boss dead in both worlds, his pay out and "beaten" in the host's save, by one plain
+    -- blow (the tenth review's sim; the base did the same). From the host's refresh till half a second after its word
+    -- of it has gone a killing blow is a plain one; and whenever it comes, one on a boss with more than half his
+    -- health isn't his end (the guest's word of the refresh late, the blow told again).
+    local w, wh, wg, wboss, wcopy = stopped()
+    Session.die(wh)
+    wh.hudLayout:UnRegisterBossHPBar(wboss)
+    w:run(6)
+    swing(wg, wcopy, 1)
+    w:run(23)
+    local blow = nil
+    for i = #wg.sent, 1, -1 do
+        blow = wg.sent[i]:match("^E (D sp:boss %S+ %S+ L.*)$")
+        if blow then
+            break
+        end
+    end
+    check(blow ~= nil and hpOf(wboss) == 2 and field(wh.deathWidget, "NotTick") ~= true,
+        "(the guest's killing blows stopped at his floor, the last " .. tostring(blow) .. "; 23 s on the host's hold ends)")
+    -- (The game's new body: whole, and with no lock on its health yet, which comes at a fifth of it.)
+    local function newAtRefresh(pc, e)
+        local hooks = pc.hooks[REFRESH]
+        hooks[#hooks + 1] = function()
+            Fake.setHealth(e, select(2, Fake.health(e)))
+            local min = field(field(e, "AttributeSetBase"), "Health_Min")
+            Fake.put(min, "BaseValue", 0)
+            Fake.put(min, "CurrentValue", 0)
+        end
+    end
+    newAtRefresh(wh, wboss)
+    newAtRefresh(wg, wcopy)
+    local wmost = select(2, Fake.health(wboss))
+    Session.moveTo(wh, 90000.0, 0.0)
+    Session.respawned(wh)
+    Session.revive(wh)
+    w.relay:post(wg, "sure", blow)              -- (told as the host's world refreshed, its word of that not yet out)
+    local asTold = false
+    w:run(0.7, function()
+        if not asTold and count(wh.sent, "^E R death") > 0 then
+            asTold = true
+            w.relay:post(wg, "sure", blow)      -- (and one more as that word goes: the guest hasn't heard it yet)
+        end
+    end)
+    check(asTold and field(wboss, "dead") ~= true and hpOf(wboss) >= wmost * 0.9 and count(wh.sent, "^E K sp:boss$") == 0
+        and count(wh.logs, "Beaten in this world too") == 0 and count(wh.logs, "came as this world refreshed") == 2,
+        "the guest's killing blows from before the host's respawn, read after it: plain blows, the new body stands ("
+            .. tostring(hpOf(wboss)) .. " of " .. tostring(wmost) .. ")")
+    w:run(2)
+    w.relay:post(wg, "sure", blow)              -- (told again seconds later: the guest's word of the refresh came late)
+    w:run(1)
+    check(field(wboss, "dead") ~= true and hpOf(wboss) >= wmost * 0.9 and count(wh.sent, "^E K sp:boss$") == 0
+        and count(wh.logs, "isn't one here: it has") == 1,
+        "nor one told again seconds later: a boss with more than half his health isn't ended by a killing blow ("
+            .. tostring(hpOf(wboss)) .. ")")
+    allErrors(w)
+
+    -- Any enemy's, in that half second (a thug's by the host's bell); and past it a killing blow is one, as ever.
+    local x, xh, xg = pair()
+    local thug = Session.enemyOn(xh, "near")
+    Session.bell(xh)
+    x:run(0.6)
+    check(count(xh.sent, "^E R ") == 1 and field(thug, "dead") ~= true, "(the host rests: its word of the refresh has gone)")
+    x.relay:post(xg, "sure", "D sp:near 0.0 0.0 L")
+    x:run(0.2)
+    check(field(thug, "dead") ~= true and count(xh.logs, "came as this world refreshed") == 1,
+        "a killing blow read in the half second after the host's word of its rest: a plain blow")
+    x:run(1.0)
+    x.relay:post(xg, "sure", "D sp:near 0.0 0.0 L")
+    x:run(0.5)
+    check(field(thug, "dead") == true and count(xh.sent, "^E K sp:near$") == 1, "one read past it: its death, told")
+    allErrors(x)
 end
 
 -- The ninth review (d0412af..50221b8, 383-386): what it found, each with a check of its own.

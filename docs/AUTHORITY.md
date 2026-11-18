@@ -105,7 +105,9 @@ online panel doesn't pause, and a pause by the game (its menu) is undone at once
   holds at a floor of its own for a finishing move (the first map's Axe chief) falls to the client's own finishing
   move, told as that (`D ... X`, 395): the host lifts that floor for the blow and makes the game's own kill, only
   where that is the boss's end: a floor of the last point, the boss low, no scene playing there, no other phase of
-  it to come (396). A plain killing blow of the client's there isn't taken, and each side is told what is (`FB`). The refresh, and the boss back
+  it to come (396). A plain killing blow of the client's there isn't taken, and each side is told what is (`FB`).
+  A killing blow read as the host's world refreshes (till half a second after its `R`), or within ten seconds of
+  that on a boss with more than half its health there, is of a body that's gone: a plain blow (397). The refresh, and the boss back
   at full health, come only once everyone in the fight is down, the boss is dead, the client leaves, 15 minutes pass,
   or such a boss has stood three minutes at that floor with nobody's finishing move (`net.finisherWaits`): then the
   host's world refreshes, and the client's with it (`R death`).
