@@ -15860,6 +15860,149 @@ local function finisherWithTheHostUp()
     allErrors(u)
 end
 
+-- 383's fight starting over with the guest still striking, and the host's lines of the boss from before its respawn
+-- read after it (the bench, 11-18, run207). The relay keeps every line that came since the last read and a frame takes
+-- events before lines, so a guest whose game stood still as the host's hold ended (5.7 s there) handled the host's R,
+-- its world's refresh with it, and then read the old lines as news: the body the refresh had just made was written
+-- down to the old one's 2. The guest's own fight with it began, the host handed it over, the hold's floor went, and
+-- the next blow was the Axe chief's death in the guest's world: his pay to both, "beaten" in the guest's save, no boss
+-- there in the host's next fight. A guest's world refreshed by the host's word forgets the host's lines so far now, the
+-- ones still waiting too, takes none for half a second more, and a boss isn't let go at the hold's floor as it stands: the
+-- host's share where the host says it has more, whole otherwise (394).
+local function restartWithOldLines()
+    part("the fight starts over, the host's old lines read after it")
+    local REFRESH = "/Game/PBZContent/Blueprint/BP_GameMode_Build.BP_GameMode_Build_C:Refresh Monster"
+    local function floorOf(e)
+        return field(field(e, "AttributeSetBase"), "Health_Min").CurrentValue
+    end
+    local function hpOf(e)
+        return (select(1, Fake.health(e)))
+    end
+    -- The guest's killing blow stopped at a floor of the host's game's own: 2 in both worlds, the copy held at its floor.
+    local function stopped()
+        local s, h, g = pair()
+        bossStart(s)
+        local boss, copy = Session.enemyOn(h, "boss"), Session.enemyOn(g, "boss")
+        swing(g, copy, hpOf(copy) - 50)
+        s:run(5)
+        local min = field(field(boss, "AttributeSetBase"), "Health_Min")
+        Fake.put(min, "BaseValue", 1)
+        Fake.put(min, "CurrentValue", 1)
+        Fake.setHealth(boss, 300)
+        s:run(2)
+        swing(g, copy, 1)
+        s:run(2)
+        return s, h, g, boss, copy
+    end
+    -- (The host's word that the guest's game runs him from now, as the host sends it.)
+    local function handedOver(s, h)
+        s.relay:post(h, "sure", "RUN sp:boss 1")
+        s:run(0.5)
+    end
+
+    local s, h, g, boss, copy = stopped()
+    local most = select(2, Fake.health(copy))
+    Session.die(h)
+    h.hudLayout:UnRegisterBossHPBar(boss)
+    s:run(6)
+    swing(g, copy, 1)
+    s:run(23)
+    check(hpOf(boss) == 2 and hpOf(copy) <= 2.5 and field(h.deathWidget, "NotTick") ~= true,
+        "(the guest's killing blow stopped at his floor, 2 in both worlds; 23 s on the host's hold ends: the fight starts over)")
+    -- The host's last lines of him, as a hitch on the guest leaves them waiting: sent before its respawn, read after.
+    local old = {}
+    for i = #h.sent, math.max(1, #h.sent - 4000), -1 do
+        local line = h.sent[i]:match("^N (.+)$")
+        local hp = line and line:match("^%d+ %S+ %S+ %S+ %S+ %S+ %S+ (%S+) %S+ %S+ %S+$")
+        if hp and tonumber(hp) and tonumber(hp) <= 2.5 then
+            old[#old + 1] = line
+            if #old >= 8 then
+                break
+            end
+        end
+    end
+    check(#old > 0, "(the host's lines of him at 2 health, to be read late: " .. #old .. ")")
+    -- Each world's refresh makes him whole, as the game's does (the fake's leaves the living as they are).
+    local function wholeAtRefresh(pc, e)
+        local hooks = pc.hooks[REFRESH]
+        hooks[#hooks + 1] = function() Fake.setHealth(e, select(2, Fake.health(e))) end
+    end
+    wholeAtRefresh(h, boss)
+    wholeAtRefresh(g, copy)
+    Session.moveTo(h, 90000.0, 0.0)             -- (at its bell again, far off)
+    Session.respawned(h)
+    Session.revive(h)
+    -- (Posted as the host's R goes, half a second on: the relay hands both over together, and the guest's frame takes
+    -- the R first.)
+    local posted = false
+    local function late()
+        if not posted and count(h.sent, "^E R death") > 0 then
+            posted = true
+            for _, line in ipairs(old) do
+                s.relay:post(h, "enemy", line)
+            end
+        end
+    end
+    s:run(0.7, late)
+    check(posted and count(g.logs, "The host died and respawned: enemies respawn here too") == 1,
+        "(the host respawns, and the guest's world refreshes with the host's)")
+    check(hpOf(copy) == most,
+        "the body the guest's refresh made stands whole: the host's lines from before it, read after it, aren't news ("
+            .. tostring(hpOf(copy)) .. " of " .. tostring(most) .. ")")
+    for _, line in ipairs(old) do
+        s.relay:post(h, "enemy", line)          -- (and a late packet's, a moment on)
+    end
+    s:run(0.15)
+    check(hpOf(copy) == most, "nor one that comes a moment later, a late packet's (" .. tostring(hpOf(copy)) .. ")")
+    s:run(1.5)
+    g.hudLayout:RegisterBossHPBar(copy)         -- (the guest stands in his arena: its own fight with the new body begins)
+    s:run(3)
+    check(hpOf(copy) == most and floorOf(copy) == 0 and field(copy, "dead") ~= true,
+        "the guest's own fight with it begins, the host away at its bell: this game's own, whole as the game made it ("
+            .. tostring(hpOf(copy)) .. ", its floor " .. tostring(floorOf(copy)) .. ")")
+    swing(g, copy, most - 400)
+    s:run(2)
+    check(hpOf(copy) == most - 400 and field(copy, "dead") ~= true and count(h.logs, "Shared dust") == 0,
+        "and the guest's next blow is a blow, not its death: nothing paid to anyone")
+    allErrors(s)
+
+    -- A boss standing at the floor it's held at, handed to the guest's game with no refresh between, the host's own
+    -- stopped at a floor of its game's. Not let go as it stands: whole first.
+    local t, th, tg, _, tcopy = stopped()
+    local tmost = select(2, Fake.health(tcopy))
+    check(hpOf(tcopy) <= 2.5 and floorOf(tcopy) == 1, "(the copy at 2, held at its floor)")
+    handedOver(t, th)
+    check(net(tg).mine["sp:boss"] == true and floorOf(tcopy) == 0, "(handed over: the guest's game runs him, the hold's floor gone)")
+    check(hpOf(tcopy) == tmost and count(tg.logs, "was let go at the floor it was held at .*whole again") == 1,
+        "handed over at the hold's floor, the host's own at a floor of its game's: whole first, " .. tostring(hpOf(tcopy))
+            .. " of " .. tostring(tmost))
+    allErrors(t)
+
+    -- The host's boss with more than that floor as it's handed over (healed there a moment ago, its copy not yet): the
+    -- copy takes the host's share, what the fight had left, not its most.
+    local u, uh, ug, uboss, ucopy = stopped()
+    local umost, hostMost = select(2, Fake.health(ucopy)), select(2, Fake.health(uboss))
+    Fake.setHealth(uboss, hostMost * 0.4)
+    u:run(0.4)
+    check(hpOf(ucopy) <= 2.5, "(the host's own healed to two fifths a moment ago: its copy still at the floor)")
+    handedOver(u, uh)
+    check(net(ug).mine["sp:boss"] == true and math.abs(hpOf(ucopy) - umost * 0.4) < 2
+        and count(ug.logs, "was let go at the floor it was held at .*at the host's") == 1,
+        "the host's own at two fifths as it's handed over: the copy at two fifths ("
+            .. tostring(hpOf(ucopy)) .. " of " .. tostring(umost) .. ")")
+    allErrors(u)
+
+    -- Let go with no handover: the host gone from the map's reach, its lines of him run out. Whole too.
+    local v, vh, vg, vboss, vcopy = stopped()
+    local vmost = select(2, Fake.health(vcopy))
+    vh.hudLayout:UnRegisterBossHPBar(vboss)
+    Session.moveTo(vh, 90000.0, 0.0)
+    v:run(4)
+    check(floorOf(vcopy) == 0 and hpOf(vcopy) == vmost and count(vg.logs, "was let go at the floor it was held at .*whole again") == 1,
+        "the host's lines of him run out, his copy at the hold's floor: let go whole (" .. tostring(hpOf(vcopy)) .. ")")
+    allErrors(v)
+end
+
 -- The ninth review (d0412af..50221b8, 383-386): what it found, each with a check of its own.
 local function ninthReview()
     part("the ninth review")
@@ -16608,6 +16751,7 @@ return function(print_, scripts)
     cost()
     backToTwo()
     finisherWithTheHostUp()
+    restartWithOldLines()
     ninthReview()
     thePlayLog()
     return failed == 0

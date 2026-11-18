@@ -1505,11 +1505,36 @@ return function(api)
     net.NOT_LIFE_S = 25           -- client: the host's "not in my world" (NOT) is good this long (asked again every ASK_AGAIN_S)
     net.UNSETTLED_S = 10          -- host: no NOT this long after its own load, rest or trip
 
+    -- A copy let go: the hold's floor off it. A guest's copy of a boss standing at that floor isn't let go as it
+    -- stands. The floor is this mod's: no finish of the game's own waits on a boss held there, and let go so (a killing
+    -- blow of this player's stopped there, the host's own at a floor of its game's, or a line of the host's from before
+    -- its world refreshed), the next blow was its death in this world, its pay and all (the bench, 11-18, run207).
+    -- r: the host's line of it, where there is one. Said just now, and more than that floor: the host's share of this
+    -- copy's most, what the fight had left. Else whole: a host that lists it no more has it whole again itself (its
+    -- fight left, its world refreshed), and one that has it at that floor alive, a partner's killing blow not its end,
+    -- has it at a floor of its game's own, a finish only that world's player makes. 394.
+    net.LET_GO_LINE_S = 2.0
+    function net.letGo(actor, addr, r)
+        game.setMinHealth(actor, 0)
+        local hp, most = game.getHealth(actor)
+        if isClient() and hp and most and hp <= HELD_HP + 1.5 and most > HELD_HP + 1.5 and game.setHealth and game.isBoss
+            and not (game.isDead and game.isDead(actor)) and game.isBoss(actor, addr) then
+            local want = most
+            if r and r.at and r.Hp and r.MaxHp and r.MaxHp > 0 and r.Hp > HELD_HP + 1.5
+                and (net.frameNow or link.now()) - r.at < net.LET_GO_LINE_S then
+                want = math.min(most, most * r.Hp / r.MaxHp)
+            end
+            game.setHealth(actor, want)
+            log(string.format("%s was let go at the floor it was held at (%.0f left): %s, its fight this game's own.",
+                enemyName(actor, addr), hp, want < most and string.format("at the host's %.0f", want) or "whole again"))
+        end
+    end
+
     -- keep: address -> actor still held this tick (nil releases every held copy).
     local function releaseHeld(keep)
         for addr, actor in pairs(net.heldAlive) do
             if not (keep and keep[addr]) and valid(actor) and game.setMinHealth then
-                game.setMinHealth(actor, 0)
+                net.letGo(actor, addr, net.remoteEnemies[enemyName(actor, addr)])
             end
         end
         net.heldAlive = keep or {}
@@ -2669,6 +2694,11 @@ return function(api)
         if text == nil or net.partnerGone then
             return
         end
+        -- (A guest, just after the host's word that its world refreshed: a line still coming is from before it, a late
+        -- packet's. What the host has now it says again within the second. net.dropHostLines.)
+        if isClient() and now < (net.linesFrom or 0) then
+            return
+        end
         -- A host hears of the ones a guest's game runs (handover). Each side takes only what the other runs: a line late
         -- from before a handover pulled a copy back for a moment.
         local into = isHost() and net.guestLines or net.remoteEnemies
@@ -2699,6 +2729,23 @@ return function(api)
                 end
             end
         end
+    end
+
+    -- Guest: the host's lines so far forgotten, the ones still waiting to be read too, and none taken for LINES_AFTER_S
+    -- more. Its world refreshed (handlers.R, RH): what they said was of bodies that are gone, and this world's refresh
+    -- makes its own anew. Read after that word they were news again (a frame takes events before lines, and the relay
+    -- keeps every line that came since the last read: a hitch here leaves seconds of them), and wrote the new bodies
+    -- down to what the old ones had. A boss stopped at its floor, 383's fight starting over: the body this world's
+    -- refresh made was written to 2, this player's own fight with it began, the host handed it over (RUN 1), the hold's
+    -- floor went, and the next blow was its death, its pay to both and "beaten" in this save (the bench, 11-18, run207:
+    -- this game stood still 5.7 s as the host's hold ended). A killing blow still waiting for its answer was the old
+    -- body's as well.
+    net.LINES_AFTER_S = 0.5
+    function net.dropHostLines()
+        link.enemies()
+        net.remoteEnemies = {}
+        net.lethalPending = {}
+        net.linesFrom = link.now() + net.LINES_AFTER_S
     end
 
     -- Guest: a live enemy of the host's within cm of this player, by its line of the last second. The guest's own game counts
@@ -2751,7 +2798,7 @@ return function(api)
             end
             if net.heldAlive[addr] then
                 net.heldAlive[addr] = nil
-                game.setMinHealth(actor, 0)
+                net.letGo(actor, addr, r)   -- (a boss standing at that floor: not as it stands)
             end
             if api.puppets then
                 api.puppets.release(addr)   -- (its own AI back now, not when the host's lines run out)
@@ -3887,6 +3934,9 @@ return function(api)
             net.pendingBosses[name] = true
         end
         seen = {}
+        if isClient() and not elsewhere then
+            net.dropHostLines()     -- (the host's lines from before say nothing of what stands here from now)
+        end
         if game.refreshEnemies and not elsewhere then
             game.refreshEnemies()
         end
@@ -3908,6 +3958,9 @@ return function(api)
         log("Player " .. slot .. " rested at a bell: the host's world refreshed, enemies respawn here too.")
         forgetDeaths(kind, elsewhere, slot)
         seen = {}
+        if not elsewhere then
+            net.dropHostLines()
+        end
         if game.refreshEnemies and not elsewhere then
             game.refreshEnemies()
         end
