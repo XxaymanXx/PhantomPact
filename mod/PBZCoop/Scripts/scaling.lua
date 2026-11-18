@@ -392,9 +392,15 @@ return function(api)
         if api.puppets and api.puppets.follows and api.puppets.follows(addr) then
             return false
         end
+        -- (Its attributes asked first: a body the game is still making has none for a moment. Set on nothing no error
+        -- came: it was marked done and said so, and kept the game's own poise for good. The bench, 11-18.)
+        local set = e.AttributeSetBase
+        if not valid(set) then
+            return false
+        end
         poised[addr] = name
         local ok = pcall(function()
-            local a = e.AttributeSetBase.TakenReductionMultiplier_Poise
+            local a = set.TakenReductionMultiplier_Poise
             a.BaseValue = 1 / scaling.bossPoise
             a.CurrentValue = 1 / scaling.bossPoise
         end)
