@@ -84,6 +84,7 @@ return {
         ["nobody has joined yet. Your partner needs Role = Guest and your address: two Hosts never find each other."] = "لم ينضم أحد بعد. يحتاج شريكك إلى Role = Guest وإلى عنوانك: إذا استضاف كلاكما فلن يجد أحدكما الآخر.",  -- tip.conn.nobody_joined
         ["packets refused: both PCs need the same Secret in PhantomPact.ini (or both none), and their clocks within two minutes of each other."] = "رُفض الاتصال: يجب أن تتطابق كلمة المرور (Secret) في PhantomPact.ini على الجهازين (أو تُترك فارغة على كليهما)، وأن يقل الفرق بين ساعتيهما عن دقيقتين.",  -- tip.conn.secret
         ["Steam is relaying this connection, which adds delay. A direct one needs SteamDirect = On on both PCs and routers that allow it."] = "يمر هذا الاتصال عبر وسيط من Steam، مما يزيد التأخير. الاتصال المباشر يحتاج إلى SteamDirect = On على الجهازين، وإلى راوترات تسمح به.",  -- tip.conn.steam_relay
+        -- the play log (playlog.lua)
         -- no Chinese: the tip's head (status.lua says it on its own), the partner, local co-op (F4)
         ["Phantom Pact: "] = "Phantom Pact: ",  -- tip.prefix
         ["partner connected, signed."] = "اتصل شريكك، والاتصال محمي بكلمة المرور.",  -- tip.conn.connected_signed

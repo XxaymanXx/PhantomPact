@@ -1471,6 +1471,15 @@ function Fake.thinkEnemies(pc)
     end
 end
 
+-- A file's text as it stands: one closed, or one still being written, as far as it was flushed.
+function Fake.fileText(pc, name)
+    local pieces = pc.writing[name]
+    if pieces then
+        return table.concat(pieces)
+    end
+    return pc.files[name]
+end
+
 -- Files, in memory, by name: all the mod's are in one folder.
 local function files(pc)
     local function base(path)
@@ -1481,7 +1490,7 @@ local function files(pc)
         local key = base(path)
         mode = mode or "r"
         if mode:find("r") then
-            local text = pc.files[key]
+            local text = Fake.fileText(pc, key)
             if text == nil then
                 return nil
             end
@@ -1492,21 +1501,43 @@ local function files(pc)
                         local rest = text:sub(pos)
                         pos = #text + 1
                         return rest
+                    elseif type(what) == "number" then
+                        if pos > #text then
+                            return nil
+                        end
+                        local piece = text:sub(pos, pos + what - 1)
+                        pos = pos + #piece
+                        return piece
                     end
                     return nil
                 end,
                 lines = function() return text:gmatch("[^\n]+") end,
-                seek = function() return #text end,
+                -- (No argument, as before: the size. "end": the size, and reading goes on from there. "set": from that place.)
+                seek = function(_, whence, offset)
+                    if whence == "set" then
+                        pos = (offset or 0) + 1
+                        return pos - 1
+                    elseif whence == "end" then
+                        pos = #text + 1
+                    end
+                    return #text
+                end,
                 close = function() end,
             }
         end
-        local out = {}
+        local out = { mode:find("a") and Fake.fileText(pc, key) or nil }
+        pc.writing[key] = nil
         return {
             write = function(self, s)
+                if pc.fileFails and pc.fileFails[key] then
+                    error("disk full")              -- (a test's: this file can't be written any more)
+                end
                 out[#out + 1] = s
                 return self
             end,
-            close = function() pc.files[key] = table.concat(out) end,
+            -- (What's written so far is there to read: kept as its pieces, and joined when it's read.)
+            flush = function() pc.writing[key] = out end,
+            close = function() pc.files[key], pc.writing[key] = table.concat(out), nil end,
         }
     end
     function fs.remove(path)
@@ -1522,7 +1553,7 @@ local function files(pc)
 end
 
 function Fake.new(id, scripts, ini, link)
-    local pc = { id = id, scripts = scripts, now = 100.0, trace = {}, logs = {}, errors = {}, missing = {}, missed = {}, files = {}, loops = {}, hooks = {},
+    local pc = { id = id, scripts = scripts, now = 100.0, trace = {}, logs = {}, errors = {}, missing = {}, missed = {}, files = {}, writing = {}, loops = {}, hooks = {},
         nextAddress = 0x100000, calls = 0, keys = {}, enemies = {}, spawners = {}, spawned = {}, hitComps = {}, factions = {}, pickups = {}, chests = {}, blockers = {}, link = link, map = "Map_Xigu",
         paused = false }
     pc.meta = makeMeta(pc)

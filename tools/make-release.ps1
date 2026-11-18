@@ -25,6 +25,9 @@ Copy-Item (Join-Path $root 'INSTALL.md') (Join-Path $stage 'Phantom Pact - INSTA
 Copy-Item (Join-Path $root 'docs\LOCAL_COOP.md') (Join-Path $stage 'Phantom Pact - LOCAL CO-OP.md')
 foreach ($f in 'enabled.txt', 'PhantomPact.ini') { Copy-Item (Join-Path $root "mod\PBZCoop\$f") $mod }
 Copy-Item (Join-Path $root 'mod\PBZCoop\Scripts\*.lua') (Join-Path $mod 'Scripts')
+# The play log's folder (playlog.lua: Lua can't make one), with a note on what lands there.
+New-Item -ItemType Directory -Force (Join-Path $mod 'logs') | Out-Null
+Copy-Item (Join-Path $root 'mod\PBZCoop\logs\README.txt') (Join-Path $mod 'logs')
 # Phantom Pact's own UE4SS signatures (GNatives, GUObjectArray): UE4SS starts on the game since the 2026-11-04 update.
 $sigs = Join-Path $stage 'platform\steam\ue4ss\UE4SS_Signatures'
 New-Item -ItemType Directory -Force $sigs | Out-Null
