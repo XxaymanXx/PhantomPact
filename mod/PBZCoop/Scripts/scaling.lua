@@ -238,7 +238,9 @@ return function(api)
                 capped[addr] = nil      -- (its most set again, by a new count's scaling: as any body from here)
             else
                 local drop = c.hp - hp
-                if drop > 0.5 and hp > 0.5 and drop <= c.most * BLOW_MOST and hp > game.healthFloor(boss) + 0.5 then
+                -- (Not at its floor: a floor of its game's own, where what comes is its script's, or 0, where it's
+                -- falling. One rule: said twice before, the second never asked. The eighth review.)
+                if drop > 0.5 and drop <= c.most * BLOW_MOST and hp > game.healthFloor(boss) + 0.5 then
                     hp = hp + drop * (1 - 1 / c.f)
                     game.setHealth(boss, hp)
                 end
@@ -708,6 +710,13 @@ return function(api)
             end
             at = at + 1
             local name = valid(e) and not inSoloFight(addr) and e:GetFName():ToString()
+            -- (A body the game is still making has no attributes for a moment: looked at again at the next pass. Scaled
+            -- then, nothing was written and it was marked done: the game's own numbers for the whole fight, and the
+            -- guests' copies pulled down to them. A boss too since 382, its poise's refusal no longer the end of that
+            -- look; an enemy with no bar before it as well. The eighth review.)
+            if name and not valid(e.AttributeSetBase) then
+                name = false
+            end
             -- (How hard it hits, a ghost twin's too: twins.lua gives a twin its original's health and posture, already
             -- scaled, as it came, but not this; the review of 11-09, every twin at the game's own.)
             if name and hitting and not game.isDead(e) and scaleHits(e, addr, name) then

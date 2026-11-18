@@ -96,6 +96,8 @@ With more than two players:
 - F3 goes to the nearest partner who's up. If nobody's on your map, a guest goes to the host.
 - Enemies get more health and posture for each person connected: see [Co-op difficulty](#co-op-difficulty).
 - Die in a boss fight and you wait until the boss dies or everyone else is down too. The camera moves to someone who's still up.
+  A boss that falls only to a finishing move (the first map's Axemaster) needs the host on their feet to make it: with the
+  host down when he's ready for it, the fight starts over 15 seconds on, and each of you is told why.
 - What anyone gets, everyone gets, and if two of you are given the same thing at once it counts once.
 - If a guest drops out the others play on. If the host leaves, it's over for everyone.
 - Enemies are shared near the host, and near a guest up to 120 m from the host. Further off the host's game leaves them
