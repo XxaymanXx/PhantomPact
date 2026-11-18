@@ -96,8 +96,9 @@ With more than two players:
 - F3 goes to the nearest partner who's up. If nobody's on your map, a guest goes to the host.
 - Enemies get more health and posture for each person connected: see [Co-op difficulty](#co-op-difficulty).
 - Die in a boss fight and you wait until the boss dies or everyone else is down too. The camera moves to someone who's still up.
-  A boss only the host can finish (the first map's Axemaster falls only to the host's finishing move) needs the host on
-  their feet: with the host down when it comes to that, the fight starts over 20 seconds on, and each of you is told why.
+  A boss that falls only to a finishing move (the first map's Axemaster) can be finished by any of you: a guest's own
+  finishing move counts, a plain blow doesn't, and you're told so. With the host down and nobody making it for three
+  minutes, the fight starts over.
 - What anyone gets, everyone gets, and if two of you are given the same thing at once it counts once.
 - If a guest drops out the others play on. If the host leaves, it's over for everyone.
 - Enemies are shared near the host, and near a guest up to 120 m from the host. Further off the host's game leaves them
@@ -257,10 +258,9 @@ Not in PvPvE yet: executions (posture break only staggers). It's for two players
 - With both of you in a fight, an enemy picks whom to fight by how near each of you is and the damage each has done to it
   lately, and holds its target a few seconds (a boss longer) before it turns.
 - If one of you dies during a boss fight, they watch the other until it's over, and respawn when the boss dies or the
-  other dies too. A boss only the host can finish (the first map's Axemaster falls only to the host's finishing move)
-  needs the host on their feet: with the host down when it comes to that, the fight starts over 20 seconds on, and
-  you're both told why. A guest's own finishing move plays there and leaves him standing: it's the host's to make,
-  and each of you is told so.
+  other dies too. A boss that falls only to a finishing move (the first map's Axemaster) can be finished by either of
+  you: a guest's own finishing move counts, a plain blow doesn't, and you're both told so. With the host down and
+  nobody making it for three minutes, the fight starts over.
 - If you join while the host is in a boss fight, you watch it (F3 takes you in now), and go to them when it's over; after
   30 s you're free to move. From another map there's nothing to watch: F3 takes you there now, or you go at the end.
 - Bells: the host's bells light for you when you come to them, not before.
