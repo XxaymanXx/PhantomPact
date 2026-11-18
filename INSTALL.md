@@ -252,8 +252,11 @@ Not in PvPvE yet: executions (posture break only staggers). It's for two players
   usual on both PCs, so block, parry and dodge do too.
 - Boss fights: when one of you starts a boss, the other gets a tip: press E at the black wall, or F3, to join. Stay close
   when you're about to start one: far from the host, enemies that aren't loaded on the host's PC fight on their own on the
-  guest's. A story boss's opening scene is each player's own: if you weren't beside the host as it began, it may play
-  for you as you go in, while the fight goes on.
+  guest's. Scenes are watched together: when a scene begins for one of you and the other stands within 30 m with that
+  scene still ahead of them, they're set down at its start and it plays for both, the later one a touch faster till
+  the two are at the same moment. Further off, a story boss's opening scene is each player's own: it may play for you
+  as you go in, while the fight goes on. `WatchTogether = Off` in PhantomPact.ini keeps scenes and bells each
+  player's own.
 - If your partner disappears, they are down, in a cutscene, on another map or disconnected; they come back.
 - With both of you in a fight, an enemy picks whom to fight by how near each of you is and the damage each has done to it
   lately, and holds its target a few seconds (a boss longer) before it turns.
@@ -263,8 +266,11 @@ Not in PvPvE yet: executions (posture break only staggers). It's for two players
   nobody making it for three minutes, the fight starts over.
 - If you join while the host is in a boss fight, you watch it (F3 takes you in now), and go to them when it's over; after
   30 s you're free to move. From another map there's nothing to watch: F3 takes you there now, or you go at the end.
-- Bells: the host's bells light for you when you come to them, not before.
-- Not shared yet: cutscenes, dialogue and spending dust. Quests and story: see The host's story, above.
+- Bells: a bell one of you rings for the first time is rung for the other too if they're within 30 m of it, in the
+  host's world as well, with its scene where it has one. Further off, the host's bells light for you when you come to
+  them, not before.
+- Not shared yet: dialogue and spending dust (a scene is, when you're together: above). Quests and story: see The
+  host's story, above.
 - Never press Ctrl+R (UE4SS hot reload) while playing together: it can crash the game. Restart the game instead.
 
 ## Other mods

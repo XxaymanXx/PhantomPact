@@ -10952,7 +10952,8 @@ local function bossScenes()
     s:run(1)
     check(field(g.scene, "skipped") == 1 and field(g.scene, "playing") == true,
         "one the host watched to its end isn't cut short on the guest's side")
-    check(count(h.sent, "^E SCENE ") == 1, "and nothing is said of it")
+    -- (No skip, that is: a scene's beginning and its place are told since 398, SCENE on / at.)
+    check(count(h.sent, "^E SCENE skip ") == 1, "and no skip is said of it")
 
     Session.scene(g, false)
     Session.scene(h, true, "Seq025")
@@ -15990,6 +15991,221 @@ local function guestsFinisher()
     allErrors(d)
 end
 
+-- Watching together (398). The user, 11-18: "why don't you make the scene for both play at the same time ... if they
+-- were both in the same place of the boss. like a synced movie people want to watch together and react together".
+-- The game starts a place's scene as its own player stands in the story's box for it (the bench, run219: some 2 s
+-- on). Here each world has such a box at a spot, and the test begins the scene a second after that world's player is
+-- in it, the box gone with that.
+local function watchingTogether()
+    part("a scene begun beside a partner is watched together")
+    local SPOT = { X = 2000, Y = 0 }
+    local function boxes(s, name)
+        local box, since, begun = {}, {}, {}
+        for _, pc in ipairs(s.pcs) do
+            box[pc] = Fake.storyBox(pc, SPOT.X, SPOT.Y, 100, 7)
+            pc.scene = pc.scene or Fake.sceneManager(pc)    -- (the game's scene manager, there all along)
+        end
+        s:run(2.5)                                          -- (found by the mod: it looks once in 2 s while it has none)
+        return function()
+            for _, pc in ipairs(s.pcs) do
+                if not begun[pc] and rawget(box[pc], "__alive") and gap(at(pc.pawn), SPOT) <= 300 then
+                    since[pc] = since[pc] or pc.now
+                    if pc.now - since[pc] >= 1.0 then
+                        begun[pc] = true
+                        rawset(box[pc], "__alive", false)
+                        Session.scene(pc, true, name)
+                    end
+                end
+            end
+        end, begun, box
+    end
+    local function where(pc)
+        return pc.env.PBZ.game.scenePos() or -1
+    end
+    local function rate(pc)
+        return field(pc.scene, "rate")
+    end
+
+    -- The host steps in, the guest 15 m back.
+    local s, h, g = pair()
+    local step, begun = boxes(s, "Seq014")
+    Session.moveTo(h, SPOT.X, SPOT.Y)
+    s:run(1.6, step)
+    check(begun[h] == true and not begun[g] and count(h.sent, "^E SCENE on Seq014 2000 0 %S+ %S+$") == 1,
+        "the host's scene begins, told with where its player stood")
+    s:run(1.8, step)
+    check(begun[g] == true and gap(at(g.pawn), SPOT) < 10 and count(g.logs, "set down in the story's box for it") == 1,
+        "the guest, 15 m back with no scene of its own, is set down in its world's box for it: its own game begins the same scene")
+    s:run(1.5, step)
+    check(rate(g) > 1 and rate(h) == 1 and where(h) - where(g) > 0.2,
+        "begun two seconds later, the guest's plays a little faster (" .. tostring(rate(g)) .. "), the host's at its own speed")
+    s:run(6, step)
+    check(math.abs(where(h) - where(g)) < 0.3 and rate(g) == 1 and count(g.logs, "is where your partner's is now") == 1,
+        "till both are at the same moment of it (" .. string.format("%.2f / %.2f", where(h), where(g)) .. ")")
+    Session.scene(h, false)
+    Session.scene(g, false)
+    s:run(1)
+    check(count(h.sent, "^E SCENE skip") == 0, "watched to its end by both: no skip is told")
+    allErrors(s)
+
+    -- The other way round: the guest steps in, the host 15 m back.
+    local t, th, tg = pair()
+    local tstep, tbegun = boxes(t, "Seq014")
+    Session.moveTo(th, 500, 0)
+    Session.moveTo(tg, SPOT.X, SPOT.Y)
+    t:run(3.4, tstep)
+    check(tbegun[tg] == true and tbegun[th] == true and gap(at(th.pawn), SPOT) < 10
+        and count(tg.sent, "^E SCENE on Seq014 ") == 1,
+        "the guest's scene begins with the host 15 m back: the host is set down in its box, its own begins too")
+    t:run(7.5, tstep)
+    check(math.abs(where(th) - where(tg)) < 0.3 and rate(th) == 1 and rate(tg) == 1,
+        "and the host's, the later one, has caught the guest's up (" .. string.format("%.2f / %.2f", where(th), where(tg)) .. ")")
+    allErrors(t)
+
+    -- Left where they are: one who isn't by, one whose world has played that scene (this session, or before it: no
+    -- box of the story's there any more), one on another map, one in a boss fight of their own, and anyone with
+    -- WatchTogether off.
+    local function left(why, before, ini)
+        local u, uh, ug = pair(ini)
+        local ustep, ubegun, ubox = boxes(u, "Seq014")
+        if before then
+            before(u, uh, ug, ubox)
+        end
+        local wx, wy = at(ug.pawn).X, at(ug.pawn).Y
+        Session.moveTo(uh, SPOT.X, SPOT.Y)
+        u:run(4, ustep)
+        check(ubegun[uh] == true and not ubegun[ug] and math.abs(at(ug.pawn).X - wx) < 1 and math.abs(at(ug.pawn).Y - wy) < 1
+            and count(ug.logs, "set down in the story's box") == 0, why)
+        allErrors(u)
+    end
+    left("a partner 50 m back is left where they are", function(u, _, ug)
+        Session.moveTo(ug, SPOT.X - 5000, 0)
+        u:run(1)
+    end)
+    left("one whose world has played that scene this session is left", function(u, _, ug, ubox)
+        rawset(ubox[ug], "__alive", false)
+        Session.scene(ug, true, "Seq014")
+        u:run(1)
+        Session.scene(ug, false)
+        u:run(1)
+    end)
+    left("one whose world has no box of the story's there (played before this session) is left", function(_, _, ug, ubox)
+        rawset(ubox[ug], "__alive", false)
+    end)
+    left("one on another map is left", function(u, _, ug)
+        ug.map = "Map_Other"
+        u:run(3)
+    end)
+    left("one in a boss fight of their own is left", function(u, _, ug)
+        ug.hudLayout:RegisterBossHPBar(Session.enemyOn(ug, "boss"))
+        u:run(2)
+    end)
+    left("with WatchTogether = Off each player's scenes are their own", nil, "WatchTogether = Off\n")
+
+    -- A scene played faster ends that much sooner by the clock: the host's own, caught up by some five seconds, isn't
+    -- told as skipped at its end.
+    local v, vh, vg = pair()
+    local vstep, vbegun = boxes(v, "Seq014")
+    for _, pc in ipairs(v.pcs) do
+        Fake.put(pc.scene, "frames", 900)       -- (a 30 s scene)
+    end
+    Session.moveTo(vh, 500, 0)
+    vh.env.PBZ.game.inDialogue = function() return true end     -- (the host is talking: left where it stands)
+    Session.moveTo(vg, SPOT.X, SPOT.Y)
+    v:run(5.0, vstep)
+    check(vbegun[vg] == true and not vbegun[vh], "(the host, in a dialogue, is left where it stands)")
+    vh.env.PBZ.game.inDialogue = function() return false end
+    v:run(2.2, vstep)
+    check(vbegun[vh] == true, "(and set down as that ends, the guest's scene some five seconds in)")
+    v:run(45, function()
+        vstep()
+        if field(vh.scene, "playing") and where(vh) >= 30 then
+            Session.scene(vh, false)
+            Session.scene(vg, false)
+        end
+    end)
+    check(field(vh.scene, "playing") ~= true and count(vh.sent, "^E SCENE skip") == 0
+        and count(vh.logs, "played a little faster") == 1,
+        "the host's, played faster for the seconds it was behind, ends that much sooner: not told as a skip")
+    allErrors(v)
+end
+
+-- A bell together (398). The user, 11-18: "for bell you should also make sure if the guest presses it then also
+-- register for host if they are near each other ... same goes vise versa". A first ring by either is the other's
+-- world's first ring too, the game's own (the bell's OnInteract), when they're by it.
+local function bellsTogether()
+    part("a bell rung beside a partner is rung for both")
+    local BELL = { X = 700, Y = 0 }
+    local function has(list, x)
+        for _, v in ipairs(list) do
+            if v == x then
+                return true
+            end
+        end
+        return false
+    end
+    local function woken(pc)
+        return field(pc.bell, "active") == true and has(pc.bellIds, "Bell_Sim_001")
+    end
+
+    -- The host rings it, the guest 10 m off.
+    local s, h, g = pair()
+    Session.moveTo(g, 1700, 0)
+    Session.moveTo(h, 600, 0)
+    s:run(2)
+    h.bell:OnInteract(h.pawn)
+    s:run(1.5)
+    check(woken(h) and count(h.sent, "^E BELL ring 700 0 100 600 0 %S+ %S+$") == 1,
+        "the host's first ring of a bell is told with where the bell stands and where the host stood")
+    check(woken(g) and count(g.logs, "rung in this world too") == 1 and gap(at(g.pawn), BELL) < 400,
+        "the guest, 10 m off, is set down by it and its world's bell rung for it: woken there too, the game's own ring")
+    check(count(g.sent, "^E BELL ring") == 0, "and that ring isn't told back")
+    allErrors(s)
+
+    -- The other way round: the guest rings it, the host by. Registered in the host's world too.
+    local t, th, tg = pair()
+    Session.moveTo(tg, 600, 0)
+    t:run(2)
+    tg.bell:OnInteract(tg.pawn)
+    t:run(1.5)
+    check(woken(tg) and woken(th) and count(th.logs, "rung in this world too") == 1,
+        "the guest's first ring with the host by: rung in the host's world too")
+    allErrors(t)
+
+    -- Left as it was: a partner 50 m off, one whose world has it woken, one in a boss fight of their own, one on
+    -- another map, anyone with WatchTogether off.
+    local function left(why, before, ini, rungAlready)
+        local u, uh, ug = pair(ini)
+        Session.moveTo(uh, 600, 0)
+        if before then
+            before(u, uh, ug)
+        end
+        u:run(2)
+        local wx = at(ug.pawn).X
+        uh.bell:OnInteract(uh.pawn)
+        u:run(1.5)
+        check(woken(uh) and (rungAlready or not woken(ug)) and math.abs(at(ug.pawn).X - wx) < 1
+            and count(ug.logs, "rung in this world too") == 0, why)
+        allErrors(u)
+    end
+    left("a partner 50 m off keeps the bell for their own first ring", function(_, _, ug)
+        Session.moveTo(ug, 5700, 0)
+    end)
+    left("one whose world has it woken is left as they are", function(_, _, ug)
+        Fake.put(ug.bell, "active", true)
+        ug.bellIds[#ug.bellIds + 1] = "Bell_Sim_001"
+    end, nil, true)
+    left("one in a boss fight of their own is left", function(u, _, ug)
+        ug.hudLayout:RegisterBossHPBar(Session.enemyOn(ug, "boss"))
+        u:run(1)
+    end)
+    left("one on another map is left", function(u, _, ug)
+        ug.map = "Map_Other"
+        u:run(2)
+    end)
+    left("with WatchTogether = Off each player's bells are their own", nil, "WatchTogether = Off\n")
+end
+
 -- 383's fight starting over with the guest still striking, and the host's lines of the boss from before its respawn
 -- read after it (the bench, 11-18, run207). The relay keeps every line that came since the last read and a frame takes
 -- events before lines, so a guest whose game stood still as the host's hold ended (5.7 s there) handled the host's R,
@@ -16960,6 +17176,8 @@ return function(print_, scripts)
     backToTwo()
     finisherWithTheHostUp()
     guestsFinisher()
+    watchingTogether()
+    bellsTogether()
     restartWithOldLines()
     ninthReview()
     thePlayLog()
