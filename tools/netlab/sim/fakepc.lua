@@ -1052,13 +1052,27 @@ Fake.LEVEL_LOOT = {
 }
 
 function Fake.sceneManager(pc)
-    local m = object(pc, "PBZLevelSequenceManager", { playing = false, ActiveSessionPlayer = nil, sequence = nil, frames = 240 })
+    local m = object(pc, "PBZLevelSequenceManager", { playing = false, ActiveSessionPlayer = nil, sequence = nil, frames = 240,
+        rate = 1, posAt = 0, since = 0 })
     defs(pc, m, {
         IsInSequence = function(self) return rawget(self, "__fields").playing end,
         GetCurrentSequence = function(self) return rawget(self, "__fields").sequence end,
         -- (The manager stands in for its own sequence player.)
         GetFrameDuration = function(self) return rawget(self, "__fields").frames end,
         GetFrameRate = function() return { Numerator = 30, Denominator = 1 } end,
+        -- (Where it is, at 30 frames a second: from where it was when it began or its speed last changed.)
+        GetCurrentTime = function(self)
+            local f = rawget(self, "__fields")
+            local seconds = f.posAt + (pc.now - f.since) * f.rate
+            return { Time = { FrameNumber = { Value = math.floor(seconds * 30 + 0.5) } }, Rate = { Numerator = 30, Denominator = 1 } }
+        end,
+        SetPlayRate = function(self, rate)
+            local f = rawget(self, "__fields")
+            put(self, "posAt", f.posAt + (pc.now - f.since) * f.rate)
+            put(self, "since", pc.now)
+            put(self, "rate", rate)
+        end,
+        GetPlayRate = function(self) return rawget(self, "__fields").rate end,
         GoToEndAndStop = function(self)
             put(self, "playing", false)
             put(self, "skipped", (rawget(self, "__fields").skipped or 0) + 1)
@@ -1066,6 +1080,18 @@ function Fake.sceneManager(pc)
     })
     put(m, "ActiveSessionPlayer", m)
     return m
+end
+
+-- One of the story's trigger boxes, made as it runs (TriggerBox_<n>): a place's scene begins as this world's player
+-- stands in it (the test's to do), and it's gone once it has.
+function Fake.storyBox(pc, x, y, z, n)
+    local b = object(pc, "TriggerBox", {})
+    rawset(b, "__name", "TriggerBox_" .. tostring(n or 1))
+    rawset(b, "__classObject", { IsValid = function() return true end, GetFName = function() return name("TriggerBox") end })
+    defs(pc, b, { K2_GetActorLocation = function() return { X = x, Y = y, Z = z } end })
+    pc.spawned = pc.spawned or {}
+    pc.spawned[#pc.spawned + 1] = b
+    return b
 end
 
 -- Something to use: a chest, a pile, a bell (a checkpoint), or what only looks like one.
@@ -1920,14 +1946,29 @@ function Fake.new(id, scripts, ini, link)
         end,
     })
     local BELL_HEAL = "/Script/ProjectPBZ.MelodiousBell:RestoreHealth"
-    local bell = object(pc, "Bell")
+    local BELL_TOUCH = "/Game/PBZContent/Blueprint/Item/BP_MelodiousBell.BP_MelodiousBell_C:OnFirstTouchBell"
+    local bell = object(pc, "Bell", { active = false, loc = { X = 700.0, Y = 0.0, Z = 100.0 }, id = "Bell_Sim_001" })
     defs(pc, bell, { RestoreHealth = function()
         local _, maxhp = Fake.health(pawn)
         Fake.setHealth(pawn, maxhp)
         for _, fn in ipairs(pc.hooks[BELL_HEAL] or {}) do
             fn()
         end
-    end })
+    end,
+        K2_GetActorLocation = function(self) return rawget(self, "__fields").loc end,
+        GetActive = function(self) return rawget(self, "__fields").active end,
+        -- (E at it, or the same asked by a mod: its first ring wakes it, with its first touch; then its sit.)
+        OnInteract = function(self)
+            local f = rawget(self, "__fields")
+            if not f.active then
+                put(self, "active", true)
+                pc.bellIds[#pc.bellIds + 1] = f.id
+                for _, fn in ipairs(pc.hooks[BELL_TOUCH] or {}) do
+                    fn({ get = function() return self end })
+                end
+            end
+            self:RestoreHealth()
+        end })
     pc.bell = bell
     local BACKPACK = "/Script/ProjectPBZ.PBZBackPackSubsystem"
     -- The game's pickup notices, as the bench found them (11-09, 11-12): given with the flag on, a thing this player has
@@ -2654,6 +2695,8 @@ function Fake.new(id, scripts, ini, link)
             return pc.flows
         elseif class == "SpecialMoveVolumeBase" then
             return pc.volumes or {}
+        elseif class == "MelodiousBell" then
+            return { pc.bell }
         elseif class == "PBZAbilityNodesComponent" then
             return pc.tree and { pc.tree } or {}
         end

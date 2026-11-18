@@ -99,6 +99,7 @@ return function(api)
     api.partner.teleport = (settings.partnerteleport or "off"):lower() == "on"
     if api.story then
         api.story.follow = (settings.followhoststory or "on"):lower() ~= "off"
+        api.story.together = (settings.watchtogether or "on"):lower() ~= "off"
     end
     -- The co-op difficulty's numbers as the ini has them: enemies' health and posture, a boss's poise and armour (first),
     -- then bosses' own health and posture and how hard enemies and bosses hit. Read as co-op starts online.

@@ -4711,11 +4711,44 @@ return function(api)
             return ft.hooked == true
         end
         ft.hooked = pcall(function()
-            RegisterHook(ft.FN, function()
+            RegisterHook(ft.FN, function(self)
                 game.firstTouchAt = os.clock()
+                -- (Which bell, by where it stands: told to a partner who's by, story.lua's bells together. Numbers
+                -- only: no object is kept.)
+                pcall(function()
+                    local l = self:get():K2_GetActorLocation()
+                    ft.bell = { X = l.X, Y = l.Y, Z = l.Z, at = game.firstTouchAt }
+                end)
             end)
         end)
         return ft.hooked
+    end
+
+    -- This world's bell standing where a partner's does (within 3 m): "woken" if it is here, "asleep" if not, nil if
+    -- there's none. With a player, one asleep is rung for them as E rings it, the bell's own OnInteract: the game's
+    -- whole first ring in this world, its walk up, the ring, its first touch, the quest and flow steps, the save, and
+    -- a crane bell's scene 5 s on (the bench, 11-18, run220: the bell woken and lit, the player in hand again, no menu
+    -- left up; the bell's own OnFirstTouchBell called alone wakes nothing). Says "rung" then.
+    function game.bellAt(x, y, z, pawn)
+        local out = nil
+        for _, b in ipairs(FindAllOf("MelodiousBell") or {}) do
+            if out == nil and valid(b) then
+                pcall(function()
+                    local l = b:K2_GetActorLocation()
+                    if math.sqrt((l.X - x) ^ 2 + (l.Y - y) ^ 2 + (l.Z - z) ^ 2) <= 300 then
+                        if b:GetActive() == true then
+                            out = "woken"
+                        elseif valid(pawn) then
+                            b:OnInteract(pawn)
+                            out = "rung"
+                        else
+                            out = "asleep"
+                        end
+                    end
+                end)
+            end
+        end
+        return out
     end
 
     -- Rest this player as a sit would: only for a partner's sit during a boss fight this player is in (their own, or a
@@ -7305,6 +7338,56 @@ return function(api)
             end
         end)
         return length
+    end
+
+    -- Where this world's scene is, in seconds from its start, or nil; and its speed set (1 is its own): one begun a
+    -- moment after a partner's same scene is played a little faster till the two are at the same moment of it
+    -- (story.lua's scenes; the bench, 11-18, run219: a sequence's player takes both).
+    function game.scenePos()
+        local at = nil
+        pcall(function()
+            local p = game.inCutscene() and scenePlayer()
+            if p then
+                local t = p:GetCurrentTime()
+                local fps = t.Rate.Numerator / t.Rate.Denominator
+                if fps > 0 then
+                    at = t.Time.FrameNumber.Value / fps
+                end
+            end
+        end)
+        return at
+    end
+
+    function game.sceneRate(rate)
+        local ok = false
+        pcall(function()
+            local p = game.inCutscene() and scenePlayer()
+            if p then
+                p:SetPlayRate(rate)
+                ok = true
+            end
+        end)
+        return ok
+    end
+
+    -- The story's trigger box nearest a place, within cm of it: where it is, or nil. The story makes its boxes as it
+    -- runs (TriggerBox_<n>: a level's own, an audio box say, has another name), and a place's scene begins as this
+    -- world's player stands in its box: set down in one, the game begins it as for a player who walked in (the bench's
+    -- boss sweeps, 11-17, and run219). A world that has played a scene has no box for it.
+    function game.storyBox(x, y, z, cm)
+        local best, bestD = nil, cm
+        for _, a in ipairs(FindAllOf("TriggerBox") or {}) do
+            pcall(function()
+                if valid(a) and a:GetFName():ToString():find("^TriggerBox_%d+$") then
+                    local l = a:K2_GetActorLocation()
+                    local d = math.sqrt((l.X - x) ^ 2 + (l.Y - y) ^ 2 + (l.Z - z) ^ 2)
+                    if d <= bestD then
+                        best, bestD = { X = l.X, Y = l.Y, Z = l.Z }, d
+                    end
+                end
+            end)
+        end
+        return best
     end
 
     -- This world's scene, ended where it would end by itself, as a skip does: what follows it runs.

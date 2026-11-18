@@ -173,6 +173,11 @@ end
 -- A story scene plays, or stops. name: its sequence's (none by default).
 function Session.scene(pc, on, name)
     pc.scene = pc.scene or Fake.sceneManager(pc)
+    if on and not rawget(pc.scene, "__fields").playing then
+        Fake.put(pc.scene, "posAt", 0)          -- (from its start, at its own speed)
+        Fake.put(pc.scene, "since", pc.now)
+        Fake.put(pc.scene, "rate", 1)
+    end
     Fake.put(pc.scene, "playing", on)
     -- (A scene takes the camera, as the game's camera cuts do: a sequence with the camera still on the player is no scene.)
     if pc.controller then
@@ -209,7 +214,7 @@ end
 -- A player rings a bell for the first time: its first touch, then its sit. (A crane bell's scene follows.)
 function Session.firstTouch(pc)
     for _, fn in ipairs(pc.hooks["/Game/PBZContent/Blueprint/Item/BP_MelodiousBell.BP_MelodiousBell_C:OnFirstTouchBell"] or {}) do
-        fn()
+        fn({ get = function() return pc.bell end })
     end
     Session.sit(pc)
 end
