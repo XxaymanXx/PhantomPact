@@ -3972,14 +3972,13 @@ return function(api)
     -- Guest: a move lunges at its enemy's target, so a copy with none fell short of the host's and was dragged the rest of the
     -- way, attack pose and all. It's given the host's target, and its own picker is told to leave that alone.
     -- (Nothing of the game's is kept between turns, as the host's steering keeps none since 362: the picker's address,
-    -- the body's name and what the picker waited, and the picker itself looked up again when it's to be written, every
-    -- COPY_LOOK_S. Kept by the copy's address alone, it was written through after valid() with no word that it was
-    -- still that copy's. And the copy's controller and blackboard are asked first: nothing there went into the game's
-    -- own call, which no pcall catches. The seventh review's G6.)
-    local copyPickers = {}        -- enemy address -> { fname, at = its picker's address, cooldown = what it waited, lookedAt }
+    -- the body's name and what the picker waited, and the picker itself looked up again at each aim (one comes with a
+    -- move of the enemy's, not with every line). Kept by the copy's address alone, it was written through after
+    -- valid() with no word that it was still that copy's. And the copy's controller and blackboard are asked first:
+    -- nothing there went into the game's own call, which no pcall catches. The seventh review's G6.)
+    local copyPickers = {}        -- enemy address -> { fname, at = its picker's address, cooldown = what it waited }
     local TARGET_KEY = "AI.BlackboardKey.Object.TargetActor"
     local LONG_S = 86400.0
-    local COPY_LOOK_S = 2.0
     game.copyAim = copyPickers      -- (for tests)
     function game.aimCopy(actor, addr, target)
         pcall(function()
@@ -3987,28 +3986,22 @@ return function(api)
             if not valid(controller) then
                 return
             end
-            local rec, now = copyPickers[addr], os.clock()
             local fname = actor:GetFName():ToString()
-            if rec and rec.fname ~= fname then
-                rec = nil               -- (another body at that address)
-            end
-            if rec == nil or now - rec.lookedAt >= COPY_LOOK_S then
-                local picker = targetPicker(actor)
-                local at = picker and picker:GetAddress() or nil
-                if rec == nil or rec.at ~= at then
-                    rec = { fname = fname, at = at }
-                end
-                rec.lookedAt = now
+            local picker = targetPicker(actor)
+            local at = picker and picker:GetAddress() or nil
+            local rec = copyPickers[addr]
+            if rec == nil or rec.fname ~= fname or rec.at ~= at then
+                rec = { fname = fname, at = at }        -- (another body at that address, or another picker on this one)
                 copyPickers[addr] = rec
-                if picker then
-                    -- (Not the held-off value itself: read again after a forget, it was restored as the original, and
-                    -- the enemy never changed targets on its own again.)
-                    if not rec.cooldown and (picker.SwitchTargetCooldown or LONG_S) < LONG_S then
-                        rec.cooldown = picker.SwitchTargetCooldown
-                    end
-                    picker.SwitchTargetCooldown = LONG_S
-                    picker.LastSwitchTime = api.gs():GetTimeSeconds(actor)
+            end
+            if picker then
+                -- (Not the held-off value itself: read again after a forget, it was restored as the original, and the
+                -- enemy never changed targets on its own again.)
+                if not rec.cooldown and (picker.SwitchTargetCooldown or LONG_S) < LONG_S then
+                    rec.cooldown = picker.SwitchTargetCooldown
                 end
+                picker.SwitchTargetCooldown = LONG_S
+                picker.LastSwitchTime = api.gs():GetTimeSeconds(actor)
             end
             local board = controller.Blackboard
             if valid(board) and valid(target) then
