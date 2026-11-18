@@ -5213,6 +5213,7 @@ return function(api)
         net.partnerFighting, net.toldFighting = false, nil
         game.holdRespawn(nil, false)
         net.holdLooking, net.holdWanted, net.respawnHeld, net.deadSince, net.struck = false, false, false, nil, {}
+        net.finisherSince = nil
         -- (And what a boss owed this player for a death while down: given in a session after, its share went to whoever
         -- was there then. pbz.lua's payOwed.)
         game.owedBosses, game.downAt, game.owedNames, net.downBossFell = nil, nil, nil, nil
@@ -5524,6 +5525,21 @@ return function(api)
         end
     end
 
+    -- Guest: the host, down, has let its fight with this boss go (FN <boss>): it stood ready for a finishing move only the
+    -- host's own player can make, and no blow from here ends it (net.finisherWaits). Said, since nothing else told why the
+    -- killing blows weren't taken. And the fight that ends now is one the host lost, however long ago they fell
+    -- (putDownLeftBosses).
+    handlers.FN = function(name, from)
+        if from ~= nil or not isClient() or not name or name == "" or #name > MAX_CHEST_NAME then
+            return
+        end
+        net.hostDownAt = os.clock()
+        log("The host is down, and only the host can make the finishing move on " .. name .. ": the fight starts over.")
+        if api.status then
+            api.status.notify("hold", "only the host can make this boss's finishing move, and the host is down: the fight starts over.")
+        end
+    end
+
     -- Guest, the host's fight over: a copy of that boss still standing here is put down if the host killed it or this save had
     -- it beaten (brought back for the fight). Left, it stood with its own AI for good: this player was "in combat" at every
     -- bell near it and shut out of the next boss's arena. Its K could miss it: a phase not paired with the host's id, or one
@@ -5772,6 +5788,35 @@ return function(api)
         return not (zero and (p.zeroSince == nil or os.clock() - p.zeroSince >= 1.0))
     end
 
+    -- Host, down and held in its fight: a boss of that fight stands ready for the finishing move only this world's own
+    -- player can make (pbz.lua's awaitsFinisher), and has for FINISHER_WAIT_S. Nobody can end that fight: a partner's
+    -- killing blow isn't taken there (193), so it went on with nothing to win till the partner fell too or the hold ran
+    -- out, a quarter of an hour (a report on 1.7.3, 11-18, the first map's Axe chief: "the host died and i was able to
+    -- kill the boss alone but when it came to combat finish..."). The boss's name then. Not while a sequence plays here: a
+    -- phase's scene starts from such a floor by itself. (Any sequence, not inCutscene: that asks who has the camera, and
+    -- a downed player's view is this mod's own, on a partner. In an arena where one runs all fight long this never says
+    -- so, and the wait is as it was.) Nor for one a guest's game runs: its floor here is the hold's.
+    -- (On net, as LOST_FIGHT_S is: this function is at Lua's 200 locals.)
+    net.FINISHER_WAIT_S = 15.0
+    function net.finisherWaits(now)
+        local waits = nil
+        if isHost() and game.awaitsFinisher and not (game.sequenceOn and game.sequenceOn()) then
+            for name in pairs(net.fightNames or {}) do
+                local actor = enemyByName[name]
+                if valid(actor) and not net.guestRuns[name] and game.awaitsFinisher(actor) then
+                    waits = name
+                    break
+                end
+            end
+        end
+        if not waits then
+            net.finisherSince = nil
+            return nil
+        end
+        net.finisherSince = net.finisherSince or now
+        return now - net.finisherSince >= net.FINISHER_WAIT_S and waits or nil
+    end
+
     local function holdForFight(pawn)
         if not net.holdLooking then
             return
@@ -5795,7 +5840,8 @@ return function(api)
             end
         end
         local waited = now - net.deadSince
-        if who and not net.pvp and waited < HOLD_MAX_S then
+        local finisher = who and not net.pvp and net.finisherWaits(now) or nil
+        if who and not net.pvp and waited < HOLD_MAX_S and not finisher then
             if not net.holdWanted then
                 net.holdWanted = true
                 log("Down in a boss fight " .. (net.party and PLAYERS[who.number or 1].name or "your partner")
@@ -5808,11 +5854,19 @@ return function(api)
                     api.status.notify("hold", "you're down: you'll be back when the fight is over.")
                 end
             end
-        elseif not up or net.pvp or waited >= HOLD_MAX_S or waited >= HOLD_GRACE_S then
-            if net.holdWanted then
+        elseif finisher or not up or net.pvp or waited >= HOLD_MAX_S or waited >= HOLD_GRACE_S then
+            if finisher then
+                -- (Said to the others too, FN: their killing blows weren't taken, and nothing told them why.)
+                log("Down, and " .. finisher .. " falls only to this player's own finishing move: nobody can end the fight, "
+                    .. "so it starts over. Your respawn goes on.")
+                sendEvent("FN", finisher)
+                if api.status then
+                    api.status.notify("hold", "this boss falls only to your own finishing move, and you're down: the fight starts over.")
+                end
+            elseif net.holdWanted then
                 log("The fight is over for you (the boss is down, or nobody's left in it): your respawn goes on.")
             end
-            net.holdLooking, net.holdWanted, net.respawnHeld = false, false, false
+            net.holdLooking, net.holdWanted, net.respawnHeld, net.finisherSince = false, false, false, nil
             game.holdRespawn(pawn, false)
         end
     end
@@ -5893,7 +5947,7 @@ return function(api)
                     game.downAt.up = true   -- (what the bag and wallet do from here on is this player's own)
                 end
             end
-            net.deadSince = nil
+            net.deadSince, net.finisherSince = nil, nil
             if net.holdLooking then
                 net.holdLooking, net.holdWanted, net.respawnHeld = false, false, false
                 game.holdRespawn(nil, false)

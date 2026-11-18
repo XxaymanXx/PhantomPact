@@ -2831,6 +2831,40 @@ return function(api)
         return ok
     end
 
+    -- A boss the game holds up for its own player's finishing move: its health at a floor of the game's own (Health_Min,
+    -- or 1 over it, where a partner's killing blow leaves it) with the game's mark for a low-health execution on it (an
+    -- active effect of the class GE_CanLowHealthExecute...). The first map's Axe chief: from a fifth of his health the
+    -- game locks it at 1, and he falls only to the execution this world's own player makes. No blow of a partner's ends
+    -- him there, and killed from outside his script the story stayed where it was (193; the bench, 11-18).
+    function game.awaitsFinisher(actor)
+        if not valid(actor) then
+            return false
+        end
+        local floor = game.healthFloor(actor)
+        local hp = game.getHealth(actor)
+        if floor < 1 or hp == nil or hp > floor + 1.5 then
+            return false
+        end
+        local asc = abilitySystem(actor)
+        local marked = false
+        if asc then
+            pcall(function()
+                asc.ActiveGameplayEffects.GameplayEffects_Internal:ForEach(function(_, e)
+                    if marked then
+                        return
+                    end
+                    pcall(function()
+                        local def = e:get().Spec.Def
+                        if valid(def) then
+                            marked = def:GetClass():GetFName():ToString():find("^GE_CanLowHealthExecute") ~= nil
+                        end
+                    end)
+                end)
+            end)
+        end
+        return marked
+    end
+
     local activeLocal = {}        -- ability class path -> true while active on the local player
     local localMoveAt, ghostMoveAt = -1e9, -1e9   -- os.clock() when the local player / the ghost last started a move
 
