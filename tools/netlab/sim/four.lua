@@ -4387,11 +4387,14 @@ end
 -- blow wasn't taken there; the fight starts over as the game has it, and both are told why (383). By the floor and the
 -- blow, not the game's mark for the finishing move: with the host down that mark wasn't on the host's boss (run186).
 local function finisherWithTheHostDown()
-    part("a boss only the host can finish, the host down")
+    part("a boss that falls only to a finishing move, nobody's made: the host down")
     -- The host down and held, the guest in the fight, the host's boss low with a floor of the game's own under him (or
     -- none). strike: the guest's killing blow, which the floor stops 1 over it.
+    -- (This part's times are 383's wait as it first was, 20 s, with no word meanwhile of what ends him. The mod's own
+    -- since 395: three minutes, the word 20 s in. Its end, and guestsFinisher.)
     local function downAt(floor)
         local s, h, g = pair()
+        net(h).FINISHER_WAIT_S, net(h).FINISHER_TELL_AFTER_S = 20, 1e9
         bossStart(s)
         local boss, copy = Session.enemyOn(h, "boss"), Session.enemyOn(g, "boss")
         swing(g, copy, select(1, Fake.health(copy)) - 50)
@@ -4428,17 +4431,16 @@ local function finisherWithTheHostDown()
     check(held(h) and told(h) == 0, "15 s at that floor: the host still waits")
     s:run(8)
     check(not held(h), "23 s: nobody else can finish him, and the host's respawn goes on")
-    check(told(h) == 1 and count(h.logs, "only this player can finish sp:boss") == 1, "said once, and to the guest (FN): " .. told(h))
-    check(count(g.logs, "only the host can finish sp:boss") == 1, "the guest is told why its killing blows weren't taken")
+    check(told(h) == 1 and count(h.logs, "nobody has made the finishing move on sp:boss") == 1, "said once, and to the guest (FN): " .. told(h))
+    check(count(g.logs, "nobody made the finishing move on sp:boss") == 1, "the guest is told why the fight ends")
     local shown = (h.env.PBZ.status.lastShown.hold or {}).text
     local shownG = (g.env.PBZ.status.lastShown.hold or {}).text
-    check(shown == "only you can finish this boss, and you're down: the fight starts over."
-        and shownG == "only the host can finish this boss, and the host is down: the fight starts over.",
+    check(shown == "nobody made this boss's finishing move: the fight starts over." and shownG == shown,
         "a tip each: " .. tostring(shown) .. " / " .. tostring(shownG))
     check(net(g).hostDownAt ~= nil and g.now - net(g).hostDownAt < 10, "and the fight that ends is one the host lost, for the guest's copy")
     s:run(20)
     check(told(h) == 1, "and not again")
-    check(count(h.sent, "^E FB ") == 0, "nor the word for a host on their feet (FB, finisherWithTheHostUp)")
+    check(count(h.sent, "^E FB ") == 0, "(nor the word of what ends him, put off in this part: FB, its end)")
     allErrors(s)
 
     -- At a floor with nobody's killing blow stopped there: nothing shows that it holds anyone up. The wait stays.
@@ -4510,8 +4512,9 @@ local function finisherWithTheHostDown()
     check(not held(wh) and told(wh) == 1, "and the 20 s run out")
     allErrors(w)
 
-    -- The host up: taking him past his floor is theirs to do. Nothing is said, nothing ends.
+    -- The host up: no fight starts over. (What's said then: finisherWithTheHostUp.)
     local x, xh, xg = pair()
+    net(xh).FINISHER_WAIT_S = 20
     bossStart(x)
     local xboss, xcopy = Session.enemyOn(xh, "boss"), Session.enemyOn(xg, "boss")
     swing(xg, xcopy, select(1, Fake.health(xcopy)) - 50)
@@ -4534,6 +4537,20 @@ local function finisherWithTheHostDown()
     x:run(9)
     check(not held(xh) and told(xh) == 1, "24 s: the respawn goes on")
     allErrors(x)
+
+    -- The mod's own wait: three minutes at that floor with nobody's finishing move, the guest told what ends him 20 s in.
+    local d, dh, dg, _, dcopy = downAt(1)
+    net(dh).FINISHER_WAIT_S, net(dh).FINISHER_TELL_AFTER_S = 180, 20
+    strike(d, dg, dcopy)
+    d:run(25)
+    check(held(dh) and told(dh) == 0 and count(dh.sent, "^E FB sp:boss$") == 1
+        and (dg.env.PBZ.status.lastShown.finisher or {}).text == "this boss falls only to a finishing move: a plain blow can't end it.",
+        "26 s at his floor, the host down: held still, and the guest is told what ends him")
+    d:run(140)
+    check(held(dh) and told(dh) == 0, "166 s: held still")
+    d:run(22)
+    check(not held(dh) and told(dh) == 1, "three minutes and nobody's finishing move: the fight starts over")
+    allErrors(d)
 end
 
 -- A report on 1.7.1, three players: "if host dies during fight, they don't get items and bell (if it spawns afterwards)
@@ -15754,15 +15771,15 @@ local function fittedOnScreen()
     allErrors(s)
 end
 
--- A boss only the host can finish, the host up (393). A guest's killing blow at a floor of the host's game's own isn't
--- taken, and its copy stands up again; in the game the guest's own finishing move plays on its copy each time (the
--- bench, run205), and nothing told either player why. Once he has stood at that floor for 20 s since such a blow, no
--- scene playing (a phase's scene starts from such a floor by itself, well inside that), each side is told it's the
--- host's to make: once in two minutes a boss, and then only for a blow not taken since.
+-- A boss that falls only to a finishing move, a guest's plain killing blows at it (393, its words 395's). One at a floor
+-- of the host's game's own isn't taken, and the copy stands up again, with nothing told either player why (the bench,
+-- run205). Once he has stood at that floor for 20 s since such a blow, no scene playing (a phase's scene starts from
+-- such a floor by itself, well inside that), each side is told what ends him: once in two minutes a boss, and then
+-- only for a blow not taken since. (A guest's own finishing move is his end: guestsFinisher.)
 local function finisherWithTheHostUp()
-    part("a boss only the host can finish, the host up")
-    local HOSTS = "only you can finish this boss: your partner's killing blow doesn't count here."
-    local GUESTS = "only the host can finish this boss: your killing blow doesn't count here."
+    part("a boss that falls only to a finishing move: a plain blow, the host up")
+    local HOSTS = "this boss falls only to a finishing move: a plain blow can't end it."
+    local GUESTS = HOSTS
     local function shown(pc)
         local tip = pc.env.PBZ.status.lastShown.finisher
         return tip and tip.text or nil
@@ -15804,9 +15821,9 @@ local function finisherWithTheHostUp()
         strike(s, g, copy, 3)
     end
     check(told(h) == 1 and shown(h) == HOSTS and shown(g) == GUESTS,
-        "22 s there, no scene: each side is told it's the host's to finish: " .. tostring(shown(h)) .. " / " .. tostring(shown(g)))
-    check(count(h.logs, "isn't its end: this game lets only this player finish it") == 1
-        and count(g.logs, "Only the host can finish sp:boss") == 1 and h.env.PBZ.game.bossFightActive() and field(boss, "dead") ~= true,
+        "22 s there, no scene: each side is told what ends him: " .. tostring(shown(h)) .. " / " .. tostring(shown(g)))
+    check(count(h.logs, "isn't its end: it falls only to a finishing move") == 1
+        and count(g.logs, "sp:boss falls only to a finishing move") == 1 and h.env.PBZ.game.bossFightActive() and field(boss, "dead") ~= true,
         "once in each log, and the fight goes on")
     for _ = 1, 10 do
         strike(s, g, copy, 3)
@@ -15860,6 +15877,108 @@ local function finisherWithTheHostUp()
     allErrors(u)
 end
 
+-- A guest's own finishing move ends the boss for everyone (395). The user, 11-18: "why the guest can't kill the boss by
+-- pressing F and playing it's animation he should be able to do that". The guest's game plays its finishing move on
+-- its copy (the bench, run205: an ability of the game's "BEx" family on the guest's player, the copy marked by that
+-- game for an execution at low health, the killing blow 2.9 s in); told as that, the host lifts its game's floor for
+-- that blow and makes the game's own kill, the whole death (run211: as at his end by the host's own finishing move).
+-- A plain killing blow there is still not his end. (What says a finishing move is under way is the game's own, read by
+-- pbz.lua's finishing and hasEffect: stood in for here, the fake having neither a player's abilities nor effects.)
+local function guestsFinisher()
+    part("a guest's own finishing move ends the boss for everyone")
+    local LINE = "this boss falls only to a finishing move: a plain blow can't end it."
+    local function floorOf(e)
+        return field(field(e, "AttributeSetBase"), "Health_Min").CurrentValue
+    end
+    -- (The guest's game as it stands in a finishing move, or not: its own ability running, its copy marked.)
+    local function finishing(g, move, mark)
+        g.env.PBZ.game.finishing = function() return move and "GA_Hun_BEx_Common_Boss" or nil end
+        g.env.PBZ.game.hasEffect = function(_, text) return mark and text == "GE_CanLowHealthExecute" end
+    end
+    -- The host's boss low with a floor of its game's own under him, the guest's plain killing blow stopped there.
+    local function atFloor(down)
+        local s, h, g = pair()
+        bossStart(s)
+        local boss, copy = Session.enemyOn(h, "boss"), Session.enemyOn(g, "boss")
+        swing(g, copy, select(1, Fake.health(copy)) - 50)
+        s:run(5)
+        if down then
+            Session.die(h)
+            h.hudLayout:UnRegisterBossHPBar(boss)
+            s:run(6)
+        end
+        local min = field(field(boss, "AttributeSetBase"), "Health_Min")
+        Fake.put(min, "BaseValue", 1)
+        Fake.put(min, "CurrentValue", 1)
+        Fake.setHealth(boss, 300)
+        s:run(2)
+        finishing(g, false, false)
+        swing(g, copy, 1)
+        s:run(2)
+        return s, h, g, boss, copy
+    end
+
+    local s, h, g, boss, copy = atFloor(false)
+    check(select(1, Fake.health(boss)) == 2 and field(boss, "dead") ~= true and count(g.logs, "The host didn't take the killing blow") == 1,
+        "(a plain killing blow of the guest's at a floor of the host's game's own: not his end, as ever)")
+    finishing(g, true, true)
+    s:run(1.5)
+    swing(g, copy, 1)
+    s:run(2)
+    check(count(g.logs, "Finishing move on sp:boss; telling the host") == 1 and count(h.logs, "Partner's finishing move on sp:boss") == 1,
+        "the guest's own finishing move on its copy is told as that")
+    check(field(boss, "dead") == true and field(copy, "dead") == true,
+        "and it's his end in both worlds: the host's game's floor lifted for that blow")
+    check(count(h.sent, "^E K sp:boss$") == 1 and count(h.sent, "^E FN ") == 0, "told once, and no fight starts over")
+    allErrors(s)
+
+    -- The copy not marked by the guest's game for a finish at low health (an execution on a broken guard takes health
+    -- and ends nobody): a plain killing blow, not taken. Marked with no finishing move running: the same.
+    local t, th, tg, tboss, tcopy = atFloor(false)
+    finishing(tg, true, false)
+    t:run(1.5)
+    swing(tg, tcopy, 1)
+    t:run(2)
+    check(field(tboss, "dead") ~= true and floorOf(tboss) == 1 and count(th.logs, "Partner's finishing move") == 0
+        and count(tg.logs, "The host didn't take the killing blow") == 2,
+        "its own ability running, the copy not marked for a finish at low health: a plain killing blow, not taken")
+    finishing(tg, false, true)
+    t:run(1.5)
+    swing(tg, tcopy, 1)
+    t:run(2)
+    check(field(tboss, "dead") ~= true and floorOf(tboss) == 1 and count(th.logs, "Partner's finishing move") == 0,
+        "marked, with no finishing move running: the same")
+    allErrors(t)
+
+    -- One the host's game won't let die now (between phases, a scene to come): not forced, its floor back as it was.
+    local l, lh, lg, lboss, lcopy = atFloor(false)
+    Fake.put(lboss, "locked", true)
+    finishing(lg, true, true)
+    l:run(1.5)
+    swing(lg, lcopy, 1)
+    l:run(2)
+    check(field(lboss, "dead") ~= true and floorOf(lboss) == 1 and count(lh.logs, "Partner's finishing move on sp:boss") == 1,
+        "one the host's game won't let die now: not forced, its floor as it was")
+    allErrors(l)
+
+    -- The host down and held, the guest left alone at him (the report on 1.7.3: "the host died and i was able to kill the
+    -- boss alone but when it came to combat finish i was glitched"): told what ends him 20 s in, and its own finishing
+    -- move then is his end. No fight starts over.
+    local d, dh, dg, dboss, dcopy = atFloor(true)
+    check(field(dh.deathWidget, "NotTick") == true, "(the host down and held, the guest's plain killing blow stopped at his floor)")
+    d:run(22)
+    check(count(dh.sent, "^E FB sp:boss$") == 1 and (dg.env.PBZ.status.lastShown.finisher or {}).text == LINE
+        and field(dh.deathWidget, "NotTick") == true,
+        "22 s on the guest is told what ends him, the host still held")
+    finishing(dg, true, true)
+    d:run(1.5)
+    swing(dg, dcopy, 1)
+    d:run(3)
+    check(field(dboss, "dead") == true and field(dcopy, "dead") == true and count(dh.sent, "^E FN ") == 0,
+        "the guest's own finishing move with the host down: his end in both worlds, and no fight starts over")
+    allErrors(d)
+end
+
 -- 383's fight starting over with the guest still striking, and the host's lines of the boss from before its respawn
 -- read after it (the bench, 11-18, run207). The relay keeps every line that came since the last read and a frame takes
 -- events before lines, so a guest whose game stood still as the host's hold ended (5.7 s there) handled the host's R,
@@ -15881,6 +16000,7 @@ local function restartWithOldLines()
     -- The guest's killing blow stopped at a floor of the host's game's own: 2 in both worlds, the copy held at its floor.
     local function stopped()
         local s, h, g = pair()
+        net(h).FINISHER_WAIT_S = 20     -- (383's first wait: finisherWithTheHostDown)
         bossStart(s)
         local boss, copy = Session.enemyOn(h, "boss"), Session.enemyOn(g, "boss")
         swing(g, copy, hpOf(copy) - 50)
@@ -16025,6 +16145,7 @@ local function ninthReview()
     -- The host down at a boss only its own player can finish: the boss at a floor of its game's own, a partner's killing
     -- blow not taken there.
     local function downAtItsFloor(s, h, boss, striker, copy)
+        net(h).FINISHER_WAIT_S, net(h).FINISHER_TELL_AFTER_S = 20, 1e9      -- (383's first wait: finisherWithTheHostDown)
         Session.die(h)
         h.hudLayout:UnRegisterBossHPBar(boss)
         s:run(6)
@@ -16063,7 +16184,7 @@ local function ninthReview()
         s:run(5)
         downAtItsFloor(s, h, bossH, a, copyA)
         s:run(26)
-        check(held(h) and count(h.sent, "^E FN ") == 0 and count(b.logs, "only the host can finish") == 0
+        check(held(h) and count(h.sent, "^E FN ") == 0 and count(b.logs, "finishing move") == 0
             and b.env.PBZ.game.bossFightActive(),
             "V1: in a party the host's hold waits while another player's own boss fight is on: nothing told, their fight goes on")
         Fake.setHealth(boss2, 0)
@@ -16099,8 +16220,8 @@ local function ninthReview()
             end
             return shown or nil
         end
-        local HOST = "Phantom Pact: only you can finish this boss, and you're down: the fight starts over."
-        local GUEST = "Phantom Pact: only the host can finish this boss, and the host is down: the fight starts over."
+        local HOST = "Phantom Pact: nobody made this boss's finishing move: the fight starts over."
+        local GUEST = HOST
         local endedAt, step, upH, upG, after = nil, 0, 0, 0, nil
         s:run(40, function()
             if endedAt == nil and not held(h) then
@@ -16751,6 +16872,7 @@ return function(print_, scripts)
     cost()
     backToTwo()
     finisherWithTheHostUp()
+    guestsFinisher()
     restartWithOldLines()
     ninthReview()
     thePlayLog()

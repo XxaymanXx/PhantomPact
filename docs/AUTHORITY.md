@@ -101,12 +101,13 @@ online panel doesn't pause, and a pause by the game (its menu) is undone at once
   the host wins, `K` reaches the client and kills its copy of the boss. Enemies the host had already killed are
   killed again in the client's refreshed world.
 - **The host dies while the client fights a boss:** the host's respawn waits, as its world is the shared one, and the
-  host's boss keeps fighting the client's ghost, the client's hits still landing: the client can finish it, unless its game lets only the
-  host's own player past a floor (the first map's Axe chief: a client's killing blow there isn't taken, and each side
-  is told so, `FB`, 393). The refresh, and the boss back at full health, come only
-  once everyone in the fight is down, the boss is dead, the client leaves, 15 minutes pass, or such a boss has stood 20 s
-  at that floor since a killing blow of the client's wasn't taken there (`net.finisherWaits`): then the host's world
-  refreshes, and the client's with it (`R death`).
+  host's boss keeps fighting the client's ghost, the client's hits still landing: the client can finish it. One the host's game
+  holds at a floor of its own for a finishing move (the first map's Axe chief) falls to the client's own finishing
+  move, told as that (`D ... X`, 395): the host lifts that floor for the blow and makes the game's own kill. A plain
+  killing blow of the client's there isn't taken, and each side is told what is (`FB`). The refresh, and the boss back
+  at full health, come only once everyone in the fight is down, the boss is dead, the client leaves, 15 minutes pass,
+  or such a boss has stood three minutes at that floor with nobody's finishing move (`net.finisherWaits`): then the
+  host's world refreshes, and the client's with it (`R death`).
 
 - **Your partner vanishes** (quits, crashes, loses the connection): after 12 s with nothing heard (longer than a loading screen), their ghost
   hides instead of standing frozen. Fog walls closed for their fight open, and the enemies held for the host go

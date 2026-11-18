@@ -66,11 +66,8 @@ return function(scriptDir)
         ["the game wouldn't go there."] = "游戏无法前往那里。",
         -- revive
         ["you're down: you'll be back when the fight is over."] = "你倒下了:战斗结束后才会复活。",
-        ["only you can finish this boss, and you're down: the fight starts over."] = "只有你能终结这个首领,而你倒下了:战斗重新开始。",
-        ["only the host can finish this boss, and the host is down: the fight starts over."] =
-            "只有房主能终结这个首领,而房主倒下了:战斗重新开始。",
-        ["only the host can finish this boss: your killing blow doesn't count here."] = "只有房主能终结这个首领:你的致命一击在这里不算数。",
-        ["only you can finish this boss: your partner's killing blow doesn't count here."] = "只有你能终结这个首领:队友的致命一击在这里不算数。",
+        ["this boss falls only to a finishing move: a plain blow can't end it."] = "这个首领只能被终结技击败:普通攻击无法终结它。",
+        ["nobody made this boss's finishing move: the fight starts over."] = "没有人使出这个首领的终结技:战斗重新开始。",
         ["your partner is in a boss fight: you'll join them when it's over."] = "队友正在首领战中:战斗结束后你会前往队友身边。",
         ["your partner is in a boss fight: you'll join them when it's over. F3 takes you in now."] =
             "队友正在首领战中:战斗结束后你会前往队友身边。按 F3 可立即加入。",

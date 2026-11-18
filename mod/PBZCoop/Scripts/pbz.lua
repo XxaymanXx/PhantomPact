@@ -3285,6 +3285,50 @@ return function(api)
         return found
     end
 
+    -- This player's finishing move of a boss, the game's own, running now: its ability's name, or nil. The game's
+    -- "BEx" family (GA_Hun_BEx_Common_PengMeng_V2 at the first map's Axe chief: some 8 s, its killing blow 2.9 s in; the
+    -- bench, 11-18, run205).
+    function game.finishing(actor)
+        local asc = abilitySystem(actor)
+        local found = nil
+        if asc then
+            pcall(function()
+                asc.ActivatableAbilities.Items:ForEach(function(_, spec)
+                    -- Own pcall: an error must never unwind through UE4SS's ForEach.
+                    pcall(function()
+                        local s = spec:get()
+                        if s.ActiveCount > 0 then
+                            local name = s.Ability:GetClass():GetFName():ToString()
+                            if name:find("_BEx_", 1, true) then
+                                found = name
+                            end
+                        end
+                    end)
+                end)
+            end)
+        end
+        return found
+    end
+
+    -- Whether an effect whose class name holds that text is on it now (GE_CanLowHealthExecute: the game's own mark on a
+    -- boss its player may finish at low health).
+    function game.hasEffect(actor, text)
+        local asc = abilitySystem(actor)
+        local found = false
+        if asc then
+            pcall(function()
+                asc.ActiveGameplayEffects.GameplayEffects_Internal:ForEach(function(_, effect)
+                    pcall(function()
+                        if effect:get().Spec.Def:GetClass():GetFName():ToString():find(text, 1, true) then
+                            found = true
+                        end
+                    end)
+                end)
+            end)
+        end
+        return found
+    end
+
     -- An ability by class path. False when it won't start. The game hands an enemy its moves as its AI goes along, and a
     -- guest's copy has its AI stopped, so more than half of what the host's enemy did wasn't there to replay: it's given
     -- here, to a copy that hasn't got it. (Looked for each time it won't start, not once per address and move: an enemy that
