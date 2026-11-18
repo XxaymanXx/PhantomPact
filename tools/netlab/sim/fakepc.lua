@@ -1080,11 +1080,16 @@ end
 
 -- One of the story's trigger boxes, made as it runs (TriggerBox_<n>): a place's scene begins as this world's player
 -- stands in it (the test's to do), and it's gone once it has.
-function Fake.storyBox(pc, x, y, z, n)
+function Fake.storyBox(pc, x, y, z, n, half)
     local b = object(pc, "TriggerBox", {})
     rawset(b, "__name", "TriggerBox_" .. tostring(n or 1))
     rawset(b, "__classObject", { IsValid = function() return true end, GetFName = function() return name("TriggerBox") end })
-    defs(pc, b, { K2_GetActorLocation = function() return { X = x, Y = y, Z = z } end })
+    -- (Its size: half its sides, 3 m by default, 2 m up and down; not turned.)
+    local shape = object(pc, "BoxComponent", {})
+    defs(pc, shape, { GetScaledBoxExtent = function() return { X = half or 300, Y = half or 300, Z = 200 } end })
+    put(b, "CollisionComponent", shape)
+    defs(pc, b, { K2_GetActorLocation = function() return { X = x, Y = y, Z = z } end,
+        K2_GetActorRotation = function() return { Pitch = 0, Yaw = 0, Roll = 0 } end })
     pc.spawned = pc.spawned or {}
     pc.spawned[#pc.spawned + 1] = b
     return b
@@ -2497,7 +2502,21 @@ function Fake.new(id, scripts, ini, link)
             pc.errors[#pc.errors + 1] = line
         end
     end
+    -- (The engine's own library, for a line straight down: ground at pc.floorZ, 0 if not set, none with pc.noFloor.
+    -- Any other line hits nothing, as before there was one.)
+    local kismet = object(pc, "KismetSystemLibrary", {})
+    defs(pc, kismet, { LineTraceSingle = function(_, _, from, to, _, _, _, _, hit)
+        local floor = pc.floorZ or 0
+        if pc.noFloor or from.X ~= to.X or from.Y ~= to.Y or floor > from.Z or floor < to.Z then
+            return false
+        end
+        hit.Distance = from.Z - floor
+        return true
+    end })
     env.StaticFindObject = function(path)
+        if path == "/Script/Engine.Default__KismetSystemLibrary" then
+            return kismet
+        end
         if found[path] then
             return found[path]
         end

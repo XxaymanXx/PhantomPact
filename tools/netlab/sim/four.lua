@@ -16062,8 +16062,8 @@ local function watchingTogether()
     local step, begun = boxes(s, "Seq014")
     Session.moveTo(h, SPOT.X, SPOT.Y)
     s:run(1.6, step)
-    check(begun[h] == true and not begun[g] and count(h.sent, "^E SCENE on Seq014 2000 0 %S+ %S+$") == 1,
-        "the host's scene begins, told with where its player stood")
+    check(begun[h] == true and not begun[g] and count(h.sent, "^E SCENE on Seq014 2000 0 %S+ %S+ %S+$") == 1,
+        "the host's scene begins, told with where its player stood and its point of the story")
     s:run(1.8, step)
     check(begun[g] == true and gap(at(g.pawn), SPOT) < 10 and count(g.logs, "set down in the story's box for it") == 1,
         "the guest, 15 m back with no scene of its own, is set down in its world's box for it: its own game begins the same scene")
@@ -16132,6 +16132,77 @@ local function watchingTogether()
         u:run(2)
     end)
     left("with WatchTogether = Off each player's scenes are their own", nil, "WatchTogether = Off\n")
+    -- (The eleventh review: who else is left, and which box is no box to stand in.)
+    left("one held down by Revive is left: down stays down", function(_, _, ug)
+        ug.env.PBZ.revive.isDown = function() return true end
+    end)
+    left("one fighting anything is left", function(_, _, ug)
+        ug.env.PBZ.game.inCombat = function() return true end
+    end)
+    left("one in the air is left", function(_, _, ug)
+        Fake.put(field(ug.pawn, "CharacterMovement"), "MovementMode", 3)
+    end)
+    left("one watching a partner's fight is left", function(_, _, ug)
+        net(ug).watchingFight = true
+    end)
+    left("with two of the story's boxes by that spot and neither holding it, nobody is set down on a guess", function(_, _, ug, ubox)
+        rawset(ubox[ug], "__alive", false)
+        Fake.storyBox(ug, SPOT.X + 800, SPOT.Y, 100, 8)
+        Fake.storyBox(ug, SPOT.X - 800, SPOT.Y, 100, 9)
+    end)
+    left("with no ground under the box's spot in their world, they're left", function(_, _, ug)
+        ug.noFloor = true
+    end)
+    left("one whose story is past the partner's is left: a box can stay after its scene", function(_, uh, ug)
+        uh.env.PBZ.story.point = function() return 24, 20 end
+        ug.env.PBZ.story.point = function() return 30, 25 end
+    end)
+
+    -- A scene inside a boss fight, or a boss's fall, isn't told as one to come to; nor is a partner in a boss fight
+    -- come for.
+    local f, fh, fg = pair()
+    local fstep, fbegun = boxes(f, "Seq014")
+    bossStart(f)
+    Session.moveTo(fh, SPOT.X, SPOT.Y)
+    f:run(4, fstep)
+    check(fbegun[fh] == true and not fbegun[fg] and count(fh.sent, "^E SCENE on ") == 0
+        and count(fg.logs, "set down in the story's box") == 0,
+        "a scene in the host's boss fight isn't told as one to come to, and the guest stays where it is")
+    allErrors(f)
+
+    -- A box as big as an arena is taken by its size, not its middle: the spot told is 25 m from the middle of one 60 m
+    -- across, and the guest is set down where the host stood.
+    local z, zh, zg = pair()
+    for _, pc in ipairs(z.pcs) do
+        pc.scene = pc.scene or Fake.sceneManager(pc)
+    end
+    local big = Fake.storyBox(zg, 4500, 0, 100, 9, 3000)
+    z:run(2.5)
+    Session.moveTo(zh, 2000, 0)
+    z:run(1)
+    Session.scene(zh, true, "Seq020")
+    z:run(1.5)
+    check(rawget(big, "__alive") and gap(at(zg.pawn), { X = 2000, Y = 0 }) < 10
+        and count(zg.logs, "set down in the story's box for it") == 1,
+        "a box 60 m across, its middle 25 m from where the host stood: the guest is set down where the host stood, in it")
+    allErrors(z)
+
+    -- The same scene come to on one's own, long after a partner, isn't chased.
+    local y, yh, yg = pair()
+    for _, pc in ipairs(y.pcs) do
+        pc.scene = pc.scene or Fake.sceneManager(pc)
+        Fake.put(pc.scene, "frames", 1800)
+    end
+    y:run(2.5)
+    Session.moveTo(yg, 9000, 0)             -- (90 m off: not come for)
+    y:run(1)
+    Session.scene(yh, true, "Seq030")
+    y:run(20)
+    Session.scene(yg, true, "Seq030")
+    y:run(4)
+    check(rate(yg) == 1 and count(yg.logs, "played a little faster") == 0,
+        "the same scene begun 20 s after a partner's, on this player's own: not played faster to chase theirs")
+    allErrors(y)
 
     -- A scene played faster ends that much sooner by the clock: the host's own, caught up by some five seconds, isn't
     -- told as skipped at its end.
@@ -16235,6 +16306,17 @@ local function bellsTogether()
         u:run(2)
     end)
     left("with WatchTogether = Off each player's bells are their own", nil, "WatchTogether = Off\n")
+    -- (The eleventh review.)
+    left("one held down by Revive is left: no ring heals them", function(_, _, ug)
+        ug.env.PBZ.revive.isDown = function() return true end
+    end)
+    left("one fighting anything is left: the game itself refuses a bell in combat", function(_, _, ug)
+        ug.env.PBZ.game.inCombat = function() return true end
+    end)
+    left("with no ground behind the ringer in their world, neither set down nor rung", function(_, _, ug)
+        Session.moveTo(ug, 1700, 0)
+        ug.noFloor = true
+    end)
 end
 
 -- 383's fight starting over with the guest still striking, and the host's lines of the boss from before its respawn

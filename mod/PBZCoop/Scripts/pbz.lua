@@ -4728,10 +4728,12 @@ return function(api)
     end
 
     -- This world's bell standing where a partner's does (within 3 m): "woken" if it is here, "asleep" if not, nil if
-    -- there's none. With a player, one asleep is rung for them as E rings it, the bell's own OnInteract: the game's
-    -- whole first ring in this world, its walk up, the ring, its first touch, the quest and flow steps, the save, and
-    -- a crane bell's scene 5 s on (the bench, 11-18, run220: the bell woken and lit, the player in hand again, no menu
-    -- left up; the bell's own OnFirstTouchBell called alone wakes nothing). Says "rung" then.
+    -- there's none. With a player, one asleep is rung for them as E rings it, the bell's own OnInteract (the bench,
+    -- 11-18, run220: by the mod's call the bell's walk up and sit ran, RestoreHealth, UpdateQuest, UpdateFlowTag, the
+    -- save; the bell woken and lit after it, the player in hand again, no menu left up). Whether the ring's first
+    -- touch, and a crane bell's scene with it, comes by a ring made so is not shown yet: that bell had been sent
+    -- OnFirstTouchBell alone before, which wakes nothing and may have spent it (bellshare.ps1 is to show it). Says
+    -- "rung" then.
     function game.bellAt(x, y, z, pawn)
         local out = nil
         for _, b in ipairs(FindAllOf("MelodiousBell") or {}) do
@@ -7373,24 +7375,84 @@ return function(api)
         return ok
     end
 
-    -- The story's trigger box nearest a place, within cm of it: where it is, or nil. The story makes its boxes as it
-    -- runs (TriggerBox_<n>: a level's own, an audio box say, has another name), and a place's scene begins as this
-    -- world's player stands in its box: set down in one, the game begins it as for a player who walked in (the bench's
-    -- boss sweeps, 11-17, and run219). A world that has played a scene has no box for it.
+    -- The story's trigger box a place belongs to: a spot to stand in it, and how many boxes could be meant. The story
+    -- makes its boxes as it runs (TriggerBox_<n>: a level's own, an audio box say, has another name), and a place's
+    -- scene begins as this world's player stands in its box: set down in one, the game begins it as for a player who
+    -- walked in (the bench's boss sweeps, 11-17, and run219). A box is taken by its own size and turn, not its middle
+    -- (the Axe chief's is 43 m by 36): the one that holds the place, or else the only one whose side is within cm of
+    -- it (a player runs on a few metres in the 2 s before the scene). The spot is the place itself where the box
+    -- holds it, else the box's nearest point a pace inside. With two or more in reach and not just one holding the
+    -- place: nil, and how many (in Zhengdaodaying's underground they stand 6 to 12 m apart: nobody is set down on a
+    -- guess). A world that has played a scene mostly has no box for it, but one can stay (run101). The eleventh
+    -- review.
     function game.storyBox(x, y, z, cm)
-        local best, bestD = nil, cm
+        local holds, near, n = {}, nil, 0
         for _, a in ipairs(FindAllOf("TriggerBox") or {}) do
             pcall(function()
-                if valid(a) and a:GetFName():ToString():find("^TriggerBox_%d+$") then
-                    local l = a:K2_GetActorLocation()
-                    local d = math.sqrt((l.X - x) ^ 2 + (l.Y - y) ^ 2 + (l.Z - z) ^ 2)
-                    if d <= bestD then
-                        best, bestD = { X = l.X, Y = l.Y, Z = l.Z }, d
+                if not (valid(a) and a:GetFName():ToString():find("^TriggerBox_%d+$")) then
+                    return
+                end
+                local l, ex, yaw = a:K2_GetActorLocation(), { X = 0, Y = 0, Z = 0 }, 0
+                pcall(function()
+                    local c = a.CollisionComponent
+                    if valid(c) then
+                        local e = c:GetScaledBoxExtent()
+                        ex = { X = e.X, Y = e.Y, Z = e.Z }
                     end
+                    yaw = math.rad(a:K2_GetActorRotation().Yaw)
+                end)
+                -- (The place in the box's own frame, and how far outside its sides it lies.)
+                local dx, dy, dz = x - l.X, y - l.Y, z - l.Z
+                local lx, ly = dx * math.cos(yaw) + dy * math.sin(yaw), dy * math.cos(yaw) - dx * math.sin(yaw)
+                local ox, oy = math.max(math.abs(lx) - ex.X, 0), math.max(math.abs(ly) - ex.Y, 0)
+                local oz = math.max(math.abs(dz) - ex.Z, 0)
+                local out = math.sqrt(ox * ox + oy * oy + oz * oz)
+                if out > cm then
+                    return
+                end
+                n = n + 1
+                local function inside(v, e)
+                    local most = math.max(e - 100, 0)
+                    return math.max(-most, math.min(most, v))
+                end
+                local px, py = lx, ly
+                if out > 0 then
+                    px, py = inside(lx, ex.X), inside(ly, ex.Y)
+                end
+                local spot = { X = l.X + px * math.cos(yaw) - py * math.sin(yaw),
+                    Y = l.Y + px * math.sin(yaw) + py * math.cos(yaw),
+                    Z = out > 0 and math.max(l.Z - ex.Z, math.min(l.Z + ex.Z, z)) or z, out = out }
+                if out == 0 then
+                    holds[#holds + 1] = spot
+                end
+                if not near or out < near.out then
+                    near = spot
                 end
             end)
         end
-        return best
+        if #holds == 1 then
+            return holds[1], n
+        end
+        if n == 1 then
+            return near, n
+        end
+        return nil, n
+    end
+
+    -- Whether there's ground within 3 m under a place (a line down from half a metre over it): a player isn't set
+    -- down over a hole, or over ground this world hasn't loaded (the bench, run103: one set down 34 m off fell
+    -- through it). The eleventh review.
+    function game.floorUnder(pawn, x, y, z)
+        local ksl = StaticFindObject("/Script/Engine.Default__KismetSystemLibrary")
+        if not (valid(ksl) and valid(pawn)) then
+            return false
+        end
+        local hit, none = {}, { R = 0, G = 0, B = 0, A = 0 }
+        local ok, got = pcall(function()
+            return ksl:LineTraceSingle(pawn, { X = x, Y = y, Z = z + 50 }, { X = x, Y = y, Z = z - 300 }, 0, false, {}, 0, hit,
+                true, none, none, 0)
+        end)
+        return ok and got == true
     end
 
     -- This world's scene, ended where it would end by itself, as a skip does: what follows it runs.
