@@ -43,6 +43,7 @@ LINES = [
                   "tip.pvp.get_closer", "tip.pvp.cut_short", "tip.pvp.host_sets", "tip.pvp.two_players",
                   "tip.pvp.loadout_next"]),
     ("the connection", ["tip.conn.nobody_joined", "tip.conn.secret", "tip.conn.steam_relay"]),
+    ("the play log (playlog.lua)", ["tip.playlog.marked"]),
     ("no Chinese: the tip's head (status.lua says it on its own), the partner, local co-op (F4)",
      ["tip.prefix", "tip.conn.connected_signed", "tip.conn.connected", "tip.partner.quest_step", "local.tip.close_menu",
       "local.tip.wall", "local.tip.p2_joined", "local.tip.gourd_empty", "local.tip.mon_lr", "local.tip.mon_tb",

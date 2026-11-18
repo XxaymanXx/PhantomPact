@@ -366,6 +366,7 @@ connection too.
 From both players if you can, right after it happens and before you restart the game or reconnect, since these files
 start over:
 
+- The newest play log, `ue4ss\Mods\PBZCoop\logs\playlog-<date>-<time>.txt` (this one stays through a restart: see below)
 - `ue4ss\UE4SS.log`
 - If the game closed by itself: the newest `ue4ss\crash_*.dmp` (UE4SS writes one when the game goes down; it says where)
 - `ue4ss\Mods\PBZCoop\net_status.txt` and `relay_log.txt`, plus `relay_error.txt` if it's there
@@ -374,3 +375,10 @@ start over:
 
 `net_status.txt` and `relay_log.txt` show your partner's address. Your `Secret` is only in `PhantomPact.ini`: don't post
 that file with the `Secret` in it.
+
+**The play log.** Each time you play, Phantom Pact keeps a text file of that session in `ue4ss\Mods\PBZCoop\logs` (in
+the `PBZCoop` folder itself if there's no `logs` folder): everything the mod said, UE4SS's errors, and every ten seconds
+how the game stood (frames a second, where you were, your health, the link). The last 12 are kept (`PlayLogKeep` in
+`PhantomPact.ini` sets how many), so the one from the session that went wrong is still there after you restart. When something looks wrong, press **F2**, or press both
+sticks in for a second: "marked in the play log" shows, and that moment is easy to find in the file. It holds no
+address, name or password. `PlayLog = Off` in `PhantomPact.ini` turns it off.

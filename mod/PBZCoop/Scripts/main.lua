@@ -30,8 +30,16 @@ local state = {
     p2Pawn = nil,
 }
 
+-- Every line the mod says goes to the play log's file too (playlog.lua), once it has one; the lines said before that are
+-- kept for it. (playEarly is nil once it's known whether there is a play log.)
+local playLine, playEarly = nil, {}
 local function log(msg)
     print(TAG .. msg .. "\n")
+    if playLine then
+        playLine(msg)
+    elseif playEarly then
+        playEarly[#playEarly + 1] = msg
+    end
 end
 
 -- Safe for anything: a stale reference handed back mid-respawn once had an IsValid that wasn't a function
@@ -563,6 +571,19 @@ local api = {
     version = VERSION,
     protocol = PROTOCOL,
 }
+-- The play log, before the rest of the mod: this session's own file of every line the mod says and how the game stands
+-- (playlog.lua). Never a reason for the mod not to load.
+do
+    local ok, play = pcall(function() return dofile(SCRIPT_DIR .. "playlog.lua")(api) end)
+    if ok and type(play) == "table" and play.on then
+        api.playlog = play
+        for _, said in ipairs(playEarly) do
+            play.line(said)
+        end
+        playLine = play.line
+    end
+    playEarly = nil
+end
 api.lang = dofile(SCRIPT_DIR .. "lang.lua")(SCRIPT_DIR)
 api.game = dofile(SCRIPT_DIR .. "pbz.lua")(api)
 local coop = dofile(SCRIPT_DIR .. "coop.lua")(api)
@@ -639,6 +660,7 @@ PBZ = {
     lang = api.lang,
     status = api.status,
     loadout = api.loadout,
+    playlog = api.playlog,
 }
 
 -- Command file: lets a developer drive tests from outside the game. Write one command per line

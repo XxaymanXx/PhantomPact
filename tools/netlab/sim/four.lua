@@ -15632,6 +15632,254 @@ local function fittedOnScreen()
     allErrors(s)
 end
 
+-- The play log (playlog.lua): this session's own file of every line the mod says, how the game stands every few seconds,
+-- what changed in between, UE4SS.log's own lines worth having, and the player's mark. (The user, 11-18: "put something
+-- that will track everything during my play like a log that will be useful to you to find issues and fix them".)
+local function thePlayLog()
+    part("the play log")
+    -- This session's file (its last part), as far as it's written.
+    local function logOf(pc)
+        local best
+        for name in pairs(pc.writing) do
+            if name:find("^playlog%-%d+%-%d+[%-%d]*%.txt$") and (not best or #name > #best or (#name == #best and name > best)) then
+                best = name
+            end
+        end
+        return best and Fake.fileText(pc, best) or "", best
+    end
+    local function has(text, what)
+        return text:find(what, 1, true) ~= nil
+    end
+    local old = {}
+    for i = 1, 12 do
+        old[i] = string.format("playlog-202611%02d-101010.txt", i)
+    end
+    local s = Session.new(SIM_SCRIPTS, { "Host", "Guest" }, false, ENEMIES, "Secret = four random words here\n", nil, function(pc, i)
+        if i == 1 then
+            -- Twelve sessions kept already, a line in their list that's no file of the log's, and UE4SS.log as it stands.
+            for _, name in ipairs(old) do
+                pc.files[name] = "an old session\n"
+            end
+            pc.files["playlog-index.txt"] = "../../PhantomPact.ini\n" .. table.concat(old, "\n") .. "\n"
+            pc.files["UE4SS.log"] = table.concat({
+                "[2026-11-18 12:11:09.9915300] UE4SS - v3.0.1 Beta #0 - Git SHA #cdbc0b66c",
+                "[2026-11-18 12:11:09.9964421] Starting Lua mod 'SomeOtherMod'",
+                "[2026-11-18 12:11:10.1000000] [RegisterHook] Registered native hook (25, 26) for Function /Script/X.Y:Z",
+                "[2026-11-18 12:11:10.2000000] FArchiveState::ArIsError = 0x29",
+                "[2026-11-18 12:11:11.9741894] [Lua] [PBZCoop] Loaded, as UE4SS.log has it.",
+                "[2026-11-18 12:11:12.5000000] [Lua] Error: attempt to index a nil value (field 'x')",
+                "stack traceback:",
+                "        [C]: in ?",
+                "[2026-11-18 12:11:13.0000000] [Lua] [PBZCoop#2] a line of the other copy's",
+                "half a line with no end",
+            }, "\n")
+        end
+    end)
+    local h, g = s.pcs[1], s.pcs[2]
+    s:run(4)
+    Session.moveTo(h, 0, 0)
+    Session.moveTo(g, 500, 0)
+    s:run(2)
+    local text, name = logOf(h)
+    check(name ~= nil and has(text, "Phantom Pact play log, begun ") and has(text, "Version " .. tostring(h.env.PBZ.net and s.relay.version))
+        and h.env.PBZ.playlog and h.env.PBZ.playlog.on == true,
+        "a session's own file begins with what it is and the version: " .. tostring(name))
+    check(has(text, "PhantomPact.ini: ") and has(text, "role=Host") and has(text, "secret=(set)") and has(text, "hostaddress=(set)")
+        and not has(text, "four random words") and not has(text, "10.0.0.1"),
+        "the settings are in it, the Secret and the host's address as set, never what they are")
+    -- Every line the mod said is in it (those with an address or a Windows user's folder, without: looked at below).
+    local missing, lines = 0, 0
+    for _, said in ipairs(h.logs) do
+        local msg = said:gsub("^%[PBZCoop[^%]]*%] ", ""):gsub("\n+$", "")
+        if not msg:find("%d+%.%d+%.%d+%.%d+") and not msg:find("Users", 1, true) and not msg:find("\n", 1, true) then
+            lines = lines + 1
+            if not has(text, msg) then
+                missing = missing + 1
+            end
+        end
+    end
+    check(lines > 5 and missing == 0, string.format("every line the mod said is in it: %d of %d missing", missing, lines))
+    check(text:find("\n%d%d:%d%d:%d%d +%d+%.%d%d  Loaded %(instance") ~= nil, "each with the time of day and the seconds since the log began")
+    check(h.files[old[1]] == nil and h.files[old[2]] ~= nil and h.files["PhantomPact.ini"] ~= nil
+        and has(h.files["playlog-index.txt"], name) and not has(h.files["playlog-index.txt"], "PhantomPact.ini")
+        and select(2, h.files["playlog-index.txt"]:gsub("\n", "\n")) == 12,
+        "the newest twelve are kept: the oldest is deleted, and a line of the list that's no file of the log's is dropped, not deleted")
+    -- No addresses.
+    h.env.PBZ.log("Connected to 203.0.113.7, by Tailscale 100.101.5.6, at home 192.168.1.20, here 127.0.0.1; ID 76561198000000001; files in C:/Users/Someone/Games/x and D:\\Users\\Someone Else\\y")
+    h.env.PBZ.log("Relay started as guest, joining A Friend Of Mine over Steam.")
+    h.env.PBZ.log("Relay started as guest, joining hosts-pc.some-tailnet.ts.net on UDP 47800.")
+    text = logOf(h)
+    check(has(text, "Connected to <internet address>, by Tailscale <Tailscale address>, at home <home network address>, here <this PC's address>; ID <Steam ID>; files in C:/Users/<user>/Games/x and D:\\Users\\<user>\\y")
+        and has(text, "joining <a Steam friend> over Steam.") and has(text, "joining <the host> on UDP 47800.")
+        and not has(text, "203.0") and not has(text, "7656119") and not has(text, "Someone") and not has(text, "Friend Of Mine") and not has(text, "tailnet")
+        and has(text, "Loaded (instance 1, v") and text:find("files in [^\n]-Users/<user>/") ~= nil,
+        "an address is written as its kind of network; a Steam ID, a Windows user and a friend's name not at all")
+    check(count(h.logs, "203%.0%.113%.7") == 1, "(UE4SS.log's own line is the mod's as it said it)")
+    -- How the game stands, every ten seconds.
+    s:run(11)
+    text = logOf(h)
+    local fps = tonumber(text:match("STATE (%d+) frames a second"))
+    check(fps and fps >= 55 and fps <= 65 and has(text, "| map Map_Xigu at 0 0 ") and has(text, "| health 1000 of 1000")
+        and has(text, "| co-op host, partners heard 1 of 1,") and has(text, "| relay "),
+        "every ten seconds a line on how the game stands: frames a second (" .. tostring(fps) .. "), the map and the place, health, the link")
+    check(text:find("the mod [%d%.]+ ms a second %(most in %a+, [%d%.]+; its longest step %a+, [%d%.]+ ms%)") ~= nil,
+        "with the mod's own time on the game thread, and where most of it went")
+    local guests = logOf(g)
+    check(has(guests, "| co-op guest, partners heard 1 of 1,") and has(guests, "role=Guest"), "the guest's PC keeps its own")
+    -- What changed in between.
+    check(has(text, "PLAY the player is in the world.") and has(text, "PLAY map - -> Map_Xigu"), "the world come into, and its map")
+    Session.die(h)
+    s:run(1.5)
+    Session.revive(h)
+    s:run(1.5)
+    h.map = "Map_Other"
+    s:run(1.5)
+    h.map = "Map_Xigu"
+    Fake.frame(h, 2.0)
+    s:run(1.5)
+    text = logOf(h)
+    check(has(text, "PLAY the player is down, at 0 0 ") and has(text, "PLAY the player is up again, at 0 0 ")
+        and has(text, "PLAY map Map_Xigu -> Map_Other") and has(text, "PLAY a frame took 2.0"),
+        "then what changes: down and up again, another map, a frame that took two seconds")
+    check(text:find("PLAY the player is down, at 0 0 [^\n]*\n[^\n]*SNAP on the screen: none of the game's screens\n[^\n]*SNAP the player: movement mode [^\n]*\n[^\n]*SNAP enemies within 40 m: sp:%a+ at %d+ m, health %d+ of %d+; sp:") ~= nil,
+        "as the player goes down, the whole picture: the screens that are up, the body, the enemies near with their health")
+    -- A scene, by the log's own look at the game's sequence manager: the mod's own look keeps its turn.
+    Session.scene(h, true, "Seq023")
+    s:run(6.5)
+    local sawIt = h.env.PBZ.game.sequenceOn()
+    Session.scene(h, false)
+    s:run(1.5)
+    text = logOf(h)
+    check(has(text, "PLAY a scene begins: Seq023.") and text:find("PLAY the scene is over %([%d%.]+ s%)%.") ~= nil and sawIt == true,
+        "a scene begins and is over, by its name")
+    -- The player's own boss fight, and the story's point.
+    Session.moveTo(h, 3000, 2800)
+    s:run(1)
+    local boss = Session.enemyOn(h, "boss")
+    h.hudLayout:RegisterBossHPBar(boss)
+    s:run(3)
+    h.hudLayout:UnRegisterBossHPBar(boss)
+    s:run(5)
+    text = logOf(h)
+    check(text:find("PLAY a boss fight begins: sp:boss, alive, health %d+ of %d+%.") ~= nil
+        and text:find("PLAY the boss fight with sp:boss is over %([%d%.]+ s%): the boss alive, health %d+ of %d+%.") ~= nil,
+        "the player's own boss fight begins and is over, by the boss's name, with its health")
+    check(text:find("PLAY the story: row %d+, %d+ steps done%.") ~= nil, "and the story's point is in it")
+    Session.moveTo(h, 0, 0)
+    s:run(1)
+    -- UE4SS.log's own lines worth having.
+    check(has(text, "UE4SS (12:11:09.991) UE4SS - v3.0.1 Beta") and has(text, "UE4SS (12:11:09.996) Starting Lua mod 'SomeOtherMod'")
+        and has(text, "UE4SS (12:11:12.500) [Lua] Error: attempt to index a nil value") and has(text, "UE4SS     stack traceback:")
+        and text:find("UE4SS +%[C%]: in %?") ~= nil,
+        "UE4SS.log's lines worth having are in it: UE4SS's version, another mod started, a Lua error and the lines under it")
+    check(not has(text, "RegisterHook") and not has(text, "ArIsError") and not has(text, "as UE4SS.log has it")
+        and not has(text, "the other copy's") and not has(text, "half a line"),
+        "and not what UE4SS says of every hook and offset, nor the mod's own lines a second time, nor a line not ended yet")
+    local flood = {}
+    for i = 1, 200 do
+        flood[i] = "[2026-11-18 12:12:00.0000000] [Lua] [OtherMod] the same thing again " .. i
+    end
+    h.files["UE4SS.log"] = h.files["UE4SS.log"] .. ", now ended\n[2026-11-18 12:11:59.0000000] [Lua] [OtherMod] a later line\n"
+        .. table.concat(flood, "\n") .. "\n"
+    s:run(2.5)
+    text = logOf(h)
+    check(has(text, "UE4SS (12:11:59.000) [Lua] [OtherMod] a later line") and not has(text, "now ended")
+        and has(text, "the same thing again 59") and not has(text, "the same thing again 60\n")
+        and has(text, "UE4SS (141 more of its lines not copied: see UE4SS.log itself)"),
+        "it reads on as UE4SS.log grows, and a mod that floods it is copied sixty lines a time, the rest counted")
+    -- The player's mark.
+    local menu = Fake.screen(h, "W_SomeMenu_C")
+    h.keys["F2"] = true
+    s:run(0.2)
+    h.keys["F2"] = nil
+    s:run(0.2)
+    for i, screen in ipairs(h.screens) do
+        if screen == menu then
+            table.remove(h.screens, i)
+            break
+        end
+    end
+    text = logOf(h)
+    local shown = h.env.PBZ.status.lastShown["playlog1"]
+    check(select(2, text:gsub("\n[^\n]*MARK %d+ =====", "")) == 1 and text:find("MARK 1 =====[^\n]*\n[^\n]*STATE [^\n]*| relay ") ~= nil
+        and shown and shown.text == "marked in the play log.",
+        "F2 marks the moment: a line that stands out, how the game stands right then, and a word on the screen")
+    check(text:find("MARK 1 =====[^\n]*\n[^\n]*STATE [^\n]*\n[^\n]*SNAP on the screen: [^\n]*W_SomeMenu_C[^\n]*\n[^\n]*SNAP the player: [^\n]*\n[^\n]*SNAP enemies within 40 m: ") ~= nil,
+        "with the whole picture under it: the screen that's up, the body, the enemies near")
+    h.keys["Gamepad_LeftThumbstick"] = true
+    s:run(2)
+    local alone = select(2, logOf(h):gsub("MARK %d+ =====", ""))
+    h.keys["Gamepad_RightThumbstick"] = true
+    s:run(0.4)
+    local early = select(2, logOf(h):gsub("MARK %d+ =====", ""))
+    s:run(3)
+    local once = select(2, logOf(h):gsub("MARK %d+ =====", ""))
+    h.keys["Gamepad_RightThumbstick"] = nil
+    s:run(0.2)
+    h.keys["Gamepad_RightThumbstick"] = true
+    s:run(1)
+    local again = select(2, logOf(h):gsub("MARK %d+ =====", ""))
+    h.keys["Gamepad_LeftThumbstick"], h.keys["Gamepad_RightThumbstick"] = nil, nil
+    check(alone == 1 and early == 1 and once == 2 and again == 3,
+        string.format("both sticks pressed in for 0.7 s mark it too, once a hold; one stick alone doesn't: %d, %d, %d, %d marks", alone, early, once, again))
+    -- A file that's full: the session goes on in the next.
+    local play = h.env.PBZ.playlog
+    local keptBytes = play.PART_BYTES
+    play.PART_BYTES = 200
+    h.env.PBZ.log("the line that fills the file")
+    play.PART_BYTES = keptBytes
+    h.env.PBZ.log("the first line of the next file")
+    local next_, nextName = logOf(h)
+    check(nextName == name:gsub("%.txt$", "-2.txt") and has(next_, "Phantom Pact play log, file 2 of the session begun ")
+        and has(next_, "the first line of the next file") and not has(next_, "the line that fills the file")
+        and has(h.files[name] or "", "the line that fills the file") and has(h.files[name] or "", "(this file is full: the session goes on in the next one)")
+        and has(h.files["playlog-index.txt"], nextName),
+        "a file that's full is closed and the session goes on in a second one, kept in the list too")
+    -- A file that can't be written: the log ends, the mod doesn't.
+    local errors = #h.errors
+    h.fileFails = { [nextName] = true }
+    h.env.PBZ.log("a line the disk has no room for")
+    h.env.PBZ.log("and the mod goes on")
+    s:run(12)
+    check(play.on == false and #h.errors == errors and count(h.logs, "and the mod goes on") == 1
+        and h.files[nextName] ~= nil and not has(h.files[nextName], "and the mod goes on") and next(h.writing) == nil,
+        "a file that can't be written any more ends the play log quietly: the mod goes on, and says what it says")
+    allErrors(s)
+    -- A line said before the play log began (main.dll being another version's is said as the mod's link opens).
+    local e = Session.new(SIM_SCRIPTS, { "Host" }, false, ENEMIES, nil, nil, function(pc)
+        pc.dllProtocol = false
+    end)
+    e:run(3)
+    local firsts = logOf(e.pcs[1])
+    check(count(e.pcs[1].logs, "main%.dll is another version's %(1%.7%.3 or older") == 1
+        and (firsts:find("main.dll is another version's (1.7.3 or older", 1, true) or 0) > (firsts:find("STATE: how the game stood", 1, true) or 1e9),
+        "a line the mod said before the log began is in it too, after its head")
+    -- PlayLogKeep.
+    local few = Session.new(SIM_SCRIPTS, { "Host" }, false, ENEMIES, "PlayLogKeep = 3\n", nil, function(pc)
+        for i = 1, 5 do
+            pc.files[old[i]] = "an old session\n"
+        end
+        pc.files["playlog-index.txt"] = table.concat(old, "\n", 1, 5) .. "\n"
+    end)
+    few:run(1)
+    local f = few.pcs[1]
+    check(f.files[old[3]] == nil and f.files[old[4]] ~= nil and f.files[old[5]] ~= nil
+        and select(2, f.files["playlog-index.txt"]:gsub("\n", "\n")) == 3,
+        "PlayLogKeep = 3: three files are kept, the new one among them")
+    -- PlayLog = Off.
+    local off = Session.new(SIM_SCRIPTS, { "Host", "Guest" }, false, ENEMIES, "PlayLog = Off\n")
+    off:run(15)
+    local none = true
+    for _, pc in ipairs(off.pcs) do
+        for fileName in pairs(pc.files) do
+            none = none and not fileName:find("^playlog")
+        end
+        none = none and next(pc.writing) == nil and pc.env.PBZ.playlog == nil and net(pc).profile == nil
+    end
+    check(none, "PlayLog = Off: no file, no list, and the mod's time isn't counted")
+    allErrors(off)
+end
+
 return function(print_, scripts)
     out = print_
     SIM_SCRIPTS = scripts
@@ -15760,5 +16008,6 @@ return function(print_, scripts)
     fittedOnScreen()
     cost()
     backToTwo()
+    thePlayLog()
     return failed == 0
 end
