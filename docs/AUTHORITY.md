@@ -86,7 +86,7 @@ online panel doesn't pause, and a pause by the game (its menu) is undone at once
 - **You die (either role):** the death screen plays. After 3 s, the camera follows your partner while they're
   up and on your map. It comes back to you when you respawn, or sooner if they go down too. The death screen is
   dimmed, not removed: removing it would run the game's monster refresh.
-- **Dying in a boss fight your partner is still in:** the respawn waits. The death screen's tick is stopped (`NotTick`), so you keep watching until the boss dies, your partner dies too or leaves, or 15 minutes pass; then it goes on from there. Anywhere else the wait could have no end, so the respawn is the game's own. PvP isn't held.
+- **Dying in a boss fight your partner is still in:** the respawn waits. The death screen's tick is stopped (`NotTick`), so you keep watching until the boss dies, your partner dies too or leaves, or 15 minutes pass, or, for the host, its boss has stood 20 s at a floor of its game's own since a partner's killing blow wasn't taken there, a floor only the host's own player takes it past (the first map's Axe chief: `net.finisherWaits`, `FN` to the guests, 383; in a party, not while another player's own boss fight is on, 388); then it goes on from there. Anywhere else the wait could have no end, so the respawn is the game's own. PvP isn't held.
   A player down and held still says the fight is on (`F 1`): the game takes a dying player's bar down, and the F 0 that
   followed once ended the partner's copy of the fight, whose own F 0 let the held respawn go. A partner counts as up while
   linked, on this map and not a second at 0 health (`net.upHere`), not by their figure being shown: a scene on either
@@ -101,9 +101,11 @@ online panel doesn't pause, and a pause by the game (its menu) is undone at once
   the host wins, `K` reaches the client and kills its copy of the boss. Enemies the host had already killed are
   killed again in the client's refreshed world.
 - **The host dies while the client fights a boss:** the host's respawn waits, as its world is the shared one, and the
-  host's boss keeps fighting the client's ghost, the client's hits still landing: the client can finish it. The refresh,
-  and the boss back at full health, come only once everyone in the fight is down, the boss is dead, the client leaves,
-  or 15 minutes pass: then the host's world refreshes, and the client's with it (`R death`).
+  host's boss keeps fighting the client's ghost, the client's hits still landing: the client can finish it, unless its game lets only the
+  host's own player past a floor (the first map's Axe chief). The refresh, and the boss back at full health, come only
+  once everyone in the fight is down, the boss is dead, the client leaves, 15 minutes pass, or such a boss has stood 20 s
+  at that floor since a killing blow of the client's wasn't taken there (`net.finisherWaits`): then the host's world
+  refreshes, and the client's with it (`R death`).
 
 - **Your partner vanishes** (quits, crashes, loses the connection): after 12 s with nothing heard (longer than a loading screen), their ghost
   hides instead of standing frozen. Fog walls closed for their fight open, and the enemies held for the host go
