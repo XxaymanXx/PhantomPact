@@ -501,27 +501,6 @@ function Fake.running(pc, actor, class, active)
         Ability = { IsValid = function() return true end, GetClass = function() return cls end } }
 end
 
--- An effect of the game's own on an actor (GE_...), as its ability system lists the active ones; on = false takes it off.
-function Fake.gameEffect(pc, actor, class, on)
-    local asc = pc.env.StaticFindObject("/Script/GameplayAbilities.Default__AbilitySystemBlueprintLibrary"):GetAbilitySystemComponent(actor)
-    local active = rawget(asc, "__fields").ActiveGameplayEffects
-    if not active then
-        active = { GameplayEffects_Internal = list({}) }
-        put(asc, "ActiveGameplayEffects", active)
-    end
-    local items = active.GameplayEffects_Internal.items
-    for i = #items, 1, -1 do
-        if items[i].class == class then
-            table.remove(items, i)
-        end
-    end
-    if on ~= false then
-        local cls = { IsValid = function() return true end, GetFName = function() return name(class) end }
-        items[#items + 1] = { class = class,
-            Spec = { Def = { IsValid = function() return true end, GetClass = function() return cls end } } }
-    end
-end
-
 -- A move of an enemy's with the game's own cooldown, as its abilities' base class keeps one (the bench, 11-16:
 -- BP_AbilityBase's "Cooldown Mark Time" on the move's one instance, 30 s on a boss's combo): the ability system starts it
 -- only once that long has passed since the mark, and marks it as it starts. path: its class's, found by it from then on.
