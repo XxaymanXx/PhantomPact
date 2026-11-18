@@ -170,7 +170,9 @@ return function(api)
     -- tick; an enemy with none at the pass's look (her summoned thugs have her rule: the bench of 11-18, run167, where
     -- every blow of the host's healed them to full). Every kept body is looked at before each of its lines to the
     -- guests, which still say co-op's numbers (coop.lua's shareEnemy), and a copy of it there is kept the same way at
-    -- its own game's cut (syncEnemy). Given back: a drop, not a rise (its heals are its own); not one that leaves it
+    -- its own game's cut (syncEnemy). Given back: a drop, not a rise (its heals are its own, in its game's health: in
+    -- co-op's number each counts f times, so her heal phases last longer than co-op's health alone would make them);
+    -- not one that leaves it
     -- dead, or on a floor its game holds it at; not one of more than half its most at once, no blow (the game's set).
     local capped = {}               -- enemy address -> { name, most, f, hp }: its game's most, what it had at the last look
     local fought = {}               -- boss address -> { name, hp, max }: what it had at the last tick
@@ -199,8 +201,9 @@ return function(api)
         return c.f
     end
 
-    local function watchBoss(boss)
-        local addr = boss:GetAddress()
+    -- (addr, hp and max: what its line's turn has just read, coop.lua's shareEnemy; else read here.)
+    local function watchBoss(boss, addr, hp, max)
+        addr = addr or boss:GetAddress()
         if not (capped[addr] or scaledAs[addr]) then
             return
         end
@@ -209,7 +212,9 @@ return function(api)
             capped[addr], fought[addr] = nil, nil
             return
         end
-        local hp, max = game.getHealth(boss)
+        if not hp then
+            hp, max = game.getHealth(boss)
+        end
         if not (hp and max and max > 0) then
             return
         end
@@ -268,13 +273,29 @@ return function(api)
         fought[addr] = was
     end
 
-    scaling.look = watchBoss        -- (coop.lua's shareEnemy: before a boss's line goes, and a kept body's)
+    scaling.look = watchBoss        -- (coop.lua's shareEnemy: before the line of any body scaled here goes)
 
-    -- A body with no bar isn't looked at every tick: its cut is known at the pass's look, by the most it was left at
-    -- here. What it has then is what it's kept with: whole, most often, a blow or two since the cut counted whole.
+    -- Whether its line looks at it first: any body scaled here. One with no bar was known at the pass's look alone and
+    -- kept whole there: a guest's blows on it before the host's first, the cut's, were undone, its bar back at full on
+    -- both screens (her summoned thugs: the eighth review, in run170's log).
+    function scaling.watched(addr)
+        return capped[addr] ~= nil or scaledAs[addr] ~= nil
+    end
+
+    -- A body with no bar isn't looked at every tick. In the host's round its line looks at it first (watched, above),
+    -- and its cut is weighed there by what it had before it. One outside the round is known at the pass's look alone,
+    -- by the most it was left at here, and kept with what it has then.
     local function cutAtLook(e, addr, name)
         if not api.coop.isHost() or capped[addr] or (net.heldAlive and net.heldAlive[addr]) then
             return false
+        end
+        -- (One its line looked at has what it had before the cut: kept with that share, as a boss is. The pass can
+        -- come to it before its next line does.)
+        if fought[addr] then
+            watchBoss(e)
+            if capped[addr] then
+                return true
+            end
         end
         local as, was, o = scaledAs[addr], scaledMax[addr], scaledOther[addr]
         if o and not o.host then
@@ -313,6 +334,21 @@ return function(api)
         scaledHealth[addr] = (ok and type(now) == "number") and { name = name, max = now } or nil
     end
 
+    -- A guest: the most the host's line says for its copy, what scaledHealth and the other role's number keep. The line
+    -- gives a copy its most before the scaling's first look as often as not (its turns go on in the quiet after a load,
+    -- which the scaling waits out), and the scaling multiplied that again for a moment: 1350 noted of the line's 900.
+    -- The copy was then given its health twice at a write of its guard bar (380), and taken for one its game cuts once
+    -- this player hosted, 225% for two (379). The eighth review.
+    function scaling.lineMost(addr, most)
+        local rec, o = scaledHealth[addr], scaledOther[addr]
+        if rec then
+            rec.max = most
+        end
+        if o and not o.host then
+            o.other = most
+        end
+    end
+
     local function playersConnected()
         local n = 1
         for _, p in ipairs(api.coop.partners()) do
@@ -341,6 +377,10 @@ return function(api)
         if before == nil and scaled[addr] == name and not game.isDead(e) and cutAtLook(e, addr, name) then
             return false
         end
+        -- (No attributes: a destroyed body still listed till collection. Nothing to write on: see tick.)
+        if not valid(e.AttributeSetBase) then
+            return false
+        end
         scaled[addr], scaledFor[addr] = name, players
         if game.isDead(e) then
             return false
@@ -358,7 +398,15 @@ return function(api)
         if before then
             health, posture = health / forPlayers(h, before), posture / forPlayers(p, before)
         end
-        scaleHealth(set, addr, name, health)
+        -- (One kept at its game's most, see capped: a new count is what its health stands for, its most its game's.
+        -- Its game numbers multiplied, it was dropped as kept and stood at 133% where three get 200%, or healed to
+        -- full at the next cut. The eighth review.)
+        local c = capped[addr]
+        if before and c and c.name == name then
+            c.f = forPlayers(h, players)
+        else
+            scaleHealth(set, addr, name, health)
+        end
         scalePosture(set, addr, name, p, players, posture)
         noteMax(addr, e)
         scaledAs[addr] = { name = name, h = h, p = p, boss = boss, players = players }
@@ -394,8 +442,8 @@ return function(api)
         if api.puppets and api.puppets.follows and api.puppets.follows(addr) then
             return false
         end
-        -- (Its attributes asked first: a body the game is still making has none for a moment. Set on nothing no error
-        -- came: it was marked done and said so, and kept the game's own poise for good. The bench, 11-18.)
+        -- (Its attributes asked first: a destroyed body, still listed till collection, has none. Set on nothing no
+        -- error came, and it was said as set. The bench, 11-18: a stand-in dropped 22 s before, run175.)
         local set = e.AttributeSetBase
         if not valid(set) then
             return false
@@ -710,10 +758,10 @@ return function(api)
             end
             at = at + 1
             local name = valid(e) and not inSoloFight(addr) and e:GetFName():ToString()
-            -- (A body the game is still making has no attributes for a moment: looked at again at the next pass. Scaled
-            -- then, nothing was written and it was marked done: the game's own numbers for the whole fight, and the
-            -- guests' copies pulled down to them. A boss too since 382, its poise's refusal no longer the end of that
-            -- look; an enemy with no bar before it as well. The eighth review.)
+            -- (A body with no attributes is looked at for nothing: a destroyed one still listed till collection, the
+            -- only kind the bench has shown (run175, a stand-in dropped 22 s before). Were a living body ever seen so,
+            -- scaled then it would be marked done with nothing written, the game's own numbers for its whole fight:
+            -- it's looked at again at the next pass instead. The eighth review.)
             if name and not valid(e.AttributeSetBase) then
                 name = false
             end

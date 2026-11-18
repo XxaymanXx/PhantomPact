@@ -1152,9 +1152,9 @@ return function(api)
     end
 
     -- The host's maximum on a copy, its share of health left as it is: game.setHealth follows on its own.
-    -- (Its attributes asked first, here and for its floor below: a body the game is still making has none for a moment.
-    -- A field set on nothing throws no error, but each is an error line in the game's log, and a copy's floor is
-    -- written every turn: the bench, 11-18, ten lines in a second as a boss came into a guest's world.)
+    -- (Its attributes asked first, here and for its floor below: a destroyed body, still listed till collection, has
+    -- none. A field set on nothing throws no error, but each is an error line in the game's log, and a copy's floor is
+    -- written every turn: the bench, 11-18, ten lines in a second as a stand-in dropped 22 s before was collected.)
     function game.setMaxHealth(actor, maxhp)
         pcall(function()
             local set = actor.AttributeSetBase
@@ -4013,7 +4013,10 @@ return function(api)
             local picker = targetPicker(actor)
             local at = picker and picker:GetAddress() or nil
             local rec = copyPickers[addr]
-            if rec == nil or rec.fname ~= fname or rec.at ~= at then
+            -- (No picker found this once is no other picker: the record and the wait it holds are kept. Made anew, the
+            -- wait read back next time was this mod's own, and the copy let go never turned to another target by itself.
+            -- The eighth review's D1.)
+            if rec == nil or rec.fname ~= fname or (at ~= nil and rec.at ~= at) then
                 rec = { fname = fname, at = at }        -- (another body at that address, or another picker on this one)
                 copyPickers[addr] = rec
             end

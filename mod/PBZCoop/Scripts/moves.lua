@@ -774,17 +774,26 @@ return function(api)
         local cwc = ghost["Character Weapons Component"]
         local slot = mainSlot()
         cwc:SetWeaponAndScabbardForceHide(slot, math.max(cwc:GetCurrentWeaponIndex(slot, false) or 0, 0), hide)
-        cwc:SetWeaponForceHide(edgeSlot(), 0, hide)
+        local kept = false
         if not hide then
             -- (Shown again, the edge slot too: a partner with no Phantom Edge then showed this player's own, as the
-            -- record said it was hidden already. Dressing hides it again.)
+            -- record said it was hidden already. Dressing hides it again. But one hidden for none whose partner put
+            -- one on meanwhile stays hidden till it holds theirs, as dressing has it (373): shown here, it showed this
+            -- player's own for the 6 s a new one waits. The eighth review's V8.)
             local addr = ghost:GetAddress()
             for _, p in ipairs(coop.partners()) do
                 if valid(p.ghost) and p.ghost:GetAddress() == addr then
-                    gearOf(p).edgeHiddenOn = nil
+                    local theirs = gearOf(p)
+                    if theirs.edgeHiddenOn == addr and theirs.edgePath and theirs.edgePath ~= "-"
+                        and heldConfig(cwc, edgeSlot()) ~= theirs.edgePath then
+                        kept = true
+                    else
+                        theirs.edgeHiddenOn = nil
+                    end
                 end
             end
         end
+        cwc:SetWeaponForceHide(edgeSlot(), 0, hide or kept)
     end
 
     -- The partner has just (re)started sync: it knows nothing yet. (Gait and stance go with every place: nothing to tell
