@@ -1152,9 +1152,16 @@ return function(api)
     end
 
     -- The host's maximum on a copy, its share of health left as it is: game.setHealth follows on its own.
+    -- (Its attributes asked first, here and for its floor below: a body the game is still making has none for a moment.
+    -- A field set on nothing throws no error, but each is an error line in the game's log, and a copy's floor is
+    -- written every turn: the bench, 11-18, ten lines in a second as a boss came into a guest's world.)
     function game.setMaxHealth(actor, maxhp)
         pcall(function()
-            local mx = actor.AttributeSetBase.Health_Max
+            local set = actor.AttributeSetBase
+            if not valid(set) then
+                return
+            end
+            local mx = set.Health_Max
             mx.BaseValue = maxhp
             mx.CurrentValue = maxhp
         end)
@@ -1252,7 +1259,11 @@ return function(api)
 
     function game.setMinHealth(actor, value)
         pcall(function()
-            local m = actor.AttributeSetBase.Health_Min
+            local set = actor.AttributeSetBase
+            if not valid(set) then
+                return
+            end
+            local m = set.Health_Min
             m.BaseValue = value
             m.CurrentValue = value
         end)

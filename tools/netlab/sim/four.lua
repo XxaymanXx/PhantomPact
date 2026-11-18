@@ -11555,6 +11555,43 @@ local function aCopysPicker()
     allErrors(s)
 end
 
+-- A body the game is still making has no attributes for a moment (the bench, 11-18: a boss coming into a guest's
+-- world). Its floor was written on nothing every turn, an error line each in the game's log, and a boss's poise was
+-- marked done with nothing set. Asked first: nothing is written till they're there, and then it is.
+local function aBodyStillMade()
+    part("an enemy the game is still making")
+    local s, h, g = pair("CoopBossPoise = 200\n")
+    Session.moveTo(h, 1500, 400)
+    Session.moveTo(g, 1600, 400)
+    s:run(3)
+    local copy = Session.enemyOn(g, "thug1")
+    local set = field(copy, "AttributeSetBase")
+    local floor = rawget(set, "__fields").Health_Min
+    rawset(set, "__alive", false)
+    Fake.put(floor, "BaseValue", 777)
+    Fake.put(floor, "CurrentValue", 777)
+    s:run(1)
+    check(field(floor, "BaseValue") == 777, "a copy with no attributes yet: its floor isn't written on nothing ("
+        .. tostring(field(floor, "BaseValue")) .. ")")
+    rawset(set, "__alive", true)
+    s:run(1)
+    check(field(floor, "BaseValue") < 777, "there again: held at its floor as ever (" .. tostring(field(floor, "BaseValue")) .. ")")
+    local boss = Fake.enemy(h, "late", "BP_Monster_Boss_C", 1700.0, 600.0, 100.0, 5000, 400, true)
+    local bossSet = field(boss, "AttributeSetBase")
+    local said = count(h.logs, "at 200%% poise")
+    rawset(bossSet, "__alive", false)
+    s:run(1)
+    h.hudLayout:RegisterBossHPBar(boss)
+    s:run(3)
+    check(count(h.logs, "at 200%% poise") == said, "a boss with no attributes yet: its poise isn't marked done on nothing")
+    rawset(bossSet, "__alive", true)
+    s:run(3)
+    check(count(h.logs, "at 200%% poise") == said + 1
+        and rawget(bossSet, "__fields").TakenReductionMultiplier_Poise.BaseValue == 0.5,
+        "there again: its poise set, and said once (" .. count(h.logs, "at 200%% poise") - said .. ")")
+    allErrors(s)
+end
+
 local function offAndBack()
     part("sync off, and back on")
     local s, h, g = pair()
@@ -15367,6 +15404,7 @@ return function(print_, scripts)
     whatsLeftOfAPartner()
     offAndBack()
     aCopysPicker()
+    aBodyStillMade()
     localPlay()
     localDifficulty()
     localTargets()
