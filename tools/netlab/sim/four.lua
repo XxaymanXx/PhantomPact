@@ -16054,8 +16054,9 @@ local function thePlayLog()
     check(fps and fps >= 55 and fps <= 65 and has(text, "| map Map_Xigu at 0 0 ") and has(text, "| health 1000 of 1000")
         and has(text, "| co-op host, partners heard 1 of 1,") and has(text, "| relay "),
         "every ten seconds a line on how the game stands: frames a second (" .. tostring(fps) .. "), the map and the place, health, the link")
-    check(text:find("the mod [%d%.]+ ms a second %(most in %a+, [%d%.]+; its longest step %a+, [%d%.]+ ms%)") ~= nil,
-        "with the mod's own time on the game thread, and where most of it went")
+    check(text:find("the mod [%d%.]+ ms a second %(most in %a+, [%d%.]+; its longest step %a+, [%d%.]+ ms%)") ~= nil
+        and text:find("| this log [%d%.]+ ms a second |") ~= nil,
+        "with the mod's own time on the game thread, where most of it went, and what this log itself costs")
     local guests = logOf(g)
     check(has(guests, "| co-op guest, partners heard 1 of 1,") and has(guests, "role=Guest"), "the guest's PC keeps its own")
     -- What changed in between.
@@ -16120,6 +16121,20 @@ local function thePlayLog()
         and has(text, "the same thing again 59") and not has(text, "the same thing again 60\n")
         and has(text, "UE4SS (141 more of its lines not copied: see UE4SS.log itself)"),
         "it reads on as UE4SS.log grows, and a mod that floods it is copied sixty lines a time, the rest counted")
+    -- The same line over and over (UE4SS's error at every frame): said once and counted, and the next line after it.
+    local same = {}
+    for i = 1, 200 do
+        same[i] = "[2026-11-18 12:13:00.0000000] [Lua] [error] the same error, every frame"
+    end
+    h.files["UE4SS.log"] = h.files["UE4SS.log"] .. table.concat(same, "\n") .. "\n    under it, where it was\n"
+        .. "[2026-11-18 12:13:05.0000000] [Lua] [OtherMod] and a line after them\n"
+    s:run(2.5)
+    text = logOf(h)
+    check(select(2, text:gsub("the same error, every frame", "")) == 1 and has(text, "UE4SS (the line above 199 times more)")
+        and has(text, "and a line after them") and not has(text, "under it, where it was"),
+        "the same line of UE4SS.log over and over is said once and counted, the lines under its repeats left out")
+    check(h.opens["UE4SS.log"] == 1, "and UE4SS.log is read through one handle kept open: opened "
+        .. tostring(h.opens["UE4SS.log"]) .. " time in the session")
     -- The player's mark.
     local menu = Fake.screen(h, "W_SomeMenu_C")
     h.keys["F2"] = true         -- (not F2: the guides tell another mod's players to put its menu there)
@@ -16204,6 +16219,44 @@ local function thePlayLog()
     check(f.files[old[3]] == nil and f.files[old[4]] ~= nil and f.files[old[5]] ~= nil
         and select(2, f.files["playlog-index.txt"]:gsub("\n", "\n")) == 3,
         "PlayLogKeep = 3: three files are kept, the new one among them")
+    -- A session whose files fill one after another, three kept: its own first file (its head, how the trouble began) is
+    -- never the one deleted, nor the one just begun. The older sessions' go first, then its own middle ones.
+    local many = Session.new(SIM_SCRIPTS, { "Host" }, false, ENEMIES, "PlayLogKeep = 3\n", nil, function(pc)
+        pc.files[old[1]], pc.files[old[2]] = "an old session\n", "an old session\n"
+        pc.files["playlog-index.txt"] = old[1] .. "\n" .. old[2] .. "\n"
+    end)
+    many:run(1)
+    local m = many.pcs[1]
+    local _, mfirst = logOf(m)
+    m.env.PBZ.playlog.PART_BYTES = 300
+    for i = 1, 5 do
+        m.env.PBZ.log("a line that fills a file, " .. i .. ": " .. string.rep("x", 300))
+    end
+    m.env.PBZ.playlog.PART_BYTES = 8 * 1024 * 1024
+    local _, mlast = logOf(m)
+    local list = m.files["playlog-index.txt"]
+    check(mfirst ~= nil and mlast == (mfirst:gsub("%.txt$", "-6.txt")) and m.files[old[1]] == nil and m.files[old[2]] == nil
+        and m.files[mfirst] ~= nil and has(m.files[mfirst], "Phantom Pact play log, begun ")
+        and m.files[(mfirst:gsub("%.txt$", "-2.txt"))] == nil and has(list, mfirst .. "\n") and has(list, mlast)
+        and select(2, list:gsub("\n", "\n")) == 3,
+        "a session whose files fill one after another keeps its own first file and the one just begun: older sessions' go first, then its own middle ones")
+    allErrors(many)
+    -- A file that can't be deleted now (open in a viewer, under a scan) stays on the list, and goes the next time.
+    local held = Session.new(SIM_SCRIPTS, { "Host" }, false, ENEMIES, "PlayLogKeep = 2\n", nil, function(pc)
+        pc.files[old[1]], pc.files[old[2]] = "an old session\n", "an old session\n"
+        pc.files["playlog-index.txt"] = old[1] .. "\n" .. old[2] .. "\n"
+        pc.fileStuck = { [old[1]] = true }
+    end)
+    held:run(1)
+    local k = held.pcs[1]
+    local stayed = k.files[old[1]] ~= nil and has(k.files["playlog-index.txt"], old[1] .. "\n")
+    k.fileStuck = nil
+    k.env.PBZ.playlog.PART_BYTES = 300
+    k.env.PBZ.log("a line that fills the file: " .. string.rep("x", 300))
+    k.env.PBZ.playlog.PART_BYTES = 8 * 1024 * 1024
+    check(stayed and k.files[old[1]] == nil and not has(k.files["playlog-index.txt"], old[1]),
+        "a file that can't be deleted now stays on the list, and goes as the next file begins")
+    allErrors(held)
     -- PlayLog = Off.
     local off = Session.new(SIM_SCRIPTS, { "Host", "Guest" }, false, ENEMIES, "PlayLog = Off\n")
     off:run(15)

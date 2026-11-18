@@ -1460,14 +1460,20 @@ local function files(pc)
     function fs.open(path, mode)
         local key = base(path)
         mode = mode or "r"
+        pc.opens[key] = (pc.opens[key] or 0) + 1
         if mode:find("r") then
             local text = Fake.fileText(pc, key)
             if text == nil then
                 return nil
             end
             local pos = 1
+            -- (As it stands at each call: a handle kept open sees what another has written since.)
+            local function now()
+                text = Fake.fileText(pc, key) or text
+            end
             return {
                 read = function(_, what)
+                    now()
                     if what == "a" then
                         local rest = text:sub(pos)
                         pos = #text + 1
@@ -1485,6 +1491,7 @@ local function files(pc)
                 lines = function() return text:gmatch("[^\n]+") end,
                 -- (No argument, as before: the size. "end": the size, and reading goes on from there. "set": from that place.)
                 seek = function(_, whence, offset)
+                    now()
                     if whence == "set" then
                         pos = (offset or 0) + 1
                         return pos - 1
@@ -1501,17 +1508,26 @@ local function files(pc)
         return {
             write = function(self, s)
                 if pc.fileFails and pc.fileFails[key] then
-                    error("disk full")              -- (a test's: this file can't be written any more)
+                    return nil, "No space left on device", 28       -- (a test's: as Lua's write says a full disk, it doesn't raise)
                 end
                 out[#out + 1] = s
                 return self
             end,
             -- (What's written so far is there to read: kept as its pieces, and joined when it's read.)
-            flush = function() pc.writing[key] = out end,
+            flush = function(self)
+                if pc.fileFails and pc.fileFails[key] then
+                    return nil, "No space left on device", 28
+                end
+                pc.writing[key] = out
+                return self
+            end,
             close = function() pc.files[key], pc.writing[key] = table.concat(out), nil end,
         }
     end
     function fs.remove(path)
+        if pc.fileStuck and pc.fileStuck[base(path)] then
+            return nil, path .. ": Permission denied", 13       -- (a test's: open in another program)
+        end
         pc.files[base(path)] = nil
         return true
     end
@@ -1524,7 +1540,7 @@ local function files(pc)
 end
 
 function Fake.new(id, scripts, ini, link)
-    local pc = { id = id, scripts = scripts, now = 100.0, trace = {}, logs = {}, errors = {}, missing = {}, missed = {}, files = {}, writing = {}, loops = {}, hooks = {},
+    local pc = { id = id, scripts = scripts, now = 100.0, trace = {}, logs = {}, errors = {}, missing = {}, missed = {}, files = {}, writing = {}, opens = {}, loops = {}, hooks = {},
         nextAddress = 0x100000, calls = 0, keys = {}, enemies = {}, spawners = {}, spawned = {}, hitComps = {}, factions = {}, pickups = {}, chests = {}, blockers = {}, link = link, map = "Map_Xigu",
         paused = false }
     pc.meta = makeMeta(pc)

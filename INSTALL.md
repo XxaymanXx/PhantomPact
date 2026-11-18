@@ -383,7 +383,7 @@ that file with the `Secret` in it.
 
 **The play log.** Each time you play, Phantom Pact keeps a text file of that session in `ue4ss\Mods\PBZCoop\logs` (in
 the `PBZCoop` folder itself if there's no `logs` folder): everything the mod said, UE4SS's errors, and every ten seconds
-how the game stood (frames a second, where you were, your health, the link). The last 12 are kept (`PlayLogKeep` in
+how the game stood (frames a second, where you were, your health, the link). The last 12 files are kept (`PlayLogKeep` in
 `PhantomPact.ini` sets how many), so the one from the session that went wrong is still there after you restart. When something looks wrong, press **F7**, or press both
 sticks in for a second: "marked in the play log" shows, and that moment is easy to find in the file. It holds no
 address, name or password. `PlayLog = Off` in `PhantomPact.ini` turns it off.

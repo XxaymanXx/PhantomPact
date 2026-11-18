@@ -9,15 +9,17 @@
 --     fight by the boss's name with its health, the story's point, a frame that took HITCH_S or more;
 --   MARK, the player's own mark when something looks wrong: F7, or both sticks pressed in for MARK_HOLD_S;
 --   SNAP, at a mark and as the player goes down: the game's screens that are up, what the player's body is doing, and
---     the enemies near.
+--     (while co-op is on: the mod knows the enemies only then) the enemies near.
 -- The files are playlog-<date>-<time>.txt in the mod folder's logs folder (the mod folder itself where there's none: Lua
 -- can't make one), the newest KEEP kept (PlayLogKeep in PhantomPact.ini); a session goes on in a next file at
 -- PART_BYTES. PlayLog = Off there: no log. No addresses and no names in it: an IP is written as its kind of network; a
 -- Steam ID, a partner's Steam name, a host's name and a user's folder not at all; the Secret and the host's address as
 -- set or not. (Players attach it to public reports.)
 -- It reads the game and writes its own files, nothing else, and a failure here ends the log, never the mod. What it
--- reads, it reads by calls that keep nothing of the mod's own: not game.sequenceOn, which spaces its searches for the
--- game's sequence manager (a look from here used one up, and the host saw its scene two seconds late).
+-- reads, it reads by calls that change nothing the mod goes by: not game.sequenceOn, which spaces its searches for the
+-- game's sequence manager (a look from here used one up, and the host saw its scene two seconds late). One thing a
+-- read of its leaves behind: story.point() ends with story.lua's set of finished quests being this read's, a fresher
+-- one than its own last (the same quests, read later).
 
 return function(api)
     local valid, getPlayer1 = api.valid, api.getPlayer1
@@ -135,12 +137,31 @@ return function(api)
             f:close()
         end
         names[#names + 1] = name
-        while #names > play.KEEP do
-            os.remove(folder .. table.remove(names, 1))
+        -- The oldest past KEEP go, but never this session's first file (its head, and how the trouble began) nor the one
+        -- just begun: a session whose files fill one after another would else delete its own beginning. One that can't
+        -- be deleted now (open in a viewer, under a scan) stays on the list, and is tried again the next time.
+        local first, over, kept = stem .. ".txt", #names - play.KEEP, {}
+        for _, n in ipairs(names) do
+            local gone = false
+            if over > 0 and n ~= first and n ~= name then
+                over = over - 1
+                gone = os.remove(folder .. n) ~= nil
+                if not gone then
+                    local still = io.open(folder .. n, "r")
+                    if still then
+                        still:close()
+                    else
+                        gone = true         -- (not there any more: off the list)
+                    end
+                end
+            end
+            if not gone then
+                kept[#kept + 1] = n
+            end
         end
         local w = io.open(folder .. INDEX, "w")
         if w then
-            w:write(table.concat(names, "\n") .. "\n")
+            w:write(table.concat(kept, "\n") .. "\n")
             w:close()
         end
     end
@@ -166,14 +187,14 @@ return function(api)
             wall = os.date("%H:%M:%S", time0 + whole)
         end
         local s = string.format("%s %9.2f  %s\n", wall, t, mask(text))
-        file:write(s)
+        assert(file:write(s))       -- (a disk that's full: nil and a message, not an error of Lua's own. Made one: line() ends the log.)
         bytes = bytes + #s
         if whole ~= rateAt then
             rateAt, rateN = whole, 0
         end
         rateN = rateN + 1
         if rateN <= play.FLUSH_EACH or rateN % 20 == 0 then
-            file:flush()
+            assert(file:flush())
             dirty = false
         else
             dirty = true
@@ -273,34 +294,58 @@ return function(api)
             or l:find("raceback") ~= nil or l:find("atal") ~= nil
     end
 
-    local logPath, logAt, carry, logMissed, lastKept = nil, 0, "", 0, false
+    local logPath, logFile, logAt, carry, logMissed, lastKept = nil, nil, 0, "", 0, false
+    local lastRest, repeats, repeating = nil, 0, false
+    -- What UE4SS.log has gained since the last pass, through one handle kept open: the file only grows in a session, and
+    -- opened anew every pass it's a file another program wrote since, which a virus scanner looks at each time (tens of
+    -- milliseconds on the game thread, by the review's reading of this PC).
+    local function gained()
+        if not logFile then
+            logPath = logPath or (api.modRoot() .. "../../UE4SS.log")
+            logFile = io.open(logPath, "rb")
+            if not logFile then
+                logMissed = logMissed + 1
+                return nil
+            end
+            logMissed = 0
+        end
+        local f = logFile
+        local ok, chunk = pcall(function()
+            local size = f:seek("end") or 0
+            if size < logAt then
+                logAt, carry = 0, ""        -- (another file than the one read so far)
+            end
+            if size <= logAt then
+                return nil
+            end
+            f:seek("set", logAt)
+            return f:read(math.min(size - logAt, play.TAIL_BYTES))
+        end)
+        if not ok then
+            pcall(function() f:close() end)
+            logFile, logMissed = nil, logMissed + 1     -- (opened again at the next pass)
+            return nil
+        end
+        return chunk
+    end
     local function tail()
         if logMissed >= 5 then
             return              -- (no UE4SS.log where it's looked for: not asked again)
         end
-        logPath = logPath or (api.modRoot() .. "../../UE4SS.log")
-        local f = io.open(logPath, "rb")
-        if not f then
-            logMissed = logMissed + 1
-            return
-        end
-        logMissed = 0
-        local size = f:seek("end") or 0
-        if size < logAt then
-            logAt, carry = 0, ""        -- (another file than the one read so far)
-        end
-        local chunk = nil
-        if size > logAt then
-            f:seek("set", logAt)
-            chunk = f:read(math.min(size - logAt, play.TAIL_BYTES))
-        end
-        f:close()
+        local chunk = gained()
         if not chunk or chunk == "" then
             return
         end
         logAt = logAt + #chunk
         carry = carry .. chunk
         local kept, passed, done = 0, 0, 1
+        -- (The same line over and over, an error every frame: said once, then counted, with the lines under it.)
+        local function counted()
+            if repeats > 0 then
+                line("UE4SS (the line above " .. repeats .. " times more)")
+                repeats = 0
+            end
+        end
         for l, after in carry:gmatch("([^\n]*)\n()") do
             done = after
             l = l:gsub("\r$", "")
@@ -309,16 +354,28 @@ return function(api)
             if at then
                 keepIt = worth(rest)
                 lastKept = keepIt
+                repeating = keepIt and rest == lastRest
+                if repeating then
+                    repeats = repeats + 1
+                end
             else
                 keepIt = lastKept and l:find("%S") ~= nil       -- (what follows an error on lines of its own: where it was)
+            end
+            if repeating then
+                keepIt = false
             end
             if keepIt and kept >= play.TAIL_LINES then
                 passed = passed + 1
             elseif keepIt then
+                counted()
                 kept = kept + 1
+                if at then
+                    lastRest = rest
+                end
                 line("UE4SS " .. (at and ("(" .. at .. ") " .. rest) or ("    " .. l)))
             end
         end
+        counted()
         carry = carry:sub(done)
         if #carry > play.TAIL_BYTES then
             carry = ""                  -- (no line is this long: not kept growing)
@@ -356,6 +413,13 @@ return function(api)
         return ok and on == true, ok and name or nil
     end
 
+    -- The log's own time on the game thread, by the mod's fine clock where there is one: its look and its keys (the
+    -- frame count is a few additions). Said in STATE, so a log that costs something shows it.
+    local own = 0
+    local function clock()
+        return api.link and api.link.now and api.link.now() or os.clock()
+    end
+
     -- How the game stands. The frames and the mod's time are since the last STATE line.
     local frames, worst, lastFrame, longGap, stateAt, stateN = 0, 0, nil, nil, nil, 0
     local function state(whole)
@@ -389,6 +453,8 @@ return function(api)
                 net.profile = play.profile      -- (counted anew from here)
             end
         end
+        out[#out + 1] = string.format("this log %.1f ms a second", own * 1000 / span)
+        own = 0
         out[#out + 1] = string.format("Lua %.1f MB", collectgarbage("count") / 1024)
         local game = api.game
         local _, pawn = getPlayer1()
@@ -690,7 +756,7 @@ return function(api)
         countTime()
         if dirty then
             dirty = false
-            if not pcall(function() file:flush() end) then
+            if not pcall(function() assert(file:flush()) end) then
                 stop()
                 return
             end
@@ -739,13 +805,17 @@ return function(api)
         end)
         LoopInGameThreadWithDelay(play.LOOK_MS, function()
             if file then
+                local began = clock()
                 look()
+                own = own + (clock() - began)
             end
             return false
         end)
         LoopInGameThreadWithDelay(play.KEY_MS, function()
             if file then
+                local began = clock()
                 try("the mark's keys", markKeys)
+                own = own + (clock() - began)
             end
             return false
         end)
