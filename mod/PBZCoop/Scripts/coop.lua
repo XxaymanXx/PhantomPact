@@ -1180,8 +1180,24 @@ return function(api)
                 end
                 -- "-" = unknown posture; the client leaves its own alone instead of zeroing it.
                 local number = enemyNumber(actor, name)
+                -- (One kept at its game's most stands for f times it, scaling.lua's capped: its line says co-op's numbers,
+                -- as it did before its game cut it. Looked at here first: a line with the cut in it, or with a blow not
+                -- yet given back, pulled every copy down by it, and a copy isn't lifted again under 5%.)
+                local f = 1
+                if boss % 2 == 1 and api.scaling and api.scaling.capped then
+                    if api.scaling.look then
+                        api.scaling.look(actor)
+                    end
+                    f = api.scaling.capped(actor, addr) or 1
+                    if f ~= 1 then
+                        local has, most = game.getHealth(actor)
+                        if has and most then
+                            hp, maxhp = has, most
+                        end
+                    end
+                end
                 net.sendEnemyLine(number, string.format("%d %.0f %.0f %.0f %.0f %.0f %.0f %.1f %.1f %d %s", number,
-                    x, y, z, yaw, vx == vx and vx or 0, vy == vy and vy or 0, hp, maxhp, boss,
+                    x, y, z, yaw, vx == vx and vx or 0, vy == vy and vy or 0, hp * f, maxhp * f, boss,
                     posture ~= nil and string.format("%.1f", posture) or "-"))
             end
             if aggro and game.hateGhost then
@@ -1545,9 +1561,40 @@ return function(api)
                 -- (Not with its most health down since the last turn too: this world's own game set its numbers again,
                 -- a boss's base written back (Xiao Xue's on the bench, 16482 over co-op's 24723), no blow. Told as one,
                 -- it took all of co-op's share off the host's boss at once, a third of her health, and two guests'
-                -- at once could end a boss with no blow struck. The host's line puts both numbers back. The sixth review.)
+                -- at once could end a boss with no blow struck. The sixth review.)
                 local written = prev.maxhp ~= nil and maxhp ~= nil and maxhp < prev.maxhp - 1
-                if (dHp > 0.5 or dPosture > 0.5 or onFloor) and not written then
+                -- (Nor a guard bar that fell to stand at its own most: this world's game wrote the most down with it, a
+                -- difficulty set again with co-op's health at the game's own, or held a bar over its most to it. No
+                -- blow leaves the bar full. Any health it took is weighed as ever. The seventh review.)
+                if dPosture > 0.5 and posture ~= nil and game.postureMax
+                    and math.abs(posture - (game.postureMax(actor) or math.huge)) < 0.5 then
+                    dPosture = 0
+                end
+                if written and dHp > 0.5 and not net.mine[name] and maxhp > 1
+                    and api.scaling and api.scaling.guardKept and api.scaling.guardKept(actor, addr) then
+                    -- (Its health alone, its guard bar as it was given: this world's game holds no more than this for it,
+                    -- and cuts what's over at each blow of this player's (Xiao Xue's: the bench of 11-18). Put back, every
+                    -- blow was cut again and told to nobody. Kept at its game's most from here, its health the share of
+                    -- it the host's line says: net.capped, below. The blow that came with the cut is in it, and lost.)
+                    net.capped[addr] = { name = name, most = maxhp }
+                    hp = math.max(HELD_HP + 1, maxhp * prev.hp / prev.maxhp)
+                    if game.setHealth then
+                        game.setHealth(actor, hp)
+                    end
+                    net.stats.undone = net.stats.undone + 1
+                    log(string.format("%s's game here holds no more than its own health (%.0f): its copy kept at that.", name, maxhp))
+                elseif written and dHp > 0.5 and not net.mine[name] then
+                    -- (Put back at once, as a drop not this player's is: the host's line lifts a copy only from 5% under
+                    -- and a second on, and one asleep there in this player's own fight never. Left lower, the copy died
+                    -- that much sooner, and its killing blow or its death here (GK) took the rest off the host's boss.
+                    -- The seventh review.)
+                    if game.setMaxHealth then
+                        game.setMaxHealth(actor, prev.maxhp)
+                    end
+                    undoHit(actor, prev.hp, dPosture > 0.5 and prev.posture or nil)
+                    hp, maxhp = prev.hp, prev.maxhp
+                    posture = dPosture > 0.5 and prev.posture or posture
+                elseif (dHp > 0.5 or dPosture > 0.5 or onFloor) and not written then
                     if ghostsHit() and (net.pvp or dHp <= 0.5) then
                         -- The host's swing, replayed here: the host's own world already took it.
                         undoHit(actor, prev.hp, prev.posture)
@@ -1584,6 +1631,14 @@ return function(api)
                             if lethal then
                                 net.lethalPending[name] = { at = os.clock(), tries = 1 }
                                 log("Killing blow on " .. name .. "; telling the host.")
+                            end
+                            -- (A copy kept at its own game's most, net.capped: the blow took that much of the host's, a
+                            -- smaller share of what it has. The rest back here, so the copy keeps with the host's.)
+                            local cap = net.capped[addr]
+                            if cap and cap.name == name and not lethal and dHp > 0.5 and game.setHealth
+                                and hostOf and hostOf.MaxHp and hostOf.MaxHp > cap.most + 1 then
+                                hp = hp + dHp * (1 - cap.most / hostOf.MaxHp)
+                                game.setHealth(actor, hp)
                             end
                         end
                     end
@@ -1644,9 +1699,19 @@ return function(api)
                 if not asleep and (r.Boss or (game.bossTwin and game.bossTwin(actor, addr))) and game.watchBossBar then
                     game.watchBossBar(actor, addr, r.Posture)   -- (the host's bar: its breaks and fills, for this player's blows)
                 end
-                if game.setMaxHealth and r.MaxHp and maxhp and math.abs(r.MaxHp - maxhp) > 1 then
-                    game.setMaxHealth(actor, r.MaxHp)
-                    maxhp = r.MaxHp     -- (what's kept for the next turn: the mod's own write is no write of the game's)
+                -- (A copy this world's game holds at no more than its own most, net.capped: kept at that, and the host's
+                -- numbers taken as the share of it. Till the host's most is no more than that itself.)
+                local cap = net.capped[addr]
+                if cap and (cap.name ~= name or not r.MaxHp or r.MaxHp <= cap.most + 1) then
+                    net.capped[addr], cap = nil, nil
+                end
+                local rHp, rMax = r.Hp, r.MaxHp
+                if cap then
+                    rHp, rMax = r.Hp and r.Hp * cap.most / r.MaxHp, cap.most
+                end
+                if game.setMaxHealth and rMax and maxhp and math.abs(rMax - maxhp) > 1 then
+                    game.setMaxHealth(actor, rMax)
+                    maxhp = rMax        -- (what's kept for the next turn: the mod's own write is no write of the game's)
                 end
                 -- (Never below the floor it's held at: the host's line can say 0 before its K comes, and a copy written to 0
                 -- reads as dead here without the game's death ever running. The forest's last boss then died in the guest's
@@ -1655,7 +1720,7 @@ return function(api)
                 -- was ever sent, the enemy the host's alone to finish.)
                 -- (A boss asleep there, in its fight here: what it has left is this game's to say, till the host is in.)
                 local own = asleep and r.Boss and handover.barOn(addr)
-                local want = not own and r.Hp ~= nil and math.max(r.Hp, HELD_HP + 0.5) or nil
+                local want = not own and rHp ~= nil and math.max(rHp, HELD_HP + 0.5) or nil
                 if game.setHealth and want ~= nil and hp ~= nil and want < hp - 0.5 then
                     game.setHealth(actor, want)
                     hp = want
@@ -1663,14 +1728,14 @@ return function(api)
                 -- (Or full there and not here, by less than that: a lost fight started over, 305, with a blow or two of
                 -- this player's on its copy, which stood 3% down for good while the host's was whole. The bench of 11-16.
                 -- Not while a killing blow of theirs waits for its answer.)
-                if game.setHealth and not own and r.Hp ~= nil and hp ~= nil and r.MaxHp
-                    and (r.Hp > hp + math.max(1, r.MaxHp * 0.05)
-                        or (r.Hp >= r.MaxHp - 0.5 and r.Hp > hp + 1 and not net.lethalPending[name])) then
+                if game.setHealth and not own and rHp ~= nil and hp ~= nil and rMax
+                    and (rHp > hp + math.max(1, rMax * 0.05)
+                        or (rHp >= rMax - 0.5 and rHp > hp + 1 and not net.lethalPending[name])) then
                     net.healTicks[name] = net.healTicks[name] or os.clock()
                     if os.clock() - net.healTicks[name] >= HEAL_TICKS then
-                        log(string.format("%s healed on the host (%.0f -> %.0f): following.", name, hp, r.Hp))
-                        game.setHealth(actor, r.Hp)
-                        hp = r.Hp
+                        log(string.format("%s healed on the host (%.0f -> %.0f): following.", name, hp, rHp))
+                        game.setHealth(actor, rHp)
+                        hp = rHp
                         net.healTicks[name] = nil
                     end
                 else
@@ -2139,9 +2204,21 @@ return function(api)
             -- (Onto its floor by any amount, as syncEnemy weighs it: a blow onto the floor of half a point or less was told
             -- to nobody, and every blow after read as nothing, the host unable to finish it till the guest did.)
             local onFloor = hp <= HELD_HP + 0.01 and prev.hp > hp + 0.01
-            -- (Not with its most health down too: this world's own game set its numbers again, as syncEnemy has it.)
+            -- (Not with its most health down too: this world's own game set its numbers again, as syncEnemy has it,
+            -- and they're put back at once. Nor a guard bar that fell to stand at its own most.)
             local written = prev.maxhp ~= nil and maxhp ~= nil and maxhp < prev.maxhp - 1
-            if (dHp > 0.5 or dPosture > 0.5 or onFloor) and not written then
+            if dPosture > 0.5 and posture ~= nil and game.postureMax
+                and math.abs(posture - (game.postureMax(actor) or math.huge)) < 0.5 then
+                dPosture = 0
+            end
+            if written and dHp > 0.5 then
+                if game.setMaxHealth then
+                    game.setMaxHealth(actor, prev.maxhp)
+                end
+                undoHit(actor, prev.hp, dPosture > 0.5 and prev.posture or nil)
+                hp, maxhp = prev.hp, prev.maxhp
+                posture = dPosture > 0.5 and prev.posture or posture
+            elseif (dHp > 0.5 or dPosture > 0.5 or onFloor) and not written then
                 if (ghostsHit() and dHp <= 0.5) or ((dHp > 0.5 or onFloor) and not ownHit(actor)) then
                     undoHit(actor, prev.hp, prev.posture)
                     hp, posture = prev.hp, prev.posture
@@ -2815,9 +2892,12 @@ return function(api)
             local fought = net.hostBosses[name] or net.partnerBosses[name] or net.pendingBosses[name]
             local wasBoss = fought or (valid(actor) and game.isBoss and game.isBoss(actor))
             -- (A fight of this player's own the host never joined, by the bars told: its fall began no scene of the
-            -- host's. One both were in, this player's bar up first, is the host's fight too. flowsync.lua's holdStarts.)
+            -- host's. One both were in, this player's bar up first, is the host's fight too. In a party only the host's
+            -- bar says so: another guest's, up in the same moment as this player's, is no joining. flowsync.lua's
+            -- holdStarts.)
             net.ownFell = net.ownFell or {}
-            net.ownFell[name] = (net.ownAnnounced or {})[name] and not net.partnerBosses[name] or nil
+            net.ownFell[name] = (net.ownAnnounced or {})[name]
+                and not (net.partnerBosses[name] and (not net.party or net.fightOf[name] == 1)) or nil
             net.hostBosses[name] = nil
             if wasBoss and not quiet then
                 net.bossFell = net.bossFell or {}
@@ -2961,6 +3041,7 @@ return function(api)
         end
         posture = num(posture)
         posture = posture and math.max(0, math.min(posture, MAX_EVENT_DAMAGE)) or 0
+        local told = amount
         if lethal == "L" then
             amount = math.huge      -- the client's killing blow (its copy can't show the full damage)
             log("Partner's killing blow on " .. tostring(name) .. (valid(enemyByName[name]) and "." or ", which isn't loaded here."))
@@ -3010,6 +3091,15 @@ return function(api)
             end
             local hitter = peerOf(from).target
             local killed = false
+            -- (One kept at its game's most, scaling.lua's capped: a copy that ran ahead of it is on its floor with more
+            -- left here than f times this blow. A blow then, not its death, and LR says what it has.)
+            if lethal == "L" and valid(actor) and api.scaling and api.scaling.capped then
+                local f = api.scaling.capped(actor, actor:GetAddress())
+                local left = f and game.getHealth(actor)
+                if left and left > told * f + 1 then
+                    amount = told
+                end
+            end
             if valid(actor) and game.applyDamage and hitter
                 and gap3d(actor:K2_GetActorLocation(), hitter) <= (lethal == "L" and OWN_HIT_CM * 2 or OWN_HIT_CM) then
                 local wasAlive = not (game.isDead and game.isDead(actor))
@@ -3121,6 +3211,8 @@ return function(api)
                 elseif valid(actor) then
                     local hp = game.getHealth(actor)
                     if hp then
+                        -- (Co-op's number of it, as its line says: one kept at its game's most stands for f times it.)
+                        hp = hp * (api.scaling and api.scaling.capped and api.scaling.capped(actor, actor:GetAddress()) or 1)
                         -- (To that guest alone: another guest's own killing blow on it, still on its way, was dropped.)
                         if from then
                             sendTo(from, "LR", name, string.format("%.1f", hp))
@@ -3144,6 +3236,11 @@ return function(api)
         net.lethalPending[name] = nil
         local actor = enemyByName[name]
         if valid(actor) and game.setHealth and not (game.isDead and game.isDead(actor)) then
+            -- (A copy kept at its own game's most: the host's share of that.)
+            local cap, r = net.capped[actor:GetAddress()], net.remoteEnemies[name]
+            if cap and cap.name == name and r and r.MaxHp and r.MaxHp > cap.most + 1 then
+                hp = hp * cap.most / r.MaxHp
+            end
             game.setHealth(actor, math.max(HELD_HP + 1, hp))
             if seen[name] then
                 seen[name].hp = math.max(HELD_HP + 1, hp)
@@ -4852,6 +4949,7 @@ return function(api)
         net.joinedBoss, net.joinedWith, net.farFight, net.bossOverAt, net.lastFarFight = nil, nil, nil, nil, nil
         net.healTicks = {}
         net.lethalPending = {}
+        net.capped = {}
         net.bossFell, net.extraBossWatch, net.watchGaveUp, net.watchHeldAt = {}, {}, nil, nil
         net.fellInFight = {}
         net.postureTicks = {}
@@ -5467,6 +5565,7 @@ return function(api)
     net.FIGHT_NEAR_CM = 10000
     net.struck = net.struck or {}         -- boss id -> true: this player hit it in this fight, or it went for them
     net.struckAt = net.struckAt or {}     -- enemy id -> os.clock() of this player's last blow on it (handover.byHere)
+    net.capped = net.capped or {}         -- client: a copy's address -> { name, most }: its own game holds no more (syncEnemy)
     net.RISE_S = 15     -- a boss whose fight begins this soon after its death here is that boss up again (joinBossFight)
     function net.fightingHere(pawn)
         if net.watchingFight then
