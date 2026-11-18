@@ -145,7 +145,7 @@ PvPvE 暂不支持处决(架势被破只会硬直),只限两名玩家。
 
 Phantom Pact 不修改任何游戏文件:它是一个 UE4SS Lua 模组,带一个自己的小 DLL,可以和大多数模组一起使用。
 
-- **按键。** F3、F5 和 F6 属于 Phantom Pact,PvP 比赛中还有 F。用同一个键的模组会同时打开。Gauntlet of Masters 的菜单默认也是 F5,可在 `ProjectPBZ\Content\Paks\~mods\BossRush.json` 里修改 "menuKey"(例如改成 "F2")。在 `PhantomPact.ini` 设置 `OnlinePanel = Off` 可以让出 F5,之后用 ini 连接。
+- **按键。** F3、F5、F6 和 F7 属于 Phantom Pact(F7 在游玩日志里标记当前时刻),PvP 比赛中还有 F。用同一个键的模组会同时打开。Gauntlet of Masters 的菜单默认也是 F5,可在 `ProjectPBZ\Content\Paks\~mods\BossRush.json` 里修改 "menuKey"(例如改成 "F2")。在 `PhantomPact.ini` 设置 `OnlinePanel = Off` 可以让出 F5,之后用 ini 连接。
 - **UE4SS。** 请使用适用于幻刃零 1.0.3 或更新版本的 UE4SS。Phantom Pact 会在 `ue4ss\UE4SS_Signatures` 放两个文件;自带 UE4SS 的整合包或模组会覆盖它们。安装或更新这类东西之后,请重新解压一次 Phantom Pact。
 - **画面和镜头**(血腥、血迹、特效、视野、镜头距离):只影响你自己的屏幕,可以一起使用。你倒下时以及 PvP 处决时,镜头由 Phantom Pact 控制,所以镜头模组在那时不生效。
 - **你自己的战斗**(弹反或格挡判定、动作取消、伤害、顿帧):落在你身上的攻击由你自己的游戏判定,所以在合作中这类模组只对你自己生效。在 PvP 比赛(F6)中这不公平,或者双方画面不一致(你取消掉的一刀在对手屏幕上仍可能命中):比赛中所有人应使用相同的模组,或者都不用。比赛中游戏每一帧都以正常速度运行,所以其他模组的慢动作或顿帧在比赛中不会出现。
@@ -206,7 +206,7 @@ Phantom Pact 不修改任何游戏文件:它是一个 UE4SS Lua 模组,带一个
 
 最好双方都提供。请在问题发生后、重启游戏或重新连接之前收集,因为这些文件之后会重新开始:
 
-- 最新的游玩日志:`ue4ss\Mods\PBZCoop\logs\playlog-<日期>-<时间>.txt`(重启后仍在,见下文)
+- 出问题那一局的游玩日志:`ue4ss\Mods\PBZCoop\logs\playlog-<日期>-<时间>.txt`,按文件名里的日期和时间找(重启后仍在;重启之后最新的文件是新一局的,请取它前面的那个)
 - `ue4ss\UE4SS.log`
 - 如果游戏自己关闭了:最新的 `ue4ss\crash_*.dmp`(游戏崩溃时 UE4SS 会写一个,里面记录了崩溃的位置)
 - `ue4ss\Mods\PBZCoop\net_status.txt` 和 `relay_log.txt`;如果有 `relay_error.txt`,也请附上
@@ -215,4 +215,4 @@ Phantom Pact 不修改任何游戏文件:它是一个 UE4SS Lua 模组,带一个
 
 `net_status.txt` 和 `relay_log.txt` 里有搭档的地址。你的 `Secret` 只在 `PhantomPact.ini` 里:不要把带着 `Secret` 的这个文件发出来。
 
-**游玩日志。** 每次游玩,幻影契约都会在 `ue4ss\Mods\PBZCoop\logs` 里保存这一局的文本文件(没有 `logs` 文件夹时放在 `PBZCoop` 文件夹里):模组说过的每一行、UE4SS 的报错,以及每十秒一次的游戏状态(帧数、所在位置、生命值、连接情况)。保留最近 12 个(`PhantomPact.ini` 里的 `PlayLogKeep` 可以改数量),所以出问题的那一局在重启后仍然找得到。发现不对劲时,按 **F2**,或同时按下两个摇杆一秒:屏幕上会提示"已在游玩日志中做了标记",之后在文件里很容易找到这一刻。日志里没有地址、名字或密码。在 `PhantomPact.ini` 里写 `PlayLog = Off` 可以关闭。
+**游玩日志。** 每次游玩,幻影契约都会在 `ue4ss\Mods\PBZCoop\logs` 里保存这一局的文本文件(没有 `logs` 文件夹时放在 `PBZCoop` 文件夹里):模组说过的每一行、UE4SS 的报错,以及每十秒一次的游戏状态(帧数、所在位置、生命值、连接情况)。保留最近 12 个(`PhantomPact.ini` 里的 `PlayLogKeep` 可以改数量),所以出问题的那一局在重启后仍然找得到。发现不对劲时,按 **F7**,或同时按下两个摇杆一秒:屏幕上会提示"已在游玩日志中做了标记",之后在文件里很容易找到这一刻。日志里没有地址、名字或密码。在 `PhantomPact.ini` 里写 `PlayLog = Off` 可以关闭。

@@ -9889,16 +9889,36 @@ local function followTheHost()
     wh.storyUpTo(all)
     wg.storyUpTo(3)
     wg.storyStuck["Boss-Puppet S1"] = true
-    w:run(40)
+    w:run(70)
     check(count(wg.logs, "1 of the host's story steps didn't take here") == 1 and told(wg) == told(g) - 1,
         "a step the game wouldn't take: said in the log, and not counted in what the player is told they caught up to ("
             .. tostring(told(wg)) .. " of " .. tostring(told(g)) .. " steps)")
+    check(count(wg.logs, "1 of the host's story steps hasn't taken here yet: asked again in 10 s") == 2,
+        "asked three times in all, ten seconds apart, before it's left")
     wg.storyStuck["Boss-Puppet S1"] = nil
     loaded(wg)
     w:run(40)
     check(wg.storyState("Boss-Puppet", "S1") == 2 and count(wg.logs, "your story caught up with the host's: 1 step") == 1,
         "tried again after a load, it takes: told then")
     allErrors(w)
+    -- One that didn't take at its first asking and does at its second (a PC out of breath, the bench of 11-18): no load is
+    -- waited for, and it's told as caught up to with the rest.
+    local x, xh, xg = pair()
+    xh.storyUpTo(all)
+    xg.storyUpTo(3)
+    xg.storyStuck["Boss-Puppet S1"] = true
+    local askedAgain
+    x:run(60, function()
+        if not askedAgain and count(xg.logs, "hasn't taken here yet") > 0 then
+            askedAgain = xg.now
+            xg.storyStuck["Boss-Puppet S1"] = nil
+        end
+    end)
+    check(askedAgain ~= nil and xg.storyState("Boss-Puppet", "S1") == 2 and count(xg.logs, "didn't take here") == 0
+        and told(xg) == told(g),
+        "a step that didn't take at its first asking is asked again ten seconds on, and takes: no load waited for, and told with the rest ("
+            .. tostring(told(xg)) .. " of " .. tostring(told(g)) .. " steps)")
+    allErrors(x)
 end
 
 -- The flags a partner's doing raises in this world too (a player report on 1.7.1, Apprentice Healer: three herbs for
@@ -16006,6 +16026,27 @@ local function thePlayLog()
         and has(text, "Loaded (instance 1, v") and text:find("files in [^\n]-Users/<user>/") ~= nil,
         "an address is written as its kind of network; a Steam ID, a Windows user and a friend's name not at all")
     check(count(h.logs, "203%.0%.113%.7") == 1, "(UE4SS.log's own line is the mod's as it said it)")
+    -- No names: a partner's Steam name in the relay's own line and the panel's, a host's name, a user's folder in any case
+    -- and a Linux login's. (Players attach the file to public reports: the play log's own review.)
+    h.env.PBZ.log("role=client via=steam connected=yes peer=Some Friend Name rtt_ms=31 route=relay route_ping_ms=-")
+    h.env.PBZ.log("role=host via=steam connected=no peer=- rtt_ms=- route=-")
+    h.env.PBZ.log("role=client via=steam connected=yes peer=76561198000000002 rtt_ms=31 route=relay")
+    h.env.PBZ.log("Status: Connected to Some Friend Name. Ping 40 ms. Route: relay.")
+    h.env.PBZ.log("Connected to Some Friend Name.")
+    h.env.PBZ.log("Looking for Some Friend Name...")
+    h.env.PBZ.log("Looking for a Steam friend who's hosting...")
+    h.env.PBZ.log("Host address set to hosts-pc.some-tailnet.ts.net.")
+    h.env.PBZ.log("Couldn't start: couldn't find the host address hosts-pc")
+    h.env.PBZ.log("files in c:\\users\\somebody\\x and Z:\\home\\somebody\\.steam\\y and /run/media/somebody/games/z")
+    text = logOf(h)
+    check(has(text, " peer=<a Steam friend> rtt_ms=31 route=relay route_ping_ms=-") and has(text, "connected=no peer=- rtt_ms=- route=-")
+        and has(text, " peer=<Steam ID> rtt_ms=31") and has(text, "Connected to <the partner>. Ping 40 ms. Route: relay.")
+        and has(text, "  Connected to <the partner>.\n") and has(text, "Looking for <the host>...")
+        and has(text, "Looking for a Steam friend who's hosting...") and has(text, "Host address set to <the host>.")
+        and has(text, "couldn't find the host address <the host>")
+        and has(text, "files in c:\\users\\<user>\\x and Z:\\home\\<user>\\.steam\\y and /run/media/<user>/games/z")
+        and not has(text, "Some Friend") and not has(text, "somebody") and not has(text, "hosts-pc") and not has(text, "tailnet"),
+        "nor a partner's Steam name, a host's name, a user's folder in any case, a Linux login")
     -- How the game stands, every ten seconds.
     s:run(11)
     text = logOf(h)
@@ -16055,7 +16096,8 @@ local function thePlayLog()
     check(text:find("PLAY a boss fight begins: sp:boss, alive, health %d+ of %d+%.") ~= nil
         and text:find("PLAY the boss fight with sp:boss is over %([%d%.]+ s%): the boss alive, health %d+ of %d+%.") ~= nil,
         "the player's own boss fight begins and is over, by the boss's name, with its health")
-    check(text:find("PLAY the story: row %d+, %d+ steps done%.") ~= nil, "and the story's point is in it")
+    check(text:find("PLAY the story: row %d+, %d+ steps done; done steps %x+%.") ~= nil,
+        "and the story's point is in it, with which steps are done")
     Session.moveTo(h, 0, 0)
     s:run(1)
     -- UE4SS.log's own lines worth having.
@@ -16080,9 +16122,14 @@ local function thePlayLog()
         "it reads on as UE4SS.log grows, and a mod that floods it is copied sixty lines a time, the rest counted")
     -- The player's mark.
     local menu = Fake.screen(h, "W_SomeMenu_C")
-    h.keys["F2"] = true
-    s:run(0.2)
+    h.keys["F2"] = true         -- (not F2: the guides tell another mod's players to put its menu there)
+    s:run(0.5)
     h.keys["F2"] = nil
+    s:run(0.2)
+    local onF2 = select(2, logOf(h):gsub("MARK %d+ =====", ""))
+    h.keys["F7"] = true
+    s:run(0.2)
+    h.keys["F7"] = nil
     s:run(0.2)
     for i, screen in ipairs(h.screens) do
         if screen == menu then
@@ -16093,8 +16140,8 @@ local function thePlayLog()
     text = logOf(h)
     local shown = h.env.PBZ.status.lastShown["playlog1"]
     check(select(2, text:gsub("\n[^\n]*MARK %d+ =====", "")) == 1 and text:find("MARK 1 =====[^\n]*\n[^\n]*STATE [^\n]*| relay ") ~= nil
-        and shown and shown.text == "marked in the play log.",
-        "F2 marks the moment: a line that stands out, how the game stands right then, and a word on the screen")
+        and shown and shown.text == "marked in the play log." and onF2 == 0,
+        "F7 marks the moment (F2 doesn't): a line that stands out, how the game stands right then, and a word on the screen")
     check(text:find("MARK 1 =====[^\n]*\n[^\n]*STATE [^\n]*\n[^\n]*SNAP on the screen: [^\n]*W_SomeMenu_C[^\n]*\n[^\n]*SNAP the player: [^\n]*\n[^\n]*SNAP enemies within 40 m: ") ~= nil,
         "with the whole picture under it: the screen that's up, the body, the enemies near")
     h.keys["Gamepad_LeftThumbstick"] = true

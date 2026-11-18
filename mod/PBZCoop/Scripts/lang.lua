@@ -69,8 +69,6 @@ return function(scriptDir)
         ["only you can finish this boss, and you're down: the fight starts over."] = "只有你能终结这个首领,而你倒下了:战斗重新开始。",
         ["only the host can finish this boss, and the host is down: the fight starts over."] =
             "只有房主能终结这个首领,而房主倒下了:战斗重新开始。",
-        -- the play log (playlog.lua)
-        ["marked in the play log."] = "已在游玩日志中做了标记。",
         ["your partner is in a boss fight: you'll join them when it's over."] = "队友正在首领战中:战斗结束后你会前往队友身边。",
         ["your partner is in a boss fight: you'll join them when it's over. F3 takes you in now."] =
             "队友正在首领战中:战斗结束后你会前往队友身边。按 F3 可立即加入。",
@@ -111,6 +109,8 @@ return function(scriptDir)
             "连接被拒绝:双方的密码必须相同(或都不设),两台电脑的时间相差也不能超过两分钟。",
         ["Steam is relaying this connection, which adds delay. A direct one needs SteamDirect = On on both PCs and routers that allow it."] =
             "这次连接经过 Steam 中继,延迟会更高。要直连,双方都要开启 Steam 直连,路由器也要允许。",
+        -- the play log (playlog.lua)
+        ["marked in the play log."] = "已在游玩日志中做了标记。",
     }
 
     -- Parts of lines, in this order. What's around them stays as it is.

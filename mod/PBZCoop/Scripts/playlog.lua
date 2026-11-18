@@ -7,13 +7,14 @@
 --     player is, their health, a scene, a fight, and the link;
 --   PLAY, what changed in between: the map, down and up again, a scene by its name, a fight, the player's own boss
 --     fight by the boss's name with its health, the story's point, a frame that took HITCH_S or more;
---   MARK, the player's own mark when something looks wrong: F2, or both sticks pressed in for MARK_HOLD_S;
+--   MARK, the player's own mark when something looks wrong: F7, or both sticks pressed in for MARK_HOLD_S;
 --   SNAP, at a mark and as the player goes down: the game's screens that are up, what the player's body is doing, and
 --     the enemies near.
 -- The files are playlog-<date>-<time>.txt in the mod folder's logs folder (the mod folder itself where there's none: Lua
 -- can't make one), the newest KEEP kept (PlayLogKeep in PhantomPact.ini); a session goes on in a next file at
--- PART_BYTES. PlayLog = Off there: no log. No addresses in it: an IP is written as its kind of network, a Steam ID and
--- a Windows user's folder not at all, the Secret and the host's address as set or not.
+-- PART_BYTES. PlayLog = Off there: no log. No addresses and no names in it: an IP is written as its kind of network; a
+-- Steam ID, a partner's Steam name, a host's name and a user's folder not at all; the Secret and the host's address as
+-- set or not. (Players attach it to public reports.)
 -- It reads the game and writes its own files, nothing else, and a failure here ends the log, never the mod. What it
 -- reads, it reads by calls that keep nothing of the mod's own: not game.sequenceOn, which spaces its searches for the
 -- game's sequence manager (a look from here used one up, and the host saw its scene two seconds late).
@@ -76,12 +77,38 @@ return function(api)
         if text:find("7656119", 1, true) then
             text = text:gsub("7656119%d%d%d%d%d%d%d%d%d%d", "<Steam ID>")
         end
-        if text:find("Users", 1, true) then
-            text = text:gsub("([/\\])Users([/\\])[^/\\]+", "%1Users%2<user>")
+        -- A user's folder: Windows' in any case, and a Linux or Proton login's (Z:\home\<login>, /run/media/<login>).
+        if text:find("[Uu][Ss][Ee][Rr][Ss][/\\]") then
+            text = text:gsub("([/\\][Uu][Ss][Ee][Rr][Ss][/\\])[^/\\]+", "%1<user>")
         end
-        if text:find(", joining ", 1, true) then       -- (autostart.lua's line: a friend's Steam name, or a host's name on a virtual LAN)
+        if text:find("home", 1, true) or text:find("/run/media/", 1, true) then
+            text = text:gsub("([/\\]home[/\\])[^/\\]+", "%1<user>")
+            text = text:gsub("(/run/media/)[^/\\]+", "%1<user>")
+        end
+        -- A partner by name: a friend's Steam name, or a host's name on a virtual LAN. (One already written as its kind,
+        -- "<...>", is left.)
+        if text:find(", joining ", 1, true) then       -- (autostart.lua's line)
             text = text:gsub(", joining .- over Steam", ", joining <a Steam friend> over Steam")
             text = text:gsub("(, joining )[^<%s]%S*( on UDP)", "%1<the host>%2")
+        end
+        if text:find(" peer=", 1, true) and text:find("via=steam", 1, true) then       -- (the relay's own line: over Steam its peer is a name)
+            text = text:gsub("( peer=)(.-)( rtt_ms=)", function(head, who, tail)
+                if who == "-" or who:sub(1, 1) == "<" then
+                    return nil
+                end
+                return head .. "<a Steam friend>" .. tail
+            end)
+        end
+        if text:find("Connected to ", 1, true) then     -- (the panel's line, and its tip)
+            text = text:gsub("(Connected to )[^<\n][^\n]-(%. Ping )", "%1<the partner>%2")
+            text = text:gsub("(Connected to )[^<\n][^\n]-%.$", "%1<the partner>.")
+        end
+        if text:find("Looking for ", 1, true) and not text:find("Looking for a Steam friend who's hosting", 1, true) then
+            text = text:gsub("(Looking for )[^<\n][^\n]-(%.%.%.)", "%1<the host>%2")
+        end
+        if text:find("ost address ", 1, true) then
+            text = text:gsub("([Hh]ost address set to )[^<\n][^\n]*", "%1<the host>.")
+            text = text:gsub("(couldn't find the host address )[^<\n][^\n]*", "%1<the host>")
         end
         return text
     end
@@ -229,7 +256,7 @@ return function(api)
         end
         line("PhantomPact.ini: " .. table.concat(set, ", "))
         line("Each line: the time of day, the seconds since this log began, what was said. STATE: how the game stood. PLAY: "
-            .. "something changed. UE4SS: a line of UE4SS.log. MARK: the player's mark (F2, or both sticks pressed in). SNAP: "
+            .. "something changed. UE4SS: a line of UE4SS.log. MARK: the player's mark (F7, or both sticks pressed in). SNAP: "
             .. "the whole picture at a mark, and as the player went down.")
     end
 
@@ -505,21 +532,24 @@ return function(api)
     -- The story's point, by story.lua's own read of the game's quests (its point(): the mod's own turn at reading is put
     -- back as it was). A host alone is told nothing of it otherwise: story.lua says a host's point for its guests. Said as
     -- it moves.
-    local storyAt, storyWas = 0, nil
+    local storyAt, storyWas, storyText = 0, nil, nil
     local function storyPoint()
         local now = os.clock()
         if now < storyAt or not (api.story and api.story.point) then
             return
         end
         storyAt = now + play.STORY_S
-        local point, done = api.story.point()
+        local point, done, bits = api.story.point()
         if point == nil then
             return
         end
+        -- (Which steps: story.lua's own bits, one a quest row of the story table in its order, four to a hex digit. A
+        -- count alone didn't say which five a guest lacked.)
         local text = string.format("row %s, %s steps done", tostring(point), tostring(done))
-        if text ~= storyWas then
-            line("PLAY the story: " .. text .. (storyWas and (" (it was " .. storyWas .. ")") or "") .. ".")
-            storyWas = text
+        if text .. tostring(bits) ~= storyWas then
+            line("PLAY the story: " .. text .. (storyText and (" (it was " .. storyText .. ")") or "") .. "; done steps "
+                .. tostring(bits) .. ".")
+            storyWas, storyText = text .. tostring(bits), text
         end
     end
     local function storySoon()
@@ -617,16 +647,17 @@ return function(api)
     end
     play.mark = mark
 
-    local keys, f2Was, sticksAt, sticksDone = nil, false, nil, false
+    local keys, keyWas, sticksAt, sticksDone = nil, false, nil, false
     local function markKeys()
         local pc = getPlayer1()
         if not valid(pc) then
             return
         end
-        keys = keys or { f2 = { KeyName = FName("F2") }, left = { KeyName = FName("Gamepad_LeftThumbstick") },
+        -- (F7: F3 to F6 are the mod's own, and the guides tell Gauntlet of Masters' players to move its menu to F2.)
+        keys = keys or { mark = { KeyName = FName("F7") }, left = { KeyName = FName("Gamepad_LeftThumbstick") },
             right = { KeyName = FName("Gamepad_RightThumbstick") } }
         local now = os.clock()
-        local f2 = pc:IsInputKeyDown(keys.f2) == true
+        local key = pc:IsInputKeyDown(keys.mark) == true
         local sticks = pc:IsInputKeyDown(keys.left) == true and pc:IsInputKeyDown(keys.right) == true
         if not sticks then
             sticksAt, sticksDone = nil, false
@@ -637,10 +668,10 @@ return function(api)
         if held then
             sticksDone = true
         end
-        if held or (f2 and not f2Was) then
+        if held or (key and not keyWas) then
             mark()
         end
-        f2Was = f2
+        keyWas = key
     end
 
     -- The mod's own time counted (coop.lua's runStage, while net.profile is there), from the start and whenever nobody
