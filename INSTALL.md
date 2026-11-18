@@ -178,9 +178,10 @@ and 160% with two connected, 250% and 190% with three, and it stops there (bosse
 instead of more health. It only goes up, so a boss doesn't lose health when someone dies or
 leaves. Someone who joins during a boss fight only watches, so that boss keeps its number until the fight is over, while other
 enemies rise at once. A boss whose game holds no more health than its own (one that heals itself by its own number)
-keeps its own health, and each blow takes less instead (two thirds at 150%): the fight is as long, and its bar reads
-the same. Not one a guest went in to first, before the host was in that fight: the guest's first blow leaves it at its
-own numbers, and each blow takes its whole till it falls, the host's too.
+keeps its own health, and each blow takes less instead (two thirds at 150%): its bar reads the same, and the fight is
+as long but for its heals, which stay its own, so each takes more blows to undo (half as many again at 150%). Not one
+a guest went in to first, before the host was in that fight: the guest's first blow leaves it at its own numbers, and
+each blow takes its whole till it falls, the host's too.
 
 ## The host's story
 
@@ -256,7 +257,9 @@ Not in PvPvE yet: executions (posture break only staggers). It's for two players
 - With both of you in a fight, an enemy picks whom to fight by how near each of you is and the damage each has done to it
   lately, and holds its target a few seconds (a boss longer) before it turns.
 - If one of you dies during a boss fight, they watch the other until it's over, and respawn when the boss dies or the
-  other dies too.
+  other dies too. A boss only the host can finish (the first map's Axemaster falls only to the host's finishing move)
+  needs the host on their feet: with the host down when it comes to that, the fight starts over 20 seconds on, and
+  you're both told why.
 - If you join while the host is in a boss fight, you watch it (F3 takes you in now), and go to them when it's over; after
   30 s you're free to move. From another map there's nothing to watch: F3 takes you there now, or you go at the end.
 - Bells: the host's bells light for you when you come to them, not before.
