@@ -4716,8 +4716,11 @@ return function(api)
                 -- (Which bell, by where it stands: told to a partner who's by, story.lua's bells together. Numbers
                 -- only: no object is kept.)
                 pcall(function()
-                    local l = self:get():K2_GetActorLocation()
-                    ft.bell = { X = l.X, Y = l.Y, Z = l.Z, at = game.firstTouchAt }
+                    local bell = self:get()
+                    if valid(bell) then         -- (asked of it only if it's there: a call on nothing is a crash)
+                        local l = bell:K2_GetActorLocation()
+                        ft.bell = { X = l.X, Y = l.Y, Z = l.Z, at = game.firstTouchAt }
+                    end
                 end)
             end)
         end)
