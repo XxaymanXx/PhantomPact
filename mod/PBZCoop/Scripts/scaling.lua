@@ -166,11 +166,13 @@ return function(api)
     -- and gives back co-op's part of every blow: a blow takes 1/f of what it did, from either player, which is what f
     -- times the health comes to. Known by the cut itself, between two ticks of its fight: its most back at what it was
     -- before this file raised it, its guard bar still what it was given (a difficulty set again writes both, and that
-    -- body is scaled as new, below). On the host, for a boss with its bar up that this game runs; its line to the
-    -- guests still says co-op's numbers (coop.lua's shareEnemy), and a copy of it there is kept the same way at its own
-    -- game's cut (syncEnemy). Given back: a drop, not a rise (its heals are its own); not one that leaves it dead, or
-    -- on a floor its game holds it at; not one of more than half its most at once, no blow (the game's own set).
-    local capped = {}               -- boss address -> { name, most, f, hp }: its game's most, what it had at the last tick
+    -- body is scaled as new, below). On the host, for a body this game runs: a boss with its bar up is looked at every
+    -- tick; an enemy with none at the pass's look (her summoned thugs have her rule: the bench of 11-18, run167, where
+    -- every blow of the host's healed them to full). Every kept body is looked at before each of its lines to the
+    -- guests, which still say co-op's numbers (coop.lua's shareEnemy), and a copy of it there is kept the same way at
+    -- its own game's cut (syncEnemy). Given back: a drop, not a rise (its heals are its own); not one that leaves it
+    -- dead, or on a floor its game holds it at; not one of more than half its most at once, no blow (the game's set).
+    local capped = {}               -- enemy address -> { name, most, f, hp }: its game's most, what it had at the last look
     local fought = {}               -- boss address -> { name, hp, max }: what it had at the last tick
     local BLOW_MOST = 0.5
 
@@ -211,8 +213,16 @@ return function(api)
         if not (hp and max and max > 0) then
             return
         end
-        local name = boss:GetFName():ToString()
         local c, was = capped[addr], fought[addr]
+        -- (As it was at the last tick: nothing to ask of it, its name neither.)
+        if c and math.abs(max - c.most) <= c.most * 0.01 and math.abs(hp - c.hp) <= 0.5 then
+            return
+        end
+        if not c and was and max >= was.max * 0.99 then
+            was.hp, was.max = hp, max
+            return
+        end
+        local name = boss:GetFName():ToString()
         if c and c.name ~= name then
             c, capped[addr] = nil, nil
         end
@@ -256,7 +266,31 @@ return function(api)
         fought[addr] = was
     end
 
-    scaling.look = watchBoss        -- (coop.lua's shareEnemy: before a boss's line goes)
+    scaling.look = watchBoss        -- (coop.lua's shareEnemy: before a boss's line goes, and a kept body's)
+
+    -- A body with no bar isn't looked at every tick: its cut is known at the pass's look, by the most it was left at
+    -- here. What it has then is what it's kept with: whole, most often, a blow or two since the cut counted whole.
+    local function cutAtLook(e, addr, name)
+        if not api.coop.isHost() or capped[addr] or (net.heldAlive and net.heldAlive[addr]) then
+            return false
+        end
+        local as, was, o = scaledAs[addr], scaledMax[addr], scaledOther[addr]
+        if o and not o.host then
+            was = o.other
+        end
+        local f = as and as.name == name and forPlayers(as.h, as.players or 2) or 1
+        local hp, max = game.getHealth(e)
+        if not (f > 1.001 and was and hp and max and max > 0 and hp > 0.5 and math.abs(max - was / f) <= max * 0.01
+            and scaling.guardKept(e, addr)) then
+            return false
+        end
+        capped[addr] = { name = name, most = max, f = f, hp = hp }
+        scaled[addr] = name
+        noteMax(addr, e)
+        log(string.format("Co-op difficulty: %s's game holds no more than its own health (%.0f): kept at that, and a "
+            .. "blow takes %d%% of what it did instead.", name, max, math.floor(100 / f + 0.5)))
+        return true
+    end
 
     -- A guest's copy judged a new body by its guard bar (its game wrote that back: a difficulty set again) can still
     -- have the most health it was given here, or the host's line's: put back at once by syncEnemy, or never touched.
@@ -299,6 +333,10 @@ return function(api)
     local function scaleForParty(e, addr, name, players)
         local before = same(e, addr, name) and (scaledFor[addr] or 2) or nil
         if before and (before >= players or not api.coop.isHost() or (game.bossFightActive() and game.isBoss(e, addr))) then
+            return false
+        end
+        -- (Under the most it was given, by its own game's cut: kept at that, not scaled again. See capped.)
+        if before == nil and scaled[addr] == name and not game.isDead(e) and cutAtLook(e, addr, name) then
             return false
         end
         scaled[addr], scaledFor[addr] = name, players
@@ -643,6 +681,18 @@ return function(api)
             end
             todo, addrs = game.enemiesSoFar()
             at = 1
+            -- (A body kept at its game's most whose guard bar is no more what it was given is a new body there with
+            -- the old name, or a difficulty set again: looked at as new, below. Whole at its game's most, nothing its
+            -- own look sees had changed.)
+            for i, a in ipairs(addrs) do
+                local c = capped[a]
+                if c and valid(todo[i]) and not scaling.guardKept(todo[i], a) then
+                    capped[a] = nil
+                    if scaled[a] == c.name then
+                        scaled[a] = nil
+                    end
+                end
+            end
             scaling.hitsBack = math.max(0, scaling.hitsBack - 1)
         end
         for _ = 1, LOOKS_PER_TICK do
@@ -671,6 +721,10 @@ return function(api)
                     return
                 end
             elseif name and not same(e, addr, name) then
+                -- (Under the most it was given by its own game's cut: kept at that, not scaled again. See capped.)
+                if scaled[addr] == name and not game.isDead(e) and cutAtLook(e, addr, name) then
+                    return
+                end
                 scaled[addr], scaledMax[addr] = name, nil       -- (or it's dead, and nothing brings it back as the same actor)
                 if not game.isDead(e) then
                     local set = e.AttributeSetBase

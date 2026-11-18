@@ -1184,7 +1184,7 @@ return function(api)
                 -- as it did before its game cut it. Looked at here first: a line with the cut in it, or with a blow not
                 -- yet given back, pulled every copy down by it, and a copy isn't lifted again under 5%.)
                 local f = 1
-                if boss % 2 == 1 and api.scaling and api.scaling.capped then
+                if api.scaling and api.scaling.capped and (boss % 2 == 1 or api.scaling.capped(actor, addr)) then
                     if api.scaling.look then
                         api.scaling.look(actor)
                     end
