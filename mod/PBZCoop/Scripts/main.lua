@@ -656,6 +656,7 @@ PBZ = {
     arena = api.arena,
     mapfog = api.mapfog,
     qte = api.qte,
+    revive = api.revive,
     lesson = api.lesson,
     hitfx = api.hitfx,
     lang = api.lang,

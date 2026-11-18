@@ -962,7 +962,9 @@ return function(api)
     local touchHookAt = 0
     local function bellScene(startedAt)
         local at = game.firstTouchAt
-        return at ~= nil and startedAt ~= nil and math.abs(startedAt - at) <= BELL_SCENE_S
+        -- (Or within it of a ring made in this world for a partner's, story.rungAt: joinBell.)
+        return startedAt ~= nil and ((at ~= nil and math.abs(startedAt - at) <= BELL_SCENE_S)
+            or (story.rungAt ~= nil and math.abs(startedAt - story.rungAt) <= BELL_SCENE_S))
     end
     local theirs, theirsAt = nil, 0     -- guest: the scene playing here and when it began
 
@@ -991,9 +993,12 @@ return function(api)
                                         -- third of a second in two, not creeping up on it)
         last = nil, toldAt = 0,         -- this world's scene as last looked at, and when its place was last told
         stood = nil,                    -- where this player stood at the last look with no scene playing
-        on = nil,                       -- a partner's scene as it began: { name, x, y, z, map, at }
-        at = nil,                       -- and where it was when last told: { name, pos, at }
+        FELL_S = 15,                    -- a scene this soon after a boss's fall here is that fall's: not told
+        on = nil,                       -- a partner's scene as it began: { name, x, y, z, map, point, at }
+        at = {},                        -- and where each partner's was when last told: slot (0 the host's) -> { name, pos, at }
         joined = {}, played = {},       -- scene name -> true: this player was set down for it; this world played it
+        heard = {}, began = {},         -- scene name -> when a partner's was told as begun; when this world's began
+        watch = nil,                    -- a set-down just made: { x, y, z (where they stood), spot z, till }
         fast = nil, gained = 0,         -- the scene played faster here now, and the seconds of it gained that way
         bell = nil,                     -- a partner's first ring of a bell: { bx, by, bz, x, y, z, map, at }
         bellTold = nil, rungFor = nil,  -- this player's own first ring as last told; when this world's was rung for a partner's
@@ -1016,17 +1021,30 @@ return function(api)
             end
             return
         end
-        local on, x, y, z, map = rest:match("^on (%S+) (%S+) (%S+) (%S+) (%S+)$")
+        -- (With the teller's point of the story, a number, or - where it has none read.)
+        local on, x, y, z, map, point = rest:match("^on (%S+) (%S+) (%S+) (%S+) (%S+)%s*(%S*)$")
         x, y, z = tonumber(x), tonumber(y), tonumber(z)
         if on and x and y and z and math.abs(x) < 1e7 and math.abs(y) < 1e7 and math.abs(z) < 1e7 then
-            tog.on = { name = on, x = x, y = y, z = z, map = map, at = os.clock() }
+            tog.on = { name = on, x = x, y = y, z = z, map = map, point = tonumber(point), at = os.clock() }
+            tog.heard[on] = os.clock()
             return
         end
         local at, pos = rest:match("^at (%S+) (%S+)$")
         pos = tonumber(pos)
         if at and pos and pos >= 0 and pos < 7200 then
-            tog.at = { name = at, pos = pos, at = os.clock() }
+            tog.at[from or 0] = { name = at, pos = pos, at = os.clock() }
         end
+    end
+
+    -- (A boss's fall in this world within FELL_S: a scene then is that fall's.)
+    local function fellLately(now)
+        local net = coop.net
+        for boss, at in pairs(net and net.killedAt or {}) do
+            if now - at < tog.FELL_S and net.bossFell and net.bossFell[boss] then
+                return true
+            end
+        end
+        return net ~= nil and now - (net.bossFellAt or -1e9) < tog.FELL_S
     end
 
     -- This world's scene, told as it begins and a second apart while it plays.
@@ -1039,13 +1057,23 @@ return function(api)
             end
         end
         if name ~= tog.last then
+            if tog.fast and game.sceneRate then
+                game.sceneRate(1)       -- (the one that ended, if it still plays, or the one begun: at its own speed)
+            end
             tog.last, tog.fast, tog.gained = name, nil, 0
             if name then
-                tog.played[name] = true
+                tog.played[name], tog.began[name] = true, now
                 local net = coop.net
                 local l = tog.stood or (valid(pawn) and pawn:K2_GetActorLocation()) or nil
-                if l and net and net.enabled and not net.pvp and not net.arena then
-                    coop.sendEvent("SCENE", "on", name, string.format("%.0f %.0f %.0f", l.X, l.Y, l.Z), mapWord())
+                -- (Not a scene inside a boss fight, a grab or a phase's, nor a boss's fall: both worlds have those by
+                -- the fight itself, and a partner set down for one stood in the boss's own box inside the walls,
+                -- their own boss begun mid-fight. Not a bell's own: its ring brings it, joinBell. The eleventh review.)
+                local fight = net and ((net.ownBosses and #net.ownBosses() > 0) or net.partnerFighting == true
+                    or (net.fightingHere and valid(pawn) and net.fightingHere(pawn)) or fellLately(now))
+                if l and net and net.enabled and not net.pvp and not net.arena and not fight and not bellScene(now) then
+                    local okP, point = pcall(story.point)
+                    coop.sendEvent("SCENE", "on", name, string.format("%.0f %.0f %.0f", l.X, l.Y, l.Z), mapWord(),
+                        okP and tonumber(point) and tostring(point) or "-")
                 end
                 tog.toldAt = now
             end
@@ -1058,19 +1086,30 @@ return function(api)
         end
     end
 
-    -- Whether this player can be set down for a partner's scene now: up, in nothing of their own.
+    -- Whether this player can be set down for a partner's scene, or have a bell rung for them, now: up and on their
+    -- feet, in nothing of their own. Not one held down by Revive (down stays down: a ring healed them, filled the
+    -- gourd and cleared their down count while they were held). Not one in or by a boss fight: their own, or a
+    -- partner's that is on (F, not a bar here: the host's bar blinks up for seconds as it comes to a boss, 344), which
+    -- they may be in, beside or watching; a bell rung outside the walls pulled a helper out. Nor one fighting anything
+    -- (the game itself refuses a bell in combat), in the air or on a ladder. The eleventh review.
     local function mayJoin(controller, pawn)
         local net = coop.net
         if not (net and net.enabled and valid(pawn)) or game.isDead(pawn) or net.pvp or net.arena then
             return false
         end
-        if (game.inDialogue and game.inDialogue()) or (api.qte and api.qte.active)
-            or (game.inPrologue and game.inPrologue()) or (net.ownBosses and #net.ownBosses() > 0) then
+        if (api.revive and api.revive.isDown and api.revive.isDown()) or net.partnerFighting == true or net.watchingFight
+            or (net.ownBosses and #net.ownBosses() > 0) or (net.fightingHere and net.fightingHere(pawn))
+            or (game.inCombat and game.inCombat(pawn)) then
             return false
         end
-        local busy = false
+        if (game.inDialogue and game.inDialogue()) or (api.qte and api.qte.active)
+            or (game.inPrologue and game.inPrologue()) then
+            return false
+        end
+        local busy = true
         pcall(function()
-            busy = api.gs():IsGamePaused(controller) == true
+            busy = pawn.CharacterMovement.MovementMode ~= 1         -- (walking: on their feet)
+                or api.gs():IsGamePaused(controller) == true
                 or (api.localcoop ~= nil and (api.localcoop.bellMenuUp() or api.localcoop.screenUp()))
         end)
         return not busy
@@ -1104,24 +1143,72 @@ return function(api)
             return
         end
         tog.on = nil                    -- (looked for once a scene: the boxes are a whole map's)
-        local box = game.storyBox(s.x, s.y, s.z, tog.BOX_CM)
-        if not box then
-            log("Your partner's scene " .. s.name .. " began beside you: this world has no story box for it there (played before?), nothing done.")
+        -- (A world past the teller's point of the story has had that scene. A box can stay after its scene has played
+        -- (run101), and stood in again it played a second time.)
+        local okP, mine = pcall(story.point)
+        mine = okP and tonumber(mine) or nil
+        if s.point and mine and mine > s.point then
+            log(string.format("Your partner's scene %s began beside you: this world's story is past theirs (%d, theirs %d), nothing done.",
+                s.name, mine, s.point))
+            return
+        end
+        local spot, boxes = game.storyBox(s.x, s.y, s.z, tog.BOX_CM)
+        if not spot then
+            log("Your partner's scene " .. s.name .. " began beside you: " .. ((boxes or 0) > 1
+                and (boxes .. " of the story's boxes are by that spot in this world, none taken on a guess.")
+                or "this world has no story box for it there (played before?), nothing done."))
+            return
+        end
+        if not (game.floorUnder and game.floorUnder(pawn, spot.X, spot.Y, spot.Z)) then
+            log("Your partner's scene " .. s.name .. " began beside you: no ground found under its box's spot here, left where you are.")
             return
         end
         tog.joined[s.name] = true
-        pawn:K2_SetActorLocation({ X = box.X, Y = box.Y, Z = box.Z + 60 }, false, {}, true)
+        tog.watch = { x = l.X, y = l.Y, z = l.Z, spotZ = spot.Z, till = now + 3 }
+        pawn:K2_SetActorLocation({ X = spot.X, Y = spot.Y, Z = spot.Z }, false, {}, true)
+        pcall(function() pawn.CharacterMovement:StopMovementImmediately() end)
         log(string.format("Your partner's scene %s began %.0f m from you: set down in the story's box for it, for this world's own to begin too.",
             s.name, d / 100))
     end
 
+    -- A set-down just made, watched 3 s: one who drops more than 3 m under the spot with no scene begun is put back
+    -- where they stood (ground that looked there and wasn't).
+    local function watchSetDown(now, name)
+        local w = tog.watch
+        if not w then
+            return
+        end
+        if name or now > w.till then
+            tog.watch = nil
+            return
+        end
+        local _, pawn = api.getPlayer1()
+        if valid(pawn) and pawn:K2_GetActorLocation().Z < w.spotZ - 300 then
+            tog.watch = nil
+            pawn:K2_SetActorLocation({ X = w.x, Y = w.y, Z = w.z }, false, {}, true)
+            pcall(function() pawn.CharacterMovement:StopMovementImmediately() end)
+            log("Set down for a partner's scene, the ground gave way: back where you stood.")
+        end
+    end
+
     -- This world's scene, behind the partner's same one: a little faster till it's where theirs is.
+    -- (Only a scene begun together: one this player was set down for, or one a partner's telling and this world's
+    -- own beginning came within JOIN_WITHIN_S of each other. The same scene come to on one's own, a minute after a
+    -- partner, isn't chased. The furthest on of the partners in it: with three players, each told its own place.)
     local function keepPace(now, name)
-        local a = tog.at
-        local same = name ~= nil and a ~= nil and a.name == name and now - a.at <= 2.5 and story.together ~= false
-            and game.scenePos ~= nil and game.sceneRate ~= nil and not (api.qte and api.qte.active)
-        local pos = same and game.scenePos() or nil
-        local behind = pos and a.pos + (now - a.at) - pos or 0
+        local together = name ~= nil and story.together ~= false and game.scenePos ~= nil and game.sceneRate ~= nil
+            and not (api.qte and api.qte.active)
+            and (tog.joined[name] or (tog.heard[name] ~= nil and tog.began[name] ~= nil
+                and math.abs(tog.heard[name] - tog.began[name]) <= tog.JOIN_WITHIN_S))
+        local pos = together and game.scenePos() or nil
+        local behind = 0
+        for slot, a in pairs(tog.at) do
+            if now - a.at > 5 then
+                tog.at[slot] = nil
+            elseif pos and a.name == name and now - a.at <= 2.5 then
+                behind = math.max(behind, a.pos + (now - a.at) - pos)
+            end
+        end
         if pos and behind > (tog.fast and tog.CAUGHT_S or tog.BEHIND_S) then
             local rate = math.max(tog.LEAST, math.min(tog.FASTEST, 1 + behind / 2))
             if game.sceneRate(rate) then
@@ -1170,8 +1257,9 @@ return function(api)
             return
         end
         tog.bellTold = b.at
-        -- (Not this world's ring made a moment ago for a partner's: theirs is told already.)
-        if tog.rungFor and now - tog.rungFor <= BELL_SCENE_S then
+        -- (Not this world's ring made a moment ago for a partner's: theirs is told already. Nor one made a while ago,
+        -- with sync off: told at the next link, it came with where the ringer stood by then.)
+        if (tog.rungFor and now - tog.rungFor <= BELL_SCENE_S) or now - b.at > 3 then
             return
         end
         local _, pawn = api.getPlayer1()
@@ -1195,6 +1283,11 @@ return function(api)
         if name or story.together == false or b.map ~= mapWord() or not game.bellAt then
             return
         end
+        -- (Not over a ring of this player's own: a first touch of theirs within the bell's own time.)
+        if game.firstTouchAt and now - game.firstTouchAt <= BELL_SCENE_S then
+            tog.bell = nil
+            return
+        end
         local controller, pawn = api.getPlayer1()
         if not mayJoin(controller, pawn) then
             return
@@ -1205,16 +1298,36 @@ return function(api)
         if d > tog.NEAR_CM or game.bellAt(b.bx, b.by, b.bz) ~= "asleep" then
             return
         end
-        -- (A pace behind where the ringer stands: their figure is at the bell. The bell's own walk up does the rest.)
+        -- (A pace behind where the ringer stands: their figure is at the bell. The bell's own walk up does the rest.
+        -- Only onto ground: with none found there, neither the set-down nor the ring, and the bell stays theirs.)
         local dx, dy = b.x - b.bx, b.y - b.by
         local n = math.sqrt(dx * dx + dy * dy)
         if d > 400 and n > 1 then
-            pawn:K2_SetActorLocation({ X = b.x + dx / n * 120, Y = b.y + dy / n * 120, Z = b.z }, false, {}, true)
+            local sx, sy = b.x + dx / n * 120, b.y + dy / n * 120
+            if not (game.floorUnder and game.floorUnder(pawn, sx, sy, b.z)) then
+                log("Your partner rang a bell beside you: no ground found behind them here, the bell left for your own ring.")
+                return
+            end
+            pawn:K2_SetActorLocation({ X = sx, Y = sy, Z = b.z }, false, {}, true)
+            pcall(function() pawn.CharacterMovement:StopMovementImmediately() end)
         end
         if game.bellAt(b.bx, b.by, b.bz, pawn) == "rung" then
-            tog.rungFor = now
+            tog.rungFor, story.rungAt = now, now
             log(string.format("Your partner rang a bell %.0f m from you for the first time: rung in this world too, its first ring here.",
                 d / 100))
+        end
+    end
+
+    -- (The pace each frame's own way, SCENE_S apart, not with the scenes' look below: that one rests in the quiet
+    -- after a stall, and a rate raised just before stayed raised all through it.)
+    local paceAt = 0
+    if coop.frameTicks then
+        coop.frameTicks.scenePace = function()
+            local now = os.clock()
+            if now >= paceAt and (tog.fast or next(tog.at) ~= nil) then
+                paceAt = now + SCENE_S
+                keepPace(now, game.sceneName())
+            end
         end
     end
 
@@ -1237,7 +1350,7 @@ return function(api)
         tellBell(now)
         joinScene(now, name)
         joinBell(now, name)
-        keepPace(now, name)
+        watchSetDown(now, name)
         if coop.isHost() then
             if name ~= mine then
                 if mine and mineLength and now - mineAt < mineLength - SKIPPED_S - gained
