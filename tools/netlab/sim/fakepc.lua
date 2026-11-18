@@ -2502,23 +2502,25 @@ function Fake.new(id, scripts, ini, link)
             pc.errors[#pc.errors + 1] = line
         end
     end
-    -- (The engine's own library, for a line straight down: ground at pc.floorZ, 0 if not set, none with pc.noFloor.
-    -- Any other line hits nothing, as before there was one.)
+    -- (The engine's own library for a test that asks for it, pc.groundTraces: a line straight down finds floor 90
+    -- under a body's middle (Z 10) everywhere, unless pc.noFloor(place) says there's none at a spot; any other line
+    -- hits nothing. A library a test has put in itself comes first.)
     local kismet = object(pc, "KismetSystemLibrary", {})
     defs(pc, kismet, { LineTraceSingle = function(_, _, from, to, _, _, _, _, hit)
-        local floor = pc.floorZ or 0
-        if pc.noFloor or from.X ~= to.X or from.Y ~= to.Y or floor > from.Z or floor < to.Z then
+        local floor = 10
+        if from.X ~= to.X or from.Y ~= to.Y or floor > from.Z or floor < to.Z
+            or (pc.noFloor and pc.noFloor({ X = from.X, Y = from.Y, Z = floor })) then
             return false
         end
         hit.Distance = from.Z - floor
         return true
     end })
     env.StaticFindObject = function(path)
-        if path == "/Script/Engine.Default__KismetSystemLibrary" then
-            return kismet
-        end
         if found[path] then
             return found[path]
+        end
+        if pc.groundTraces and path == "/Script/Engine.Default__KismetSystemLibrary" then
+            return kismet
         end
         -- The engine's own Roboto, in every game: its fallback face a font file of the engine's (the Chinese one, as the
         -- bench found it), for pbz.lua's game.arabicFont to swap for its Arabic one. Made the first time it's asked for, so

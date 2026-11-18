@@ -16035,6 +16035,7 @@ local function watchingTogether()
         for _, pc in ipairs(s.pcs) do
             box[pc] = Fake.storyBox(pc, SPOT.X, SPOT.Y, 100, 7)
             pc.scene = pc.scene or Fake.sceneManager(pc)    -- (the game's scene manager, there all along)
+            pc.groundTraces = true                          -- (and ground to be found under a spot)
         end
         s:run(2.5)                                          -- (found by the mod: it looks once in 2 s while it has none)
         return function()
@@ -16151,7 +16152,7 @@ local function watchingTogether()
         Fake.storyBox(ug, SPOT.X - 800, SPOT.Y, 100, 9)
     end)
     left("with no ground under the box's spot in their world, they're left", function(_, _, ug)
-        ug.noFloor = true
+        ug.noFloor = function() return true end
     end)
     left("one whose story is past the partner's is left: a box can stay after its scene", function(_, uh, ug)
         uh.env.PBZ.story.point = function() return 24, 20 end
@@ -16175,6 +16176,7 @@ local function watchingTogether()
     local z, zh, zg = pair()
     for _, pc in ipairs(z.pcs) do
         pc.scene = pc.scene or Fake.sceneManager(pc)
+        pc.groundTraces = true
     end
     local big = Fake.storyBox(zg, 4500, 0, 100, 9, 3000)
     z:run(2.5)
@@ -16252,6 +16254,7 @@ local function bellsTogether()
 
     -- The host rings it, the guest 10 m off.
     local s, h, g = pair()
+    h.groundTraces, g.groundTraces = true, true
     Session.moveTo(g, 1700, 0)
     Session.moveTo(h, 600, 0)
     s:run(2)
@@ -16266,6 +16269,7 @@ local function bellsTogether()
 
     -- The other way round: the guest rings it, the host by. Registered in the host's world too.
     local t, th, tg = pair()
+    th.groundTraces, tg.groundTraces = true, true
     Session.moveTo(tg, 600, 0)
     t:run(2)
     tg.bell:OnInteract(tg.pawn)
@@ -16278,6 +16282,7 @@ local function bellsTogether()
     -- another map, anyone with WatchTogether off.
     local function left(why, before, ini, rungAlready)
         local u, uh, ug = pair(ini)
+        uh.groundTraces, ug.groundTraces = true, true
         Session.moveTo(uh, 600, 0)
         if before then
             before(u, uh, ug)
@@ -16315,7 +16320,7 @@ local function bellsTogether()
     end)
     left("with no ground behind the ringer in their world, neither set down nor rung", function(_, _, ug)
         Session.moveTo(ug, 1700, 0)
-        ug.noFloor = true
+        ug.noFloor = function() return true end
     end)
 end
 
