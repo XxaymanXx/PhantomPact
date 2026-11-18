@@ -1181,12 +1181,14 @@ return function(api)
                 -- "-" = unknown posture; the client leaves its own alone instead of zeroing it.
                 local number = enemyNumber(actor, name)
                 -- (One kept at its game's most stands for f times it, scaling.lua's capped: its line says co-op's numbers,
-                -- as it did before its game cut it. Looked at here first: a line with the cut in it, or with a blow not
-                -- yet given back, pulled every copy down by it, and a copy isn't lifted again under 5%.)
+                -- as it did before its game cut it. Looked at here first, any body scaled here: a line with the cut in
+                -- it, or with a blow not yet given back, pulled every copy down by it, and a copy isn't lifted again
+                -- under 5%; and one with no bar, first known at the scaling's pass, was kept whole there, a guest's
+                -- blows before the cut undone.)
                 local f = 1
-                if api.scaling and api.scaling.capped and (boss % 2 == 1 or api.scaling.capped(actor, addr)) then
+                if api.scaling and api.scaling.watched and (boss % 2 == 1 or api.scaling.watched(addr)) then
                     if api.scaling.look then
-                        api.scaling.look(actor)
+                        api.scaling.look(actor, addr, hp, maxhp)
                     end
                     f = api.scaling.capped(actor, addr) or 1
                     if f ~= 1 then
@@ -1713,6 +1715,10 @@ return function(api)
                     game.setMaxHealth(actor, rMax)
                     maxhp = rMax        -- (what's kept for the next turn: the mod's own write is no write of the game's)
                 end
+                -- (The most the host's line says, co-op's, for the scaling's own notes of this copy: scaling.lineMost.)
+                if r.MaxHp and api.scaling and api.scaling.lineMost then
+                    api.scaling.lineMost(addr, r.MaxHp)
+                end
                 -- (Never below the floor it's held at: the host's line can say 0 before its K comes, and a copy written to 0
                 -- reads as dead here without the game's death ever running. The forest's last boss then died in the guest's
                 -- world with no scene after it, and the guest's story stayed in the forest while the host's went on.)
@@ -1756,13 +1762,18 @@ return function(api)
                     net.postureTicks[name] = nil
                 elseif game.setPosture and r.Posture ~= nil and r.Posture <= empty then
                     net.postureTicks[name] = nil
-                elseif game.setPosture and r.Posture ~= nil and posture ~= nil and r.Posture > posture + 0.5 then
+                elseif game.setPosture and r.Posture ~= nil and posture ~= nil and r.Posture > posture + 0.5
+                    and math.min(r.Posture, game.postureMax and game.postureMax(actor) or r.Posture) > posture + 0.5 then
                     -- (And back up, a few turns on: after the boss's break the bar refills on the host, and here it stayed
                     -- empty for good, as the break never happened here.)
+                    -- (Never over its own most: a party's copies keep the most they were scaled to when a player joins
+                    -- later, and the host's is raised. Held over it, its game put the bar back at its most at this
+                    -- player's next blow, and that blow's guard went to nobody, 375. The eighth review.)
+                    local up = math.min(r.Posture, game.postureMax and game.postureMax(actor) or r.Posture)
                     net.postureTicks[name] = net.postureTicks[name] or os.clock()
                     if os.clock() - net.postureTicks[name] >= HEAL_TICKS then
-                        game.setPosture(actor, r.Posture)
-                        posture = r.Posture
+                        game.setPosture(actor, up)
+                        posture = up
                         net.postureTicks[name] = nil
                     end
                 else
@@ -5880,6 +5891,7 @@ return function(api)
                 log("The fight is over for you (the boss is down, or nobody's left in it): your respawn goes on.")
             end
             net.holdLooking, net.holdWanted, net.respawnHeld, net.finisherSince = false, false, false, nil
+            net.floorRefused = {}       -- (that fight's over for this player: a note of it means nothing in the next)
             game.holdRespawn(pawn, false)
         end
     end

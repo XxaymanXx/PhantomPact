@@ -973,10 +973,17 @@ local function aCopyWrittenBack()
     -- game's to say. Its numbers written there (all of them, then its health alone): the copy keeps the share the
     -- host's boss has, and the host's boss falls only to blows of all it had. 364 left the copy at its base: it fell
     -- that much sooner, its death taking the rest off the host's boss. (V3.)
-    for _, guardToo in ipairs({ true, false }) do
+    -- (lineFirst: the host's line before this guest's scaling, as after a load. Its note of the copy was the line's
+    -- most multiplied again, and at a write of its guard bar the copy was given its health twice: 19000 of 10000. The
+    -- eighth review's V2.)
+    for _, case in ipairs({ { true, false }, { false, false }, { true, true }, { false, true } }) do
+        local guardToo, lineFirst = case[1], case[2]
         local a = Session.new(SIM_SCRIPTS, { "Host", "Guest", "Guest" }, true,
             { { "boss", "BP_Monster_Boss_C", 2000.0, 3000.0, 100.0, 5000, 400, true } })
         local ah, ab = a.pcs[1], a.pcs[3]
+        if lineFirst then
+            net(ab).quietUntil = ab.now + 5
+        end
         a:run(4)
         Session.moveTo(ah, 0, 0)
         Session.moveTo(a.pcs[2], 500, 0)
@@ -1002,7 +1009,8 @@ local function aCopyWrittenBack()
         Fake.put(copyA, "dead", true)
         a:run(3)
         check(math.abs(share - had / mostA) < 0.001 and field(bossA, "dead") == true and dealt >= had - 2,
-            "a party guest's own fight, its copy's " .. (guardToo and "numbers" or "health alone") .. " written by its game: "
+            "a party guest's own fight" .. (lineFirst and ", the host's line before its scaling" or "") .. ", its copy's "
+                .. (guardToo and "numbers" or "health alone") .. " written by its game: "
                 .. "the copy keeps the host's share, and the host's boss falls to blows of all it had ("
                 .. string.format("%.0f of %.0f", dealt, had) .. ")")
         allErrors(a)
@@ -1135,9 +1143,17 @@ local function aGuestHostsNext()
         end
         return table.concat(got, ", ")
     end
+    -- (lineFirst: the host's line gives the copies their most before the guest's scaling first looks, as after a load:
+    -- the quiet that follows one holds the scaling, not the enemies' turns. The scaling multiplied the line's most for
+    -- a moment and noted that: 1350 of 900, and hosting next the body was taken for one its game cuts, 225% for two.
+    -- The eighth review's V2.)
+    for _, lineFirst in ipairs({ false, true }) do
     for _, case in ipairs({ "nothing written", "a difficulty set again", "a rest" }) do
         local s = Session.new(SIM_SCRIPTS, { "Host", "Guest" }, false, list, "CoopBossPosture = 200\n")
         local h, g = s.pcs[1], s.pcs[2]
+        if lineFirst then
+            net(g).quietUntil = g.now + 8
+        end
         s:run(4)
         Session.moveTo(h, 0, 0)
         Session.moveTo(g, 500, 0)
@@ -1160,7 +1176,13 @@ local function aGuestHostsNext()
         s:run(10)
         check(g.env.PBZ.coop.isHost() and numbers(g) == "900/130, 7500/800",
             "the guest hosts next, " .. case .. ": its enemies at co-op's numbers, once (" .. numbers(g) .. ")")
+        if lineFirst then
+            check(count(g.logs, "holds no more than its own health") == 0 and numbers(h) == "900/130, 7500/800",
+                "the host's line before its scaling's first look: none taken for one its game cuts, the new guest's copies at "
+                    .. "co-op's numbers too (" .. numbers(h) .. "; said " .. count(g.logs, "holds no more than its own health") .. ")")
+        end
         allErrors(s)
+    end
     end
     -- (Health alone at its base, the guard bar as given: that's its game's cut, 378: kept at that, not scaled again.)
     local s = Session.new(SIM_SCRIPTS, { "Host", "Guest" }, false, list, "CoopBossPosture = 200\n")
@@ -1184,6 +1206,48 @@ local function aGuestHostsNext()
         and count(g.logs, "holds no more than its own health") == 1,
         "its health alone at its base there, its guard bar as given: its game's cut, kept at that, its guard bar not twice ("
             .. numbers(g) .. ")")
+    allErrors(s)
+end
+
+-- A party after a later join (the eighth review's V3). The host scales a boss's guard for the new count; a guest's copy
+-- keeps the most it was scaled to, and the host's line lifted the copy's bar over that most. Its game puts such a bar
+-- back at its most at the next blow, and that blow's guard went to nobody (375). Never lifted over its own most now.
+local function aGuardOverItsMost()
+    part("a party after a later join: a copy's guard and its own most")
+    local list = { { "boss", "BP_Monster_Boss_C", 3000.0, 3000.0, 100.0, 5000, 400, true } }
+    local function attr(e, name)
+        return rawget(e, "__fields").AttributeSetBase[name]
+    end
+    local s = Session.new(SIM_SCRIPTS, { "Host", "Guest", "Guest" }, true, list, "CoopBossPosture = 200\n")
+    local h, g, late = s.pcs[1], s.pcs[2], s.pcs[3]
+    late.joinAt = h.now + 14
+    s:run(4)
+    Session.moveTo(h, 2800, 2900)
+    Session.moveTo(g, 3200, 3100)
+    s:run(6)
+    local onH, onG = Session.enemyOn(h, "boss"), Session.enemyOn(g, "boss")
+    local two = attr(onG, "Shachi_Max").CurrentValue
+    s:run(10)       -- (the third is in: the host's guard is for three)
+    local over = 0
+    s:run(6, function()
+        if attr(onG, "Shachi").CurrentValue > attr(onG, "Shachi_Max").CurrentValue + 0.5 then
+            over = over + 1
+        end
+    end)
+    check(late.env.PBZ.net.enabled == true and attr(onH, "Shachi").CurrentValue > two + 1 and attr(onG, "Shachi_Max").CurrentValue == two,
+        "(a third joined: the host's guard for three, " .. attr(onH, "Shachi").CurrentValue .. ", the guest's copy's most still "
+            .. two .. ")")
+    check(over == 0 and math.abs(attr(onG, "Shachi").CurrentValue - two) < 0.5,
+        "the copy's guard is lifted to its own most, never over it (" .. attr(onG, "Shachi").CurrentValue .. " of " .. two
+            .. "; over it at " .. over .. " looks)")
+    -- (And a blow of the guest's on it then: its guard part is told.)
+    local sent = count(g.sent, "^E D ")
+    swing(g, onG, select(1, Fake.health(onG)) - 50)
+    Fake.put(attr(onG, "Shachi"), "CurrentValue", attr(onG, "Shachi").CurrentValue - 30)
+    local guard = attr(onH, "Shachi").CurrentValue
+    s:run(2)
+    check(count(g.sent, "^E D ") == sent + 1 and attr(onH, "Shachi").CurrentValue <= guard - 29,
+        "a blow of the guest's then takes its guard off the host's bar (" .. guard .. " -> " .. attr(onH, "Shachi").CurrentValue .. ")")
     allErrors(s)
 end
 
@@ -1411,6 +1475,67 @@ local function aBossHeldToItsMost()
     check(math.abs(hpOf(addH) - (addWas - 60)) < 0.01,
         "the partner gone mid-fight: a blow still takes 60 of it (" .. string.format("%.1f", addWas - hpOf(addH)) .. ")")
     allErrors(a)
+
+    -- The guest strikes it first (the eighth review's V1; in run170's log). Its own game cuts its copy at its first
+    -- blow; its next three are told and land whole on the host's body, still at co-op's most there. Then the host's
+    -- first blow, its game's cut: kept with the share it had, as a boss is. Known at the scaling's pass alone it was
+    -- kept whole: the guest's blows undone, its bar back at full on both screens.
+    for _, roles in ipairs({ { "Host", "Guest" }, { "Host", "Guest", "Guest" } }) do
+        local b = Session.new(SIM_SCRIPTS, roles, #roles > 2, { { "add", THUG, 3000.0, 3000.0, 100.0, THUG_OWN, 100 } })
+        local bh, bg = b.pcs[1], b.pcs[2]
+        b:run(4)
+        Session.moveTo(bh, 2800, 2900)
+        Session.moveTo(bg, 3200, 3100)
+        if b.pcs[3] then
+            Session.moveTo(b.pcs[3], 3100, 2800)
+        end
+        b:run(6)
+        local onH, onG = Session.enemyOn(bh, "add"), Session.enemyOn(bg, "add")
+        local most = mostOf(onH)
+        for _ = 1, 4 do
+            thugBlow(bg, onG, 90)
+            b:run(1)
+        end
+        local had, healed = hpOf(onH), count(bg.logs, "healed on the host")
+        thugBlow(bh, onH, 90)
+        b:run(3)
+        check(had == most - 270 and mostOf(onH) == THUG_OWN and math.abs(hpOf(onH) - THUG_OWN * had / most) < 0.01
+            and count(bh.logs, "holds no more than its own health") == 1,
+            #roles .. " players, the guest strikes a body with no bar first (" .. had .. " of " .. most
+                .. " left), then the host's first blow, its game's cut: kept with that share ("
+                .. string.format("%.1f of %.0f", hpOf(onH), mostOf(onH)) .. ")")
+        check(mostOf(onG) == THUG_OWN and math.abs(hpOf(onG) - hpOf(onH)) < 1 and count(bg.logs, "healed on the host") == healed,
+            "the guest's copy with it, never back at full (" .. string.format("%.1f of %.0f", hpOf(onG), mostOf(onG)) .. ")")
+        allErrors(b)
+    end
+
+    -- A third joins while one is kept (the eighth review's V5): the new count is what its health stands for, its most
+    -- its game's still. Its game numbers multiplied, it was dropped as kept: 133% where three get 200%.
+    local c = Session.new(SIM_SCRIPTS, { "Host", "Guest", "Guest" }, true, { { "add", THUG, 3000.0, 3000.0, 100.0, THUG_OWN, 100 } })
+    local ch, cg, late = c.pcs[1], c.pcs[2], c.pcs[3]
+    late.joinAt = ch.now + 22
+    c:run(4)
+    Session.moveTo(ch, 2800, 2900)
+    Session.moveTo(cg, 3200, 3100)
+    c:run(6)
+    local keptH = Session.enemyOn(ch, "add")
+    local two = mostOf(keptH)
+    thugBlow(ch, keptH, 90)                 -- (the host's first: its game's cut)
+    c:run(3)
+    for _ = 1, 2 do
+        thugBlow(ch, keptH, 90)
+        c:run(1)
+    end
+    local before = hpOf(keptH)
+    c:run(16)                               -- (the third is in)
+    local after = hpOf(keptH)
+    thugBlow(ch, keptH, 90)
+    c:run(1)
+    check(two == 900 and #c.pcs == 3 and late.env.PBZ.net.enabled == true and mostOf(keptH) == THUG_OWN
+        and math.abs(after - before) < 0.01 and math.abs(hpOf(keptH) - (after - 45)) < 0.01,
+        "a third joins while one is kept at its game's most: its most and what it has stay, and a blow of 90 takes 45 now ("
+            .. string.format("%.1f -> %.1f -> %.1f of %.0f", before, after, hpOf(keptH), mostOf(keptH)) .. ")")
+    allErrors(c)
 
     -- Co-op's health at the game's own (CoopEnemyHealth = 100): nothing over its most, no cut, nothing kept or given.
     local t, th, tg, onT = fight({ "Host", "Guest" }, "CoopEnemyHealth = 100\nCoopBossPosture = 200\n")
@@ -11724,7 +11849,8 @@ local function aCopysPicker()
     allErrors(s)
 end
 
--- A body the game is still making has no attributes for a moment (the bench, 11-18: a boss coming into a guest's
+-- A body with no attributes (the bench, 11-18, a destroyed stand-in still listed till collection, as it turned out:
+-- the eighth review; a living body has never been seen so). What 382 said of it, as it read it: a boss coming into a guest's
 -- world). Its floor was written on nothing every turn, an error line each in the game's log, and a boss's poise was
 -- marked done with nothing set. Asked first: nothing is written till they're there, and then it is.
 local function aBodyStillMade()
@@ -15453,6 +15579,7 @@ return function(print_, scripts)
     guestRunsWhatsNearIt()
     guestRunsItsBoss()
     aCopyWrittenBack()
+    aGuardOverItsMost()
     aBossHeldToItsMost()
     aGuestHostsNext()
     asleepOnTheHost()
