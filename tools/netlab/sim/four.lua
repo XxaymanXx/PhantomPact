@@ -4227,15 +4227,16 @@ local function hostDiesFirst()
 end
 -- A report on 1.7.3 (11-18), the first map's Axe chief: "the host died and i was able to kill the boss alone but when it
 -- came to combat finish i was glitched". From a fifth of his health the game holds it at 1 for its own player's
--- finishing move: a floor of the game's own and its mark for a low-health execution (GE_CanLowHealthExecute). No blow of
--- a partner's ends him there (193), and with the host down nobody could: the guest fought on with nothing to win for as
--- long as the host's respawn was held, a quarter of an hour (the bench, 11-18). The host's hold ends 15 s on now, the
--- fight starts over as the game has it, and both are told why (383).
+-- finishing move: a floor of the game's own. No blow of a partner's takes him past it (193), and with the host down
+-- nobody could: the guest fought on with nothing to win for as long as the host's respawn was held, a quarter of an
+-- hour (the bench, 11-18). The host's hold ends now once he has stood at that floor for 20 s since a partner's killing
+-- blow wasn't taken there; the fight starts over as the game has it, and both are told why (383). By the floor and the
+-- blow, not the game's mark for the finishing move: with the host down that mark wasn't on the host's boss (run186).
 local function finisherWithTheHostDown()
-    part("a boss ready for the host's own finishing move, the host down")
-    -- The host down and held, the guest in the fight; then the boss as a guest's killing blow leaves him: 1 over the
-    -- game's floor, marked or not.
-    local function downAt(marked, floor)
+    part("a boss only the host can finish, the host down")
+    -- The host down and held, the guest in the fight, the host's boss low with a floor of the game's own under him (or
+    -- none). strike: the guest's killing blow, which the floor stops 1 over it.
+    local function downAt(floor)
         local s, h, g = pair()
         bossStart(s)
         local boss, copy = Session.enemyOn(h, "boss"), Session.enemyOn(g, "boss")
@@ -4247,15 +4248,14 @@ local function finisherWithTheHostDown()
         local min = field(field(boss, "AttributeSetBase"), "Health_Min")
         Fake.put(min, "BaseValue", floor)
         Fake.put(min, "CurrentValue", floor)
-        Fake.setHealth(boss, floor + 1)
-        if floor >= 1 then
-            Fake.gameEffect(h, boss, "GE_PengMeng_LockHealth_C")       -- (what holds the floor: an effect, but not the mark)
-        end
-        if marked then
-            Fake.gameEffect(h, boss, "GE_CanLowHealthExecute_C")
-        end
+        Fake.setHealth(boss, 300)
+        s:run(2)
         h.sent = {}
-        return s, h, g, boss
+        return s, h, g, boss, copy
+    end
+    local function strike(s, g, copy)
+        swing(g, copy, 1)
+        s:run(1)
     end
     local function held(h)
         return field(h.deathWidget, "NotTick") == true
@@ -4264,63 +4264,98 @@ local function finisherWithTheHostDown()
         return count(h.sent, "^E FN sp:boss$")
     end
 
-    local s, h, g = downAt(true, 1)
+    local s, h, g, boss, copy = downAt(1)
     check(held(h), "the host, down with the guest still fighting, waits")
-    s:run(10)
-    check(held(h) and told(h) == 0, "his health at the game's floor and its mark on him, 10 s: the host still waits")
+    strike(s, g, copy)
+    check(select(1, Fake.health(boss)) == 2 and field(boss, "dead") ~= true and count(g.logs, "The host didn't take the killing blow") == 1,
+        "the guest's killing blow at a floor of the game's own isn't taken: he stands 1 over it ("
+            .. tostring((select(1, Fake.health(boss)))) .. ")")
+    s:run(14)
+    check(held(h) and told(h) == 0, "15 s at that floor: the host still waits")
     s:run(8)
-    check(not held(h), "18 s: nobody can end that fight, and the host's respawn goes on")
-    check(told(h) == 1 and count(h.logs, "falls only to this player's own finishing move") == 1,
-        "said once, and to the guest (FN): " .. told(h))
-    check(count(g.logs, "only the host can make the finishing move on sp:boss") == 1,
-        "the guest is told why its killing blows weren't taken")
+    check(not held(h), "23 s: nobody else can finish him, and the host's respawn goes on")
+    check(told(h) == 1 and count(h.logs, "only this player can finish sp:boss") == 1, "said once, and to the guest (FN): " .. told(h))
+    check(count(g.logs, "only the host can finish sp:boss") == 1, "the guest is told why its killing blows weren't taken")
     local shown = (h.env.PBZ.status.lastShown.hold or {}).text
     local shownG = (g.env.PBZ.status.lastShown.hold or {}).text
-    check(shown == "this boss falls only to your own finishing move, and you're down: the fight starts over."
-        and shownG == "only the host can make this boss's finishing move, and the host is down: the fight starts over.",
+    check(shown == "only you can finish this boss, and you're down: the fight starts over."
+        and shownG == "only the host can finish this boss, and the host is down: the fight starts over.",
         "a tip each: " .. tostring(shown) .. " / " .. tostring(shownG))
     check(net(g).hostDownAt ~= nil and g.now - net(g).hostDownAt < 10, "and the fight that ends is one the host lost, for the guest's copy")
     s:run(20)
     check(told(h) == 1, "and not again")
     allErrors(s)
 
-    -- A floor with no mark is a phase's end: its scene starts by itself. The wait stays.
-    local t, th = downAt(false, 1)
-    t:run(25)
-    check(held(th) and told(th) == 0, "a floor of the game's with no such mark (a phase's end): the host waits on")
+    -- At a floor with nobody's killing blow stopped there: nothing shows that it holds anyone up. The wait stays.
+    local t, th, _, tboss = downAt(1)
+    Fake.setHealth(tboss, 2)
+    t:run(30)
+    check(held(th) and told(th) == 0, "at a floor of the game's with no killing blow stopped there: the host waits on")
     allErrors(t)
 
-    -- The mark with no floor: any enemy low on health has it, and a partner's blow kills that one.
-    local u, uh = downAt(true, 0)
-    u:run(25)
-    check(held(uh) and told(uh) == 0, "the mark with no floor under him (any enemy low on health): the host waits on")
+    -- No floor of the game's: the guest's killing blow is his death, as ever.
+    local u, uh, ug, uboss, ucopy = downAt(0)
+    strike(u, ug, ucopy)
+    u:run(3)
+    check(field(uboss, "dead") == true and told(uh) == 0, "no floor under him: the guest's killing blow is his death, nothing said")
     allErrors(u)
 
-    -- A scene playing on the host: whatever it is, the fight is the game's to move on.
-    local v, vh = downAt(true, 1)
+    -- One the game won't let die just now, with no floor of its own (between phases): left at 1 for the game, and no
+    -- floor says it's held up for anyone. The wait stays.
+    local l, lh, lg, lboss, lcopy = downAt(0)
+    Fake.put(lboss, "locked", true)
+    strike(l, lg, lcopy)
+    l:run(30)
+    check(field(lboss, "dead") ~= true and held(lh) and told(lh) == 0,
+        "one the game won't let die just now, no floor under it (between phases): the host waits on")
+    -- (What "at a floor of the game's own" asks, said straight: a floor of 1 or more, and its health at it or 1 over.)
+    local atFloor = lh.env.PBZ.game.atOwnFloor
+    local lmin = field(field(lboss, "AttributeSetBase"), "Health_Min")
+    Fake.setHealth(lboss, 1)
+    local none = atFloor(lboss)
+    Fake.put(lmin, "CurrentValue", 1)
+    local at, over = atFloor(lboss), nil
+    Fake.setHealth(lboss, 2)
+    local one = atFloor(lboss)
+    Fake.setHealth(lboss, 4)
+    over = atFloor(lboss)
+    check(none == false and at == true and one == true and over == false,
+        "at 1 health with no floor: not at one; a floor of 1: at it at 1 and at 2, not at 4 ("
+            .. tostring(none) .. ", " .. tostring(at) .. ", " .. tostring(one) .. ", " .. tostring(over) .. ")")
+    allErrors(l)
+
+    -- A sequence playing in the host's world: whatever it is, the fight is the game's to move on.
+    local v, vh, vg, _, vcopy = downAt(1)
+    strike(v, vg, vcopy)
     Session.scene(vh, true, "Seq023")
-    v:run(25)
+    v:run(30)
     check(held(vh) and told(vh) == 0, "a scene playing in the host's world: the host waits on")
     Session.scene(vh, false)
-    v:run(10)
-    check(held(vh) and told(vh) == 0, "the 15 s are counted from its end")
-    v:run(8)
+    v:run(14)
+    check(held(vh) and told(vh) == 0, "the 20 s are counted from its end")
+    v:run(9)
     check(not held(vh) and told(vh) == 1, "and then the respawn goes on")
     allErrors(v)
 
-    -- Off the floor for a moment (healed): counted again from when he's back at it.
-    local w, wh, _, wboss = downAt(true, 1)
-    w:run(10)
+    -- Off the floor for a moment (healed): the blow stopped before is of no account, and the next one counts anew.
+    local w, wh, wg, wboss, wcopy = downAt(1)
+    strike(w, wg, wcopy)
+    w:run(12)
     Fake.setHealth(wboss, 500)
     w:run(3)
     Fake.setHealth(wboss, 2)
-    w:run(10)
-    check(held(wh) and told(wh) == 0, "off his floor for a moment: the 15 s start again")
-    w:run(8)
-    check(not held(wh) and told(wh) == 1, "and run out")
+    w:run(25)
+    check(held(wh) and told(wh) == 0, "off his floor for a moment, back with no new blow stopped there: the host waits on")
+    Fake.setHealth(wboss, 300)
+    w:run(3)
+    strike(w, wg, wcopy)
+    w:run(14)
+    check(held(wh) and told(wh) == 0, "a new killing blow stopped there: counted from it")
+    w:run(9)
+    check(not held(wh) and told(wh) == 1, "and the 20 s run out")
     allErrors(w)
 
-    -- The host up: the finishing move is theirs to make. Nothing is said, nothing ends.
+    -- The host up: taking him past his floor is theirs to do. Nothing is said, nothing ends.
     local x, xh, xg = pair()
     bossStart(x)
     local xboss, xcopy = Session.enemyOn(xh, "boss"), Session.enemyOn(xg, "boss")
@@ -4329,12 +4364,20 @@ local function finisherWithTheHostDown()
     local xmin = field(field(xboss, "AttributeSetBase"), "Health_Min")
     Fake.put(xmin, "BaseValue", 1)
     Fake.put(xmin, "CurrentValue", 1)
-    Fake.setHealth(xboss, 2)
-    Fake.gameEffect(xh, xboss, "GE_CanLowHealthExecute_C")
+    Fake.setHealth(xboss, 300)
+    x:run(2)
     xh.sent = {}
-    x:run(25)
-    check(told(xh) == 0 and xh.env.PBZ.game.bossFightActive() and count(xg.logs, "only the host can make") == 0,
-        "the host up at such a boss: nothing said, the fight goes on")
+    strike(x, xg, xcopy)
+    x:run(30)
+    check(told(xh) == 0 and xh.env.PBZ.game.bossFightActive() and count(xg.logs, "only the host can finish") == 0,
+        "the host up at such a boss, the guest's killing blow stopped at his floor: nothing said, the fight goes on")
+    -- (And the host going down after it: counted from then, the blow stopped before still standing.)
+    Session.die(xh)
+    xh.hudLayout:UnRegisterBossHPBar(xboss)
+    x:run(15)
+    check(held(xh) and told(xh) == 0, "the host goes down then: held, 15 s")
+    x:run(9)
+    check(not held(xh) and told(xh) == 1, "24 s: the respawn goes on")
     allErrors(x)
 end
 
