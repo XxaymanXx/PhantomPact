@@ -15801,10 +15801,20 @@ local function guestsFinisher()
     local function floorOf(e)
         return field(field(e, "AttributeSetBase"), "Health_Min").CurrentValue
     end
-    -- (The guest's game as it stands in a finishing move, or not: its own ability running, its copy marked.)
+    -- (The guest's game as it stands in a finishing move, or not: its own ability running, and the effects on its
+    -- copy by their class names: true for the game's mark for a finish at low health alone.)
+    local MARK, EDGE = "GE_CanLowHealthExecute_C", "GE_CanLowHealthExecute_XueDiZi_C"
     local function finishing(g, move, mark)
+        local on = mark == true and { MARK } or (mark or {})
         g.env.PBZ.game.finishing = function() return move and "GA_Hun_BEx_Common_Boss" or nil end
-        g.env.PBZ.game.hasEffect = function(_, text) return mark and text == "GE_CanLowHealthExecute" end
+        g.env.PBZ.game.hasEffect = function(_, text, exact)
+            for _, name in ipairs(on) do
+                if name == text or (not exact and name:find(text, 1, true)) then
+                    return true
+                end
+            end
+            return false
+        end
     end
     -- The host's boss low with a floor of its game's own under him, the guest's plain killing blow stopped there.
     local function atFloor(down)
@@ -15853,6 +15863,15 @@ local function guestsFinisher()
     check(field(tboss, "dead") ~= true and floorOf(tboss) == 1 and count(th.logs, "Partner's finishing move") == 0
         and count(tg.logs, "The host didn't take the killing blow") == 2,
         "its own ability running, the copy not marked for a finish at low health: a plain killing blow, not taken")
+    -- (A Phantom Edge's own mark, on a boss at full health too, isn't that one, though its name holds the other's: by
+    -- its whole name. The tenth review.)
+    finishing(tg, true, { EDGE })
+    t:run(1.5)
+    swing(tg, tcopy, 1)
+    t:run(2)
+    check(field(tboss, "dead") ~= true and floorOf(tboss) == 1 and count(th.logs, "Partner's finishing move") == 0
+        and count(tg.logs, "The host didn't take the killing blow") == 3,
+        "nor with a Phantom Edge's own mark alone on it, a name that holds the other's: a plain killing blow")
     finishing(tg, false, true)
     t:run(1.5)
     swing(tg, tcopy, 1)
@@ -15862,15 +15881,90 @@ local function guestsFinisher()
     allErrors(t)
 
     -- One the host's game won't let die now (between phases, a scene to come): not forced, its floor back as it was.
+    -- And still the boss of the host's own fight: forgotten as one for the kill, then shown again as a partner's, the
+    -- host's fight read as over, F 0 went out and the hold of that fight with it (the tenth review).
     local l, lh, lg, lboss, lcopy = atFloor(false)
     Fake.put(lboss, "locked", true)
     finishing(lg, true, true)
     l:run(1.5)
+    lh.sent = {}
     swing(lg, lcopy, 1)
     l:run(2)
     check(field(lboss, "dead") ~= true and floorOf(lboss) == 1 and count(lh.logs, "Partner's finishing move on sp:boss") == 1,
         "one the host's game won't let die now: not forced, its floor as it was")
+    l:run(4)
+    check(count(lh.sent, "^E F 0") == 0 and (net(lh).fightNames or {})["sp:boss"] == true
+        and lh.env.PBZ.game.bossFightActive() and not lh.env.PBZ.game.isMirrorBar(lboss),
+        "and still the boss of the host's own fight: no word that it's over, his bar not a partner's fight's")
     allErrors(l)
+
+    -- A scene playing in the host's world as it comes (a phase's, begun from that floor): not taken, the floor as it
+    -- was. The game's kill isn't refused once the floor is off (run211: the Axe chief's lock was still on him as it
+    -- took), so the floor is lifted only where a finishing move is his end. (The tenth review.)
+    local c, ch, cg, cboss, ccopy = atFloor(false)
+    Session.scene(ch, true, "Seq023")
+    finishing(cg, true, true)
+    c:run(1.5)
+    swing(cg, ccopy, 1)
+    c:run(2)
+    check(field(cboss, "dead") ~= true and floorOf(cboss) == 1
+        and count(ch.logs, "A finishing move on sp:boss isn't its end here: a scene plays there") == 1,
+        "a scene playing in the host's world: a guest's finishing move isn't taken, the floor as it was")
+    allErrors(c)
+
+    -- A floor well over the last point (a phase's, at two fifths of his health): the same.
+    local p, ph, pg, pboss, pcopy = atFloor(false)
+    local pmin = field(field(pboss, "AttributeSetBase"), "Health_Min")
+    Fake.put(pmin, "BaseValue", 2000)
+    Fake.put(pmin, "CurrentValue", 2000)
+    Fake.setHealth(pboss, 2001)
+    p:run(2)
+    finishing(pg, true, true)
+    p:run(1.5)
+    swing(pg, pcopy, 1)
+    p:run(2)
+    check(field(pboss, "dead") ~= true and floorOf(pboss) == 2000 and select(1, Fake.health(pboss)) == 2001
+        and count(ph.logs, "A finishing move on sp:boss isn't its end here: the floor there is a phase's") == 1,
+        "a phase's floor, at two fifths of his health: not taken either (" .. tostring((Fake.health(pboss))) .. " left)")
+    allErrors(p)
+
+    -- Another phase of him to come, its spawner in the host's world (a boss of phases, a spawner each): his end there
+    -- is a scene and that phase, the game's to bring.
+    local q, qh, qg, qboss, qcopy = atFloor(false)
+    Fake.enemy(qh, "bossP2", "BP_Monster_Boss_C", 60000.0, 3000.0, 100.0, 5000, 400, true)
+    finishing(qg, true, true)
+    q:run(1.5)
+    swing(qg, qcopy, 1)
+    q:run(2)
+    local after = qh.env.PBZ.game.phaseAfter
+    check(after ~= nil and after("sp:boss") == true and after("sp:bossP2") == false and after("sp:thug1") == false
+        and field(qboss, "dead") ~= true and floorOf(qboss) == 1
+        and count(qh.logs, "A finishing move on sp:boss isn't its end here: another phase of it is to come") == 1,
+        "another phase of him to come in the host's world: not taken, the floor as it was")
+    allErrors(q)
+
+    -- The finishing move's one blow from over the hold's floor: the game's mark comes up there (run184: on the copy
+    -- with the blow from 150 to 70 of 28080), and the move's blow takes the copy from there to its floor in one. Looked
+    -- for at the hold's floor alone, the mark wasn't seen and the move went as a plain blow. (The tenth review.)
+    local a, ah, ag = pair()
+    bossStart(a)
+    local aboss, acopy = Session.enemyOn(ah, "boss"), Session.enemyOn(ag, "boss")
+    swing(ag, acopy, select(1, Fake.health(acopy)) - 50)
+    a:run(5)
+    local amin = field(field(aboss, "AttributeSetBase"), "Health_Min")
+    Fake.put(amin, "BaseValue", 1)
+    Fake.put(amin, "CurrentValue", 1)
+    Fake.setHealth(aboss, 300)
+    a:run(2)
+    local over = select(1, Fake.health(acopy))
+    finishing(ag, true, true)
+    a:run(1.5)
+    swing(ag, acopy, 1)
+    a:run(2)
+    check(over > 100 and count(ag.logs, "Finishing move on sp:boss; telling the host") == 1
+        and field(aboss, "dead") == true and field(acopy, "dead") == true,
+        "the finishing move's one blow from over the hold's floor (the copy at " .. tostring(over) .. "): his end in both worlds")
+    allErrors(a)
 
     -- The host down and held, the guest left alone at him (the report on 1.7.3: "the host died and i was able to kill the
     -- boss alone but when it came to combat finish i was glitched"): told what ends him 20 s in, and its own finishing
@@ -15985,6 +16079,11 @@ local function restartWithOldLines()
     end
     s:run(0.15)
     check(hpOf(copy) == most, "nor one that comes a moment later, a late packet's (" .. tostring(hpOf(copy)) .. ")")
+    -- (Nor the host's answer to a killing blow told just before its respawn, come after it: LR wrote the new body down
+    -- to the 2 the old one had, whether a blow waited for that answer or not. The tenth review.)
+    s.relay:post(h, "sure", "LR sp:boss 2.0")
+    s:run(0.15)
+    check(hpOf(copy) == most, "nor the host's answer to a killing blow told before it, come after it (" .. tostring(hpOf(copy)) .. ")")
     s:run(1.5)
     g.hudLayout:RegisterBossHPBar(copy)         -- (the guest stands in his arena: its own fight with the new body begins)
     s:run(3)

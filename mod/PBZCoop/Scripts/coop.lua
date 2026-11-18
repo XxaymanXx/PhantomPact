@@ -1531,24 +1531,26 @@ return function(api)
     end
 
     -- Guest: this player's own finishing move of a boss, the game's, under way on its copy: an ability of the game's
-    -- "BEx" family running on this player, and the copy marked by this game, within EXEC_MARK_S, for an execution at
-    -- low health (GE_CanLowHealthExecute: not the mark of an execution on a broken guard, GE_CanWeakExecute, which
-    -- takes health and ends nobody). The killing blow that comes inside it is told as that, X, and a host whose game
-    -- holds that boss at a floor of its own takes it (handlers.D). A plain killing blow there stays what it was: not
-    -- its end. The user, 11-18: "why the guest can't kill the boss by pressing F and playing it's animation he should
-    -- be able to do that". (The mark is looked for on a boss's copy at the floor it's held at, a second apart:
-    -- syncEnemy.)
-    net.EXEC_MARK_S = 15.0
+    -- "BEx" family running on this player, and the copy marked by this game, now or within EXEC_MARK_S, for an
+    -- execution at low health (EXEC_MARK, by its whole name: not a Phantom Edge's own mark, which is there at full
+    -- health too, nor the mark of an execution on a broken guard, GE_CanWeakExecute, which takes health and ends
+    -- nobody). The killing blow that comes inside it is told as that, X, and a host whose game holds that boss at its
+    -- last point takes it (handlers.D). A plain killing blow there stays what it was: not its end. The user, 11-18:
+    -- "why the guest can't kill the boss by pressing F and playing it's animation he should be able to do that". (The
+    -- mark is looked for a second apart on a boss's copy from EXEC_LOW of its health down, syncEnemy: it comes above
+    -- the hold's floor, with the blow from 150 to 70 of 28080 on the bench, run184, and a finishing move's one blow
+    -- from up there went as a plain one. The tenth review.)
+    net.EXEC_MARK, net.EXEC_MARK_S, net.EXEC_LOW = "GE_CanLowHealthExecute_C", 15.0, 0.25
     net.execLookAt, net.execMarkAt = {}, {}
     function net.finishingMove(name, actor, addr)
-        if not (game.finishing and game.isBoss and game.isBoss(actor, addr)) then
-            return false
-        end
-        if os.clock() - (net.execMarkAt[name] or -1e9) > net.EXEC_MARK_S then
+        if not (game.finishing and game.hasEffect and game.isBoss and game.isBoss(actor, addr)) then
             return false
         end
         local _, pawn = getPlayer1()
-        return valid(pawn) and game.finishing(pawn) ~= nil
+        if not (valid(pawn) and game.finishing(pawn)) then
+            return false
+        end
+        return os.clock() - (net.execMarkAt[name] or -1e9) <= net.EXEC_MARK_S or game.hasEffect(actor, net.EXEC_MARK, true)
     end
 
     -- keep: address -> actor still held this tick (nil releases every held copy).
@@ -1736,12 +1738,12 @@ return function(api)
                 if not asleep then
                     held[addr] = actor
                 end
-                -- (A boss's copy at the floor it's held at: marked by this game for an execution at low health? Looked
-                -- at a second apart, for net.finishingMove.)
-                if hp and hp <= HELD_HP + 1.5 and not asleep and (r.Boss or net.partnerBosses[name])
-                    and os.clock() >= (net.execLookAt[name] or 0) then
+                -- (A boss's copy low: marked by this game for an execution at low health? Looked at a second apart,
+                -- for net.finishingMove.)
+                if hp and maxhp and hp <= math.max(HELD_HP + 1.5, maxhp * net.EXEC_LOW) and not asleep
+                    and (r.Boss or net.partnerBosses[name]) and os.clock() >= (net.execLookAt[name] or 0) then
                     net.execLookAt[name] = os.clock() + 1.0
-                    if game.hasEffect and game.hasEffect(actor, "GE_CanLowHealthExecute") then
+                    if game.hasEffect and game.hasEffect(actor, net.EXEC_MARK, true) then
                         net.execMarkAt[name] = os.clock()
                     end
                 end
@@ -3235,22 +3237,33 @@ return function(api)
                 if refused then
                     posture = 0
                 end
-                -- (A partner's own finishing move on a boss this game holds at a floor of its own: taken, 395. The floor
+                -- (A partner's own finishing move on a boss this game holds at its last point: taken, 395. The floor
                 -- off for this blow and the game's own kill then, the whole death, as by this player's own finishing
                 -- move: the bench, 11-18, run211, the Axe chief's flow steps, flags, axe and pay as at his real end,
-                -- run188. Put back if the game still won't let it die: a floor for a scene to come isn't one a
-                -- finishing move is made at, and nothing is forced past it, 193.)
+                -- run188. Only where that is its end: a floor of the last point (1), the boss low (it may stand over
+                -- that floor still: the game's mark for a finishing move comes up there), no sequence playing here,
+                -- and no other phase of it to come (game.phaseAfter). The game's kill takes whatever holds Health_Min
+                -- once that's 0 (run211: his lock was still on him), so at a phase's floor, or one held for a scene, it
+                -- would be 193 again. The tenth review. The floor back if the game still won't let it die.)
                 local floor0 = nil
-                if finisher and boss and game.atOwnFloor and game.atOwnFloor(actor) and game.setMinHealth then
-                    floor0 = game.healthFloor(actor)
-                    game.setMinHealth(actor, 0)
+                if finisher and boss and game.healthFloor and game.setMinHealth and before then
+                    local floor, _, most = game.healthFloor(actor), game.getHealth(actor)
+                    if floor >= 1 then
+                        local why = (floor > HELD_HP + 0.5 and "the floor there is a phase's")
+                            or (not (most and before <= math.max(floor + 1.5, most * net.EXEC_LOW)) and "it isn't low there")
+                            or (game.sequenceOn and game.sequenceOn() and "a scene plays there")
+                            or (game.phaseAfter and game.phaseAfter(name) and "another phase of it is to come")
+                        if why then
+                            log("A finishing move on " .. name .. " isn't its end here: " .. why .. ".")
+                        else
+                            floor0 = floor
+                            game.setMinHealth(actor, 0)
+                        end
+                    end
                 end
                 local real = game.applyDamage(actor, amount, posture, true)
                 if floor0 and not real and not (game.isDead and game.isDead(actor)) then
                     game.setMinHealth(actor, floor0)
-                    if game.showBossBar then
-                        pcall(game.showBossBar, actor)
-                    end
                 end
                 -- (What it took, for who the enemy goes for: a floor or a kill takes less than was sent.)
                 game.partnerHit(actor:GetAddress(), from, (before or 0) - (game.getHealth(actor) or before or 0))
@@ -3377,9 +3390,13 @@ return function(api)
         if from ~= nil or isHost() or not name or not hp then
             return
         end
+        -- (Only for a killing blow that waits for its answer. One told just before the host's world refreshed gets its
+        -- LR after it, and that wrote the body this world's refresh had made, let go already, down to 2: 394's free
+        -- kill by another way. The tenth review.)
+        local waited = net.lethalPending[name]
         net.lethalPending[name] = nil
         local actor = enemyByName[name]
-        if valid(actor) and game.setHealth and not (game.isDead and game.isDead(actor)) then
+        if waited and valid(actor) and game.setHealth and not (game.isDead and game.isDead(actor)) then
             -- (A copy kept at its own game's most: the host's share of that.)
             local cap, r = net.capped[actor:GetAddress()], net.remoteEnemies[name]
             if cap and cap.name == name and r and r.MaxHp and r.MaxHp > cap.most + 1 then

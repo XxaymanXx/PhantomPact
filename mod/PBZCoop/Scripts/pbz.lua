@@ -742,6 +742,38 @@ return function(api)
         return id:find("P[2-9]%f[^%d]") ~= nil or id:find("_P[2-9]") ~= nil
     end
 
+    -- Whether another phase of this boss is still to come in this world: a spawner of its group (phaseGroup; one with
+    -- no group goes by its own name, "Boss" before "BossP2") with a later phase's number, one with none being the first
+    -- (ChangHong_Seq106 before ChangHongP2_Seq107), or with the same number where both names carry one (the forest's
+    -- YuCong_P3_1/2/3). This one's end here is then a scene and that phase, the game's to bring, not a death: a
+    -- partner's finishing move isn't made its end (coop.lua's handlers.D).
+    function game.phaseAfter(enemyId)
+        local id = type(enemyId) == "string" and enemyId:gsub("^sp:", "") or ""
+        if id == "" then
+            return false
+        end
+        local function number(sid)
+            sid = sid:gsub("_Seq.*$", "")
+            local n = sid:match("_P(%d+)") or sid:match("P(%d+)$")
+            return n and tonumber(n) or 1, n ~= nil
+        end
+        local group = game.phaseGroup(id) or id
+        local mine, named = number(id)
+        local found = false
+        for _, s in ipairs(FindAllOf("AISpawner") or {}) do
+            local sid = nil
+            pcall(function() sid = s.SpawnerID:ToString() end)
+            if sid and sid ~= id and sid ~= "None" and (game.phaseGroup(sid) or sid) == group then
+                local its, itsNamed = number(sid)
+                if its > mine or (its == mine and named and itsNamed) then
+                    found = true
+                    break
+                end
+            end
+        end
+        return found
+    end
+
     function game.spawnBoss(enemyId, revive)
         local id = enemyId:match("^sp:(.+)$")
         -- (A boss of phases, a spawner each: HookManP1_Seq022 / HookManP2_Seq023, but also ChangHong_Seq106 /
@@ -1782,6 +1814,7 @@ return function(api)
             return false
         end
         if left <= 0 and real then
+            local was = bosses[actor:GetAddress()]
             forgetBoss(actor)
             stopSwing(actor)
             game.setMinHealth(actor, 0)
@@ -1793,6 +1826,9 @@ return function(api)
                 return true
             end
             if game.isBoss and game.isBoss(actor) then
+                -- (Still the boss of its fight here: forgotten as one, this player's own fight read as over, F 0 went
+                -- out, and the tips and the holds that go by that fight with it. The tenth review.)
+                bosses[actor:GetAddress()] = was
                 -- The game wouldn't let its boss die now (between phases, its health locked for a scene to come): not forced
                 -- through with the quiet kill below. Forced, the forest's last boss died outside its script, its body stayed,
                 -- no scene came, and the trip on to Lu Family Village never opened in the host's save. Left at 1, for the game.
@@ -3310,16 +3346,18 @@ return function(api)
         return found
     end
 
-    -- Whether an effect whose class name holds that text is on it now (GE_CanLowHealthExecute: the game's own mark on a
-    -- boss its player may finish at low health).
-    function game.hasEffect(actor, text)
+    -- Whether an effect whose class name holds that text, or with exact is that text, is on it now
+    -- (GE_CanLowHealthExecute_C: the game's own mark on a boss its player may finish at low health; by its whole name,
+    -- a Phantom Edge's own, GE_CanLowHealthExecute_XueDiZi_C, being there on bosses at full health too).
+    function game.hasEffect(actor, text, exact)
         local asc = abilitySystem(actor)
         local found = false
         if asc then
             pcall(function()
                 asc.ActiveGameplayEffects.GameplayEffects_Internal:ForEach(function(_, effect)
                     pcall(function()
-                        if effect:get().Spec.Def:GetClass():GetFName():ToString():find(text, 1, true) then
+                        local name = effect:get().Spec.Def:GetClass():GetFName():ToString()
+                        if name == text or (not exact and name:find(text, 1, true)) then
                             found = true
                         end
                     end)
