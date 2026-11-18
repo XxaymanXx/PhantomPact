@@ -145,6 +145,7 @@ return function(api)
         ghostSlots = {},          -- party: ghost address -> slot
         hitHere = {},             -- client: enemy id -> this player hit it
         postureTicks = {},        -- client: enemy id -> since when its posture has been above this copy's
+        postureFull = {},         -- client: enemy id -> the guard its copy stood at when found at its own most, under the host's
         guestRuns = {},           -- host: enemy id -> true while the guest's game runs it (see handover)
         guestLines = {},          -- host: enemy id -> the guest's latest record of one its game runs
         mine = {},                -- client: host enemy id -> true while this game runs it (see handover)
@@ -1763,17 +1764,23 @@ return function(api)
                 elseif game.setPosture and r.Posture ~= nil and r.Posture <= empty then
                     net.postureTicks[name] = nil
                 elseif game.setPosture and r.Posture ~= nil and posture ~= nil and r.Posture > posture + 0.5
-                    and math.min(r.Posture, game.postureMax and game.postureMax(actor) or r.Posture) > posture + 0.5 then
+                    and net.postureFull[name] ~= posture then
                     -- (And back up, a few turns on: after the boss's break the bar refills on the host, and here it stayed
                     -- empty for good, as the break never happened here.)
                     -- (Never over its own most: a party's copies keep the most they were scaled to when a player joins
                     -- later, and the host's is raised. Held over it, its game put the bar back at its most at this
                     -- player's next blow, and that blow's guard went to nobody, 375. The eighth review.)
-                    local up = math.min(r.Posture, game.postureMax and game.postureMax(actor) or r.Posture)
+                    -- (Its most read only when the lift is due, and a copy found at it left be till its bar moves: read
+                    -- every turn, a party's copies at full asked it 400 times a second with 20 about. The ninth review.)
                     net.postureTicks[name] = net.postureTicks[name] or os.clock()
                     if os.clock() - net.postureTicks[name] >= HEAL_TICKS then
-                        game.setPosture(actor, up)
-                        posture = up
+                        local up = math.min(r.Posture, game.postureMax and game.postureMax(actor) or r.Posture)
+                        if up > posture + 0.5 then
+                            game.setPosture(actor, up)
+                            posture = up
+                        else
+                            net.postureFull[name] = posture
+                        end
                         net.postureTicks[name] = nil
                     end
                 else
@@ -4986,7 +4993,7 @@ return function(api)
         net.capped = {}
         net.bossFell, net.extraBossWatch, net.watchGaveUp, net.watchHeldAt = {}, {}, nil, nil
         net.fellInFight = {}
-        net.postureTicks = {}
+        net.postureTicks, net.postureFull = {}, {}
         net.hostSeen = {}
         net.partnerDowned = false
         enemyByName = {}
@@ -5570,7 +5577,7 @@ return function(api)
         net.hostDownAt = os.clock()
         log("The host is down, and only the host can finish " .. name .. ": the fight starts over.")
         if api.status then
-            api.status.notify("hold", "only the host can finish this boss, and the host is down: the fight starts over.")
+            api.status.notify("hold", "only the host can finish this boss, and the host is down: the fight starts over.", true)
         end
     end
 
@@ -5838,6 +5845,14 @@ return function(api)
     function net.finisherWaits(now)
         local waits = nil
         local quiet = isHost() and game.atOwnFloor and not (game.sequenceOn and game.sequenceOn())
+        -- (Nor while another player's own fight is on, in a party: this respawn refreshes the world under it, a host's
+        -- death being everyone's (handlers.R). The hold waited for that fight before 383, and does still. The ninth review.)
+        for other in pairs(net.party and net.partnerBosses or {}) do
+            local slot = net.fightOf[other] or 1
+            if slot ~= 1 and net.peers[slot] and net.peers[slot].fights and net.upHere(net.peers[slot]) then
+                quiet = false
+            end
+        end
         for name in pairs(net.fightNames or {}) do
             local actor = enemyByName[name]
             if not (game.atOwnFloor and valid(actor) and game.atOwnFloor(actor)) then
@@ -5898,7 +5913,7 @@ return function(api)
                     .. "killing blow not taken there): the fight starts over. Your respawn goes on.")
                 sendEvent("FN", finisher)
                 if api.status then
-                    api.status.notify("hold", "only you can finish this boss, and you're down: the fight starts over.")
+                    api.status.notify("hold", "only you can finish this boss, and you're down: the fight starts over.", true)
                 end
             elseif net.holdWanted then
                 log("The fight is over for you (the boss is down, or nobody's left in it): your respawn goes on.")

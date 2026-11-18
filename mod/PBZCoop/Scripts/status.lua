@@ -112,14 +112,23 @@ return function(api)
         end)
     end
 
-    -- A message at most once per REPEAT_S per key, unless it changed.
-    local function notify(key, text)
+    -- A message at most once per REPEAT_S per key, unless it changed. keep: the bar is its own for SHOW_S, and what's
+    -- said meanwhile waits for it (383's two: the respawn's own tips took the bar from them within half a second, on the
+    -- bench and in every language. The ninth review.)
+    local keptUntil = 0
+    local function notify(key, text, keep)
         local now = os.clock()
         local prev = status.lastShown[key]
         if prev and prev.text == text and now - prev.at < REPEAT_S then
             return
         end
         status.lastShown[key] = { text = text, at = now }
+        if keep then
+            keptUntil = now + SHOW_S
+        elseif now < keptUntil and game.after then
+            game.after(keptUntil - now, function() show(text) end)
+            return
+        end
         show(text)
     end
 

@@ -257,7 +257,13 @@ return function(api)
             if f > 1.001 and math.abs(max - was.max / f) <= max * 0.01 and scaling.guardKept(boss, addr) then
                 -- (Cut to its most: the share it had, less what it has lost since at 1/f. Under its own most before, its
                 -- health was left as it was: that share.)
-                local keep = was.hp > max + 0.5 and math.min(max, was.hp / f) - math.max(0, max - hp) / f or hp / f
+                -- (By its share only where that tells its game's cut: a boss, as before 385, or a body whose guard bar
+                -- was raised here. With its guard its game's own (CoopEnemyPosture 100) one whose numbers the game wrote
+                -- again, a difficulty set again, looks the same, and its old share stood for less than co-op's health:
+                -- kept with what it has, as the pass's look kept one before 385. The ninth review.)
+                local byShare = game.isBoss(boss, addr) or forPlayers(as.p, as.players or 2) * 0.99 > 1
+                local keep = not byShare and hp
+                    or was.hp > max + 0.5 and math.min(max, was.hp / f) - math.max(0, max - hp) / f or hp / f
                 keep = math.max(1, keep)
                 game.setHealth(boss, keep)
                 hp = keep
@@ -380,6 +386,9 @@ return function(api)
         -- (No attributes: a destroyed body still listed till collection. Nothing to write on: see tick.)
         if not valid(e.AttributeSetBase) then
             return false
+        end
+        if before == nil then
+            fought[addr] = nil      -- (a new body: its line's record of the one there before it goes, see watchBoss)
         end
         scaled[addr], scaledFor[addr] = name, players
         if game.isDead(e) then
@@ -789,6 +798,9 @@ return function(api)
                     return
                 end
                 scaled[addr], scaledMax[addr] = name, nil       -- (or it's dead, and nothing brings it back as the same actor)
+                -- (Its line's record of the body there before it goes with it: kept, a body made at a dead one's address
+                -- had the dead one's name in it, and its game's cut at the host's first blow wasn't weighed. The ninth review.)
+                fought[addr] = nil
                 if not game.isDead(e) then
                     local set = e.AttributeSetBase
                     local health, posture, boss = numbersFor(e, addr)
