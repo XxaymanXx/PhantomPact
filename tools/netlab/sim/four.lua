@@ -1162,7 +1162,7 @@ local function aGuestHostsNext()
             "the guest hosts next, " .. case .. ": its enemies at co-op's numbers, once (" .. numbers(g) .. ")")
         allErrors(s)
     end
-    -- (Health alone healed to base, the guard bar as given: an enemy's health again, its guard bar not twice.)
+    -- (Health alone at its base, the guard bar as given: that's its game's cut, 378: kept at that, not scaled again.)
     local s = Session.new(SIM_SCRIPTS, { "Host", "Guest" }, false, list, "CoopBossPosture = 200\n")
     local h, g = s.pcs[1], s.pcs[2]
     s:run(4)
@@ -1180,8 +1180,10 @@ local function aGuestHostsNext()
     put(e, "Health_Max", 600)
     put(e, "Health", 600)
     s:run(10)
-    check(attr(e, "Health_Max").CurrentValue == 900 and attr(e, "Shachi_Max").CurrentValue == 130,
-        "its health alone healed to base there: its health again, its guard bar not twice (" .. numbers(g) .. ")")
+    check(attr(e, "Health_Max").CurrentValue == 600 and attr(e, "Shachi_Max").CurrentValue == 130
+        and count(g.logs, "holds no more than its own health") == 1,
+        "its health alone at its base there, its guard bar as given: its game's cut, kept at that, its guard bar not twice ("
+            .. numbers(g) .. ")")
     allErrors(s)
 end
 
@@ -1340,6 +1342,62 @@ local function aBossHeldToItsMost()
     s:run(2)
     check(field(onH, "dead") == true, "and in step with it, the copy's next floor is its death there (" .. hpOf(onH) .. ")")
     allErrors(s)
+
+    -- An enemy with no bar under the same rule (her summoned thugs: the bench of 11-18, where every blow of the host's
+    -- healed them to full). Known at the pass's look, a second on at most; kept and given back like a boss from there.
+    local THUG_OWN = 600
+    local a = Session.new(SIM_SCRIPTS, { "Host", "Guest" }, false, { { "add", THUG, 3000.0, 3000.0, 100.0, THUG_OWN, 100 } })
+    local ah, ag = a.pcs[1], a.pcs[2]
+    a:run(4)
+    Session.moveTo(ah, 2800, 2900)
+    Session.moveTo(ag, 3200, 3100)
+    a:run(6)
+    local addH, addG = Session.enemyOn(ah, "add"), Session.enemyOn(ag, "add")
+    local addMost = mostOf(addH)
+    local function thugBlow(pc, e, d)
+        pc.env.PBZ.game.noteLocalMove()
+        if hpOf(e) > THUG_OWN + 0.01 then
+            for _, n in ipairs({ "Health", "Health_Max" }) do
+                Fake.put(attr(e, n), "CurrentValue", THUG_OWN)
+                Fake.put(attr(e, n), "BaseValue", THUG_OWN)
+            end
+        else
+            Fake.setHealth(e, hpOf(e) - d)
+        end
+    end
+    thugBlow(ah, addH, 90)
+    a:run(3)
+    check(addMost == 900 and mostOf(addH) == THUG_OWN and hpOf(addH) == THUG_OWN
+        and count(ah.logs, "holds no more than its own health") == 1,
+        "an enemy with no bar, the host's first blow, its game's cut: kept at its own most, not scaled again ("
+            .. hpOf(addH) .. " of " .. mostOf(addH) .. ")")
+    a:run(3)
+    check(mostOf(addG) == addMost and math.abs(hpOf(addG) - addMost) < 1,
+        "the guest's copy of it shows co-op's numbers (" .. hpOf(addG) .. " of " .. mostOf(addG) .. ")")
+    for _ = 1, 3 do
+        thugBlow(ah, addH, 90)
+        a:run(1)
+    end
+    check(math.abs(hpOf(addH) - (THUG_OWN - 3 * 90 / 1.5)) < 0.01 and mostOf(addH) == THUG_OWN
+        and count(ah.logs, "holds no more than its own health") == 1,
+        "three more blows of the host's, 90 each: 60 off each, said once (" .. string.format("%.1f", hpOf(addH)) .. ")")
+    thugBlow(ag, addG, 90)                  -- (the guest's first: its own game's cut of its copy)
+    a:run(1)
+    local addWas = hpOf(addH)
+    thugBlow(ag, addG, 90)
+    a:run(1)
+    check(math.abs(hpOf(addH) - (addWas - 60)) < 0.01 and math.abs(hpOf(addG) - hpOf(addH)) < 1,
+        "the guest's blow of 90 on its copy: 60 off the host's, the copy with it ("
+            .. string.format("%.1f, %.1f", hpOf(addH), hpOf(addG)) .. ")")
+    -- (The partner gone mid-fight: it keeps its share all the same, as a scaled body keeps its health.)
+    Session.command(ag, "netoff")
+    a:run(14)
+    addWas = hpOf(addH)
+    thugBlow(ah, addH, 90)
+    a:run(1)
+    check(math.abs(hpOf(addH) - (addWas - 60)) < 0.01,
+        "the partner gone mid-fight: a blow still takes 60 of it (" .. string.format("%.1f", addWas - hpOf(addH)) .. ")")
+    allErrors(a)
 
     -- Co-op's health at the game's own (CoopEnemyHealth = 100): nothing over its most, no cut, nothing kept or given.
     local t, th, tg, onT = fight({ "Host", "Guest" }, "CoopEnemyHealth = 100\nCoopBossPosture = 200\n")
