@@ -270,9 +270,10 @@ Not in PvPvE yet: executions (posture break only staggers). It's for two players
 
 Phantom Pact changes no game files: it's a UE4SS Lua mod with a small DLL of its own, and it runs beside most mods.
 
-- **Keys.** F3, F5 and F6 are Phantom Pact's, and F in a PvP match. A mod on the same key opens with it. Gauntlet of
-  Masters' menu is F5 unless you change "menuKey" in `ProjectPBZ\Content\Paks\~mods\BossRush.json` ("F2", say).
-  `OnlinePanel = Off` in `PhantomPact.ini` frees F5; you then connect with the ini.
+- **Keys.** F3, F5, F6 and F7 are Phantom Pact's (F7 marks a moment in the play log), and F in a PvP match. A mod on
+  the same key opens with it. Gauntlet of Masters' menu is F5 unless you change "menuKey" in
+  `ProjectPBZ\Content\Paks\~mods\BossRush.json` ("F2", say). `OnlinePanel = Off` in `PhantomPact.ini` frees F5; you
+  then connect with the ini.
 - **UE4SS.** Use UE4SS for Phantom Blade Zero 1.0.3 or newer. Phantom Pact puts two files in `ue4ss\UE4SS_Signatures`; a
   UE4SS package, or a mod that brings its own, replaces them. After installing or updating one of those, extract Phantom
   Pact again.
@@ -369,7 +370,8 @@ connection too.
 From both players if you can, right after it happens and before you restart the game or reconnect, since these files
 start over:
 
-- The newest play log, `ue4ss\Mods\PBZCoop\logs\playlog-<date>-<time>.txt` (this one stays through a restart: see below)
+- The play log of the session it happened in, `ue4ss\Mods\PBZCoop\logs\playlog-<date>-<time>.txt`, by the date and time
+  in its name (it stays through a restart; after one, the newest file is the new session's: take the one before it)
 - `ue4ss\UE4SS.log`
 - If the game closed by itself: the newest `ue4ss\crash_*.dmp` (UE4SS writes one when the game goes down; it says where)
 - `ue4ss\Mods\PBZCoop\net_status.txt` and `relay_log.txt`, plus `relay_error.txt` if it's there
@@ -381,7 +383,7 @@ that file with the `Secret` in it.
 
 **The play log.** Each time you play, Phantom Pact keeps a text file of that session in `ue4ss\Mods\PBZCoop\logs` (in
 the `PBZCoop` folder itself if there's no `logs` folder): everything the mod said, UE4SS's errors, and every ten seconds
-how the game stood (frames a second, where you were, your health, the link). The last 12 are kept (`PlayLogKeep` in
-`PhantomPact.ini` sets how many), so the one from the session that went wrong is still there after you restart. When something looks wrong, press **F2**, or press both
+how the game stood (frames a second, where you were, your health, the link). The last 12 files are kept (`PlayLogKeep` in
+`PhantomPact.ini` sets how many), so the one from the session that went wrong is still there after you restart. When something looks wrong, press **F7**, or press both
 sticks in for a second: "marked in the play log" shows, and that moment is easy to find in the file. It holds no
 address, name or password. `PlayLog = Off` in `PhantomPact.ini` turns it off.

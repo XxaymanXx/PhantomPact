@@ -23,6 +23,8 @@ return function(api)
     local QUESTS_PER_TICK = 4       -- a read takes this many quests a tick: a whole list at once was 10 ms on a full save
     local CALM_S = 20               -- guest: catches up once this long has passed with nothing going on, and a load long over
     local NEXT_S = 2                -- and the next batch this long after one
+    local TAKE_TRIES = 3            -- a step that didn't take is asked this often in all before it's left till a load
+    local AGAIN_S = 10              -- and again this long after
     local BATCH = 40                -- table rows applied in one go: the QA tools apply forty without a hitch
     local FRESH_S = 150             -- a host's point heard longer ago than this isn't acted on
 
@@ -676,7 +678,8 @@ return function(api)
     local host = nil                -- { done, point, at, line, check }: the host's point as last heard; check = look again
     local calmSince, calmBody = nil, nil
     local waitUntil = 0
-    local tried = {}                -- quest rows applied this session that didn't take: not tried again
+    local tried = {}                -- quest rows applied and not seen done: not tried again (one that didn't take TAKE_TRIES times: till a load)
+    local misses = {}               -- quest row -> the times it was applied and didn't take
     local marked = {}               -- mark rows applied this session
     local batch = nil               -- quest rows of the last batch, checked on the next read
     -- Catching up now (a batch of the host's steps applied, not yet read back): flowsync waits, so a flag doesn't land in
@@ -690,7 +693,7 @@ return function(api)
     coop.handlers.S = function(rest, from)
         guestSyncStarted(rest, from)
         if not coop.isHost() and from == nil then
-            host, tried, marked = nil, {}, {}
+            host, tried, marked, misses = nil, {}, {}, {}
         end
     end
 
@@ -803,7 +806,7 @@ return function(api)
             calmBody, calmSince, reading, batch = body, nil, nil, nil
             if host and body then
                 host.check = true                   -- a load: this world may be another save's
-                tried, marked = {}, {}
+                tried, marked, misses = {}, {}, {}
             end
             if body and coop.linked() then
                 coop.sendEvent("GSTORY", "reset")   -- (and for the host: its count of what this player did starts over)
@@ -850,19 +853,36 @@ return function(api)
         tellOwn(states, now)
         mend(states)
         if batch then
-            local missed = 0
+            -- (One that didn't take is asked again, AGAIN_S on, TAKE_TRIES times in all, and only then left as it is. On a
+            -- PC out of breath, two copies of the game and four other jobs in 24 GB, five side-quest steps of the Crimson
+            -- Forest didn't take at their one asking and stayed undone till the next load: the game's calls went
+            -- through, and the steps weren't done two seconds on, or ever. With the PC to itself they all took.)
+            local missed, again = 0, 0
             for _, k in ipairs(batch) do
                 if done[k] then
-                    tried[k] = nil
+                    tried[k], misses[k] = nil, nil
                 else
-                    missed = missed + 1
+                    misses[k] = (misses[k] or 0) + 1
+                    if misses[k] < TAKE_TRIES then
+                        tried[k] = nil
+                        again = again + 1
+                    else
+                        missed = missed + 1
+                    end
                 end
             end
+            caught = math.max(0, caught - missed - again)   -- (not caught up to: nothing to tell the player of)
             if missed > 0 then
-                caught = math.max(0, caught - missed)       -- (not caught up to: nothing to tell the player of)
                 log(string.format("Story: %d of the host's story steps didn't take here: left as they are.", missed))
             end
             batch = nil
+            if again > 0 then
+                log(string.format("Story: %d of the host's story steps %s taken here yet: asked again in %d s.", again,
+                    again == 1 and "hasn't" or "haven't", AGAIN_S))
+                waitUntil = now + AGAIN_S
+                reading = nil
+                return
+            end
         end
         local todo = todoFor(done, point, states)
         if #todo == 0 then
