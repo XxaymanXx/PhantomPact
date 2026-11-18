@@ -186,6 +186,14 @@ Both worlds scale the same enemy by the same factor, so the host's numbers (whic
 match. Tested: one thug 400 -> 600 health and 200 -> 260 posture in both worlds; the guest's hit (-200) reached the
 host and the host's kill reached the guest; co-op e2e still passes.
 
+A boss whose game holds no more health than its own most (Xiao Xue: health over it is cut at the next blow of that
+world's own player, the bench of 11-18; ledger 378) isn't raised again. On the host it keeps the game's `Health_Max`
+with the share of health it had, and (1 - 1/f) of every drop is given back each tick, so a blow takes 1/f (`capped` in
+scaling.lua). Its enemy line still carries co-op's numbers (health and most times f). A guest's copy cut the same way
+is kept at its own most (`net.capped` in coop.lua), follows the host's share of it, and gives back the same part of
+its own blows. A write that takes the guard bar down too (a difficulty set again) is a new body to the scaling and is
+scaled once more; on a guest's copy it's put back at once.
+
 Bosses also get `TakenReductionMultiplier_Poise` (an `AttributeSetBase` attribute, 1.0 by default) set to
 100 / `CoopBossPoise` (default 200, so 0.5): the share of poise damage they take. Poise is the game's interrupt number
 (the `CharacterState.Hitreact.Endure.*` levels and each move's action poise), separate from posture (`Shachi`).

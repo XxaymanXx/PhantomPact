@@ -175,7 +175,9 @@ and 160% with two connected, 250% and 190% with three, and it stops there (bosse
 400% with three). With five or six, the ghost twins make it harder
 instead of more health. It only goes up, so a boss doesn't lose health when someone dies or
 leaves. Someone who joins during a boss fight only watches, so that boss keeps its number until the fight is over, while other
-enemies rise at once.
+enemies rise at once. A boss whose game holds no more health than its own (one that heals itself by its own number)
+keeps its own health, and each blow takes less instead (two thirds at 150%): the fight is as long, and its bar reads
+the same.
 
 ## The host's story
 

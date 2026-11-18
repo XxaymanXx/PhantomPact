@@ -1535,6 +1535,12 @@ return function(api)
         return (ok and type(v) == "number") and v or nil
     end
 
+    -- Its guard bar's most: no blow lowers it, only a write (the game's own, or scaling.lua's).
+    function game.postureMax(actor)
+        local ok, v = pcall(function() return actor.AttributeSetBase.Shachi_Max.CurrentValue end)
+        return (ok and type(v) == "number") and v or nil
+    end
+
     -- A boss's posture written here reaches no listener either: the gold strip under its health (BreakmeterBar) stood
     -- still at a partner's blows while the health beside it moved (issue #16; the bench, 11-11). Its bar is told with its
     -- own ForSeq_UpdateShachi, as a PvP foe's strip is (setFoeShachi): the bar started with this boss (its Character, see
@@ -3911,7 +3917,7 @@ return function(api)
         GAME_WAIT_S = 1.5,          -- its picker's own wait, given back when the one it had was already ours
         OWN_HIT_S = 2.0,            -- health it lost is this player's hit if they started a move this recently
         LOOK_S = 2.5,               -- and the look before was this recent (over a longer gap it says nothing of who)
-        steered = {},               -- enemy address -> { picker, actor, fname, orig, slot, since, wantSince }
+        steered = {},               -- enemy address -> { pickerAt, fname, orig, slot, since, wantSince }: nothing of the game's
         dmg = {},                   -- enemy address -> { at, hp, seen, taken, big, [slot] = health taken lately }
         healAt = {},                -- slot -> os.clock() of that player's last drink
     }
@@ -3965,41 +3971,67 @@ return function(api)
 
     -- Guest: a move lunges at its enemy's target, so a copy with none fell short of the host's and was dragged the rest of the
     -- way, attack pose and all. It's given the host's target, and its own picker is told to leave that alone.
-    local copyPickers = {}        -- enemy address -> its target picker
-    local copyCooldowns = {}      -- enemy address -> how long its picker waited before it was told to leave a target alone
+    -- (Nothing of the game's is kept between turns, as the host's steering keeps none since 362: the picker's address,
+    -- the body's name and what the picker waited, and the picker itself looked up again when it's to be written, every
+    -- COPY_LOOK_S. Kept by the copy's address alone, it was written through after valid() with no word that it was
+    -- still that copy's. And the copy's controller and blackboard are asked first: nothing there went into the game's
+    -- own call, which no pcall catches. The seventh review's G6.)
+    local copyPickers = {}        -- enemy address -> { fname, at = its picker's address, cooldown = what it waited, lookedAt }
     local TARGET_KEY = "AI.BlackboardKey.Object.TargetActor"
     local LONG_S = 86400.0
+    local COPY_LOOK_S = 2.0
+    game.copyAim = copyPickers      -- (for tests)
     function game.aimCopy(actor, addr, target)
         pcall(function()
-            local picker = copyPickers[addr]
-            if not valid(picker) then
-                picker = targetPicker(actor)
-                copyPickers[addr] = picker
+            local controller = actor.Controller
+            if not valid(controller) then
+                return
             end
-            if picker then
-                -- (Not the held-off value itself: read again after a forget, it was restored as the original, and the
-                -- enemy never changed targets on its own again.)
-                if not copyCooldowns[addr] and (picker.SwitchTargetCooldown or LONG_S) < LONG_S then
-                    copyCooldowns[addr] = picker.SwitchTargetCooldown
+            local rec, now = copyPickers[addr], os.clock()
+            local fname = actor:GetFName():ToString()
+            if rec and rec.fname ~= fname then
+                rec = nil               -- (another body at that address)
+            end
+            if rec == nil or now - rec.lookedAt >= COPY_LOOK_S then
+                local picker = targetPicker(actor)
+                local at = picker and picker:GetAddress() or nil
+                if rec == nil or rec.at ~= at then
+                    rec = { fname = fname, at = at }
                 end
-                picker.SwitchTargetCooldown = LONG_S
-                picker.LastSwitchTime = api.gs():GetTimeSeconds(actor)
+                rec.lookedAt = now
+                copyPickers[addr] = rec
+                if picker then
+                    -- (Not the held-off value itself: read again after a forget, it was restored as the original, and
+                    -- the enemy never changed targets on its own again.)
+                    if not rec.cooldown and (picker.SwitchTargetCooldown or LONG_S) < LONG_S then
+                        rec.cooldown = picker.SwitchTargetCooldown
+                    end
+                    picker.SwitchTargetCooldown = LONG_S
+                    picker.LastSwitchTime = api.gs():GetTimeSeconds(actor)
+                end
             end
-            StaticFindObject("/Script/SGameAI.Default__SGameAIFunctionLibrary"):SetValueAsObjectByTag(actor.Controller.Blackboard,
-                { TagName = FName(TARGET_KEY) }, target)
+            local board = controller.Blackboard
+            if valid(board) and valid(target) then
+                StaticFindObject("/Script/SGameAI.Default__SGameAIFunctionLibrary"):SetValueAsObjectByTag(board,
+                    { TagName = FName(TARGET_KEY) }, target)
+            end
         end)
     end
 
     -- A copy let go is its own again: the target it was given may be a ghost that's gone, so it looks for one now, not in a day.
-    -- forgetOnly: the copy is dead or gone, and its picker may be too (its address someone else's): only forgotten.
-    function game.freeCopy(addr, forgetOnly)
-        local picker, cooldown = copyPickers[addr], copyCooldowns[addr]
-        copyPickers[addr], copyCooldowns[addr] = nil, nil
-        if cooldown and valid(picker) and not forgetOnly then
+    -- forgetOnly, or no actor: the copy is dead or gone, and its picker may be too (its address someone else's): only
+    -- forgotten. Else its picker is looked up now, and written only if it's the one that was told.
+    function game.freeCopy(addr, forgetOnly, actor)
+        local rec = copyPickers[addr]
+        copyPickers[addr] = nil
+        if rec and rec.cooldown and not forgetOnly and valid(actor) then
             pcall(function()
-                picker.SwitchTargetCooldown = cooldown
-                picker.LastSwitchTime = 0
-                picker:TrySwitchTarget()
+                local picker = targetPicker(actor)
+                if picker and picker:GetAddress() == rec.at and actor:GetFName():ToString() == rec.fname then
+                    picker.SwitchTargetCooldown = rec.cooldown
+                    picker.LastSwitchTime = 0
+                    picker:TrySwitchTarget()
+                end
             end)
         end
     end

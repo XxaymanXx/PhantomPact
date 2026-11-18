@@ -242,7 +242,7 @@ return function(api)
                 p.busyUntil = 0
                 poiseFor(p)                     -- (its own boss poise again, as its own AI takes over)
                 game.startAI(p.actor)
-                game.freeCopy(addr)
+                game.freeCopy(addr, false, p.actor)
             end
         end
     end

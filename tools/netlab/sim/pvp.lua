@@ -415,6 +415,22 @@ return function(out, scripts)
         return cfg and tostring(rawget(cfg, "__path")):match("[^.]+$") or "-"
     end
     Fake.put(figureGear(), "edgeConfig", h.env.StaticFindObject(HOOK))     -- (the host's own, from its bag)
+    -- (Not in this PC's memory till it's loaded, as a foe's match weapon is: the game has it only after LoadAsset. In
+    -- a match it goes on the figure at once all the same: the 6 s a weapon loaded here waits in co-op (358) were
+    -- longer than the count, and round 1 began with the host's own Hook on the guest's figure. The seventh review's V2.)
+    do
+        local find, loaded = h.env.StaticFindObject, false
+        local nothing = find("/Nothing/Here.Here")
+        h.env.StaticFindObject = function(path)
+            if path == CANNON and not loaded then
+                return nothing
+            end
+            return find(path)
+        end
+        h.env.LoadAsset = function(path)
+            loaded = loaded or path == CANNON
+        end
+    end
     Session.holdEdge(g, CANNON, false)
     s:run(1.5)
     check(figureEdge() == "Cannon", "the guest's figure on the host's screen holds the guest's Phantom Edge, not the host's: "

@@ -664,7 +664,8 @@ return function(api)
     -- a call through nothing, the game gone with no line in the log. A report on 1.7.3, three players with late saves:
     -- the host's game gone five times, each a few seconds after a guest was back. Not reproduced on the bench, where 34
     -- weapons given the tick they were loaded did no harm: the wait costs a partner's new weapon 6 s on their figure,
-    -- once a weapon and a run of the game.)
+    -- each time this PC loads it: again once the game has let it go (a map load, or minutes after the figure put it
+    -- down). Not in a match, below.)
     local function weaponConfig(path)
         local cfg = StaticFindObject(path)
         if not valid(cfg) and type(LoadAsset) == "function" and countLoad() then
@@ -679,13 +680,18 @@ return function(api)
             return nil
         end
         local at = gear.loadedAt and gear.loadedAt[path]
-        if at and os.clock() - at < GEAR_LOADED_S then
+        -- (Not in a match: there the figure fights with the foe's own abilities from the count on, judged by the weapon
+        -- in its hand, and the foe's loadout comes with the count, 3 s before the fight. Held back 6 s, round 1 began
+        -- with the foe's old weapons on it, and its first Phantom Edge skill fired this player's own. The seventh
+        -- review.)
+        if at and not net.arena and os.clock() - at < GEAR_LOADED_S then
             return nil, true
         end
-        -- (The third answer: its first giving since it was loaded here, for the log.)
+        -- (The third answer: its first giving since this load of it, for the log. By the load: one the game let go and
+        -- this PC loaded again is as new as the first time, and is said so.)
         gear.given = gear.given or {}
-        local first = at ~= nil and not gear.given[path]
-        gear.given[path] = true
+        local first = at ~= nil and gear.given[path] ~= at
+        gear.given[path] = at
         return cfg, false, first
     end
 
@@ -735,7 +741,10 @@ return function(api)
             end
         elseif theirs.edgePath then
             slot = edgeSlot()
-            if theirs.edgeHiddenOn then
+            -- (Shown again once it holds theirs: one this PC had to load waits GEAR_LOADED_S, and the slot hidden for
+            -- none showed this player's own meanwhile, or the one they'd put down. A dress after it's set, not in that
+            -- tick. The seventh review.)
+            if theirs.edgeHiddenOn and heldConfig(cwc, slot) == theirs.edgePath then
                 theirs.edgeHiddenOn = nil
                 pcall(function() cwc:SetWeaponForceHide(slot, 0, false) end)
             end

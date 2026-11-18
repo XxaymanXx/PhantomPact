@@ -85,14 +85,28 @@ return function(api)
     -- by, and nobody sets the most of their posture but this file. With no test of its own a guest took the new body on an
     -- old address for the one it had scaled, at every respawn of its own: its posture stood at the base's from then on, and
     -- one its game then ran for the host fought at the base's health. The audit of 11-15.)
-    local function maxOf(e)
+    local function mostOf(e, health)
         local ok, v = pcall(function()
             local set = e.AttributeSetBase
-            return api.coop.isHost() and set.Health_Max.CurrentValue or set.Shachi_Max.CurrentValue
+            return health and set.Health_Max.CurrentValue or set.Shachi_Max.CurrentValue
         end)
         -- (A number only: on some actors the read hands back an object, and the comparison with it threw every pass, seen on
         -- the bench beside the forest's YuCong.)
         return ok and type(v) == "number" and v or nil
+    end
+    local function maxOf(e)
+        return mostOf(e, api.coop.isHost())
+    end
+    -- (Both numbers are kept, with the role that one was taken in. A guest who hosts next in the same run of the game,
+    -- from the panel with no load between, judged the bodies it had scaled as a guest by their guard bar's number
+    -- against their health: the same for good, so one healed to its base by a difficulty set again, or a new body at
+    -- that address after a rest, fought at the game's own numbers for the rest of that run. The seventh review, in the
+    -- sim: 1.7.3 judged by health alone and kept co-op's health there.)
+    local scaledOther = {}          -- enemy address -> { host, other }: the role scaledMax was taken in, the other number
+    local function noteMax(addr, e)
+        local host = api.coop.isHost()
+        scaledMax[addr] = mostOf(e, host)
+        scaledOther[addr] = { host = host, other = mostOf(e, not host) }
     end
     -- (Only a body below what it was given: one the game raises itself is still the one scaled.)
     local function same(e, addr, name)
@@ -103,13 +117,18 @@ return function(api)
         -- Known by its hold here (coop's heldAlive: on a host, only ever a copy the guest's game runs), and kept as scaled
         -- at what it has: by the guest's list it never was, that goes by the enemy's id and this file by the actor's name.)
         if api.coop.isHost() and net.heldAlive and net.heldAlive[addr] then
-            scaled[addr], scaledMax[addr] = name, maxOf(e)
+            scaled[addr] = name
+            noteMax(addr, e)
             return true
         end
         if scaled[addr] ~= name then
             return false
         end
         local was, now = scaledMax[addr], maxOf(e)
+        local o = scaledOther[addr]
+        if o and o.host ~= api.coop.isHost() then
+            was = o.other           -- (taken in the other role: this role's number, kept beside it)
+        end
         return not (was and now and now < was * 0.99)
     end
 
@@ -119,10 +138,11 @@ return function(api)
     end
 
     -- A body's guard bar scaled for these numbers: by the whole of it for a new body, by what's missing (most often
-    -- nothing) for one that still has the most posture it was given here. The game writes a boss's health and its most
-    -- back to their base in a fight, its posture left as it is (Xiao Xue's, every few seconds in the state the bench
-    -- reaches her in, 11-17; a rise of hers may do it in play). To the look above that's a new body, scaled again, and
-    -- her guard bar was multiplied again at each write: 34443 to 72 billion in a minute, a bar nobody breaks.
+    -- nothing) for one that still has the most posture it was given here. A boss's game can cut its health and its most
+    -- back to its own, its posture left as it is: Xiao Xue's, at each blow of that world's own player while she had
+    -- more health than her own most (the bench, 11-17 and 11-18; her rise is a new body). To the look above that's a
+    -- new body, scaled again, and her guard bar was multiplied again at each cut: 34443 to 72 billion, a bar nobody
+    -- breaks. (Her health since then: capped, below.)
     local scaledPosture = {}        -- enemy address -> { name, max, p, players }: what its most posture was scaled to
     local function scalePosture(set, addr, name, p, players, factor)
         local rec = scaledPosture[addr]
@@ -135,6 +155,126 @@ return function(api)
         end
         ok, now = pcall(function() return set.Shachi_Max.CurrentValue end)
         scaledPosture[addr] = (ok and type(now) == "number") and { name = name, max = now, p = p, players = players } or nil
+    end
+
+    -- A boss whose game holds no more health than its own most. Xiao Xue's (the bench of 11-18, co-op off, her numbers
+    -- written by hand): health over her own 16482 is cut to it at the next blow of that world's own player, and her
+    -- most with it; under it a blow sticks and a most written over hers is left alone; her heals go by her own most.
+    -- So co-op's share of her health can't be kept as health. To the look below the cut was a new body, scaled again
+    -- with the share the cut left, a full one: every blow of the host's a heal to full, a fight nobody wins (the review
+    -- of 369; in 1.7.3 too). Such a boss keeps its game's most from then on, its health the share it had of co-op's,
+    -- and gives back co-op's part of every blow: a blow takes 1/f of what it did, from either player, which is what f
+    -- times the health comes to. Known by the cut itself, between two ticks of its fight: its most back at what it was
+    -- before this file raised it, its guard bar still what it was given (a difficulty set again writes both, and that
+    -- body is scaled as new, below). On the host, for a boss with its bar up that this game runs; its line to the
+    -- guests still says co-op's numbers (coop.lua's shareEnemy), and a copy of it there is kept the same way at its own
+    -- game's cut (syncEnemy). Given back: a drop, not a rise (its heals are its own); not one that leaves it dead, or
+    -- on a floor its game holds it at; not one of more than half its most at once, no blow (the game's own set).
+    local capped = {}               -- boss address -> { name, most, f, hp }: its game's most, what it had at the last tick
+    local fought = {}               -- boss address -> { name, hp, max }: what it had at the last tick
+    local BLOW_MOST = 0.5
+
+    -- Whether its guard bar still has the most it was given here: the same body, whatever was written of its health.
+    function scaling.guardKept(actor, addr)
+        local rec = scaledPosture[addr]
+        local ok, name, most = pcall(function()
+            return actor:GetFName():ToString(), actor.AttributeSetBase.Shachi_Max.CurrentValue
+        end)
+        return rec ~= nil and ok and rec.name == name and type(most) == "number" and most >= rec.max * 0.99
+    end
+
+    -- The f of a body kept at its game's most, or nil: what its health stands for is f times it.
+    function scaling.capped(actor, addr)
+        local c = capped[addr]
+        if not c then
+            return nil
+        end
+        local ok, name = pcall(function() return actor:GetFName():ToString() end)
+        if not ok or name ~= c.name then
+            capped[addr] = nil
+            return nil
+        end
+        return c.f
+    end
+
+    local function watchBoss(boss)
+        local addr = boss:GetAddress()
+        if not (capped[addr] or scaledAs[addr]) then
+            return
+        end
+        -- (Not a copy the guest's game runs: its numbers are the guest's line's.)
+        if net.heldAlive and net.heldAlive[addr] then
+            capped[addr], fought[addr] = nil, nil
+            return
+        end
+        local hp, max = game.getHealth(boss)
+        if not (hp and max and max > 0) then
+            return
+        end
+        local name = boss:GetFName():ToString()
+        local c, was = capped[addr], fought[addr]
+        if c and c.name ~= name then
+            c, capped[addr] = nil, nil
+        end
+        if c then
+            if not scaling.guardKept(boss, addr) then
+                -- (Its guard bar no more what it was given: a new body there with the old name, or a difficulty set
+                -- again. Looked at as new, below: by its health alone it's the one kept at its game's most.)
+                capped[addr] = nil
+                if scaled[addr] == name then
+                    scaled[addr] = nil
+                end
+            elseif math.abs(max - c.most) > c.most * 0.01 then
+                capped[addr] = nil      -- (its most set again, by a new count's scaling: as any body from here)
+            else
+                local drop = c.hp - hp
+                if drop > 0.5 and hp > 0.5 and drop <= c.most * BLOW_MOST and hp > game.healthFloor(boss) + 0.5 then
+                    hp = hp + drop * (1 - 1 / c.f)
+                    game.setHealth(boss, hp)
+                end
+                c.hp = hp
+            end
+        elseif was and was.name == name and max < was.max * 0.99 then
+            local as = scaledAs[addr]
+            local f = as and as.name == name and forPlayers(as.h, as.players or 2) or 1
+            if f > 1.001 and math.abs(max - was.max / f) <= max * 0.01 and scaling.guardKept(boss, addr) then
+                -- (Cut to its most: the share it had, less what it has lost since at 1/f. Under its own most before, its
+                -- health was left as it was: that share.)
+                local keep = was.hp > max + 0.5 and math.min(max, was.hp / f) - math.max(0, max - hp) / f or hp / f
+                keep = math.max(1, keep)
+                game.setHealth(boss, keep)
+                hp = keep
+                capped[addr] = { name = name, most = max, f = f, hp = keep }
+                scaled[addr] = name
+                noteMax(addr, boss)
+                log(string.format("Co-op difficulty: %s's game holds no more than its own health (%.0f): kept at that, and a "
+                    .. "blow takes %d%% of what it did instead.", name, max, math.floor(100 / f + 0.5)))
+            end
+        end
+        was = was or {}
+        was.name, was.hp, was.max = name, hp, max
+        fought[addr] = was
+    end
+
+    scaling.look = watchBoss        -- (coop.lua's shareEnemy: before a boss's line goes)
+
+    -- A guest's copy judged a new body by its guard bar (its game wrote that back: a difficulty set again) can still
+    -- have the most health it was given here, or the host's line's: put back at once by syncEnemy, or never touched.
+    -- Scaled again it stood at f times what it had, a copy in a party guest's own fight for good (the sim, 11-18).
+    -- So a guest gives a body its health only when it hasn't the most this file left it at.
+    local scaledHealth = {}         -- a guest: enemy address -> { name, max }: the most health its scaling left it at
+    local function scaleHealth(set, addr, name, factor)
+        if api.coop.isHost() then
+            return scaleAttr(set, "Health", "Health_Max", factor)
+        end
+        local rec = scaledHealth[addr]
+        local ok, now = pcall(function() return set.Health_Max.CurrentValue end)
+        if rec and rec.name == name and ok and type(now) == "number" and now >= rec.max * 0.99 then
+            return
+        end
+        scaleAttr(set, "Health", "Health_Max", factor)
+        ok, now = pcall(function() return set.Health_Max.CurrentValue end)
+        scaledHealth[addr] = (ok and type(now) == "number") and { name = name, max = now } or nil
     end
 
     local function playersConnected()
@@ -178,9 +318,9 @@ return function(api)
         if before then
             health, posture = health / forPlayers(h, before), posture / forPlayers(p, before)
         end
-        scaleAttr(set, "Health", "Health_Max", health)
+        scaleHealth(set, addr, name, health)
         scalePosture(set, addr, name, p, players, posture)
-        scaledMax[addr] = maxOf(e)
+        noteMax(addr, e)
         scaledAs[addr] = { name = name, h = h, p = p, boss = boss, players = players }
         return true
     end
@@ -198,7 +338,7 @@ return function(api)
         scaleAttr(set, "Health", "Health_Max", forPlayers(h, players) / forPlayers(was.h, players))
         scalePosture(set, addr, name, p, players, forPlayers(p, players) / forPlayers(was.p, players))
         scaledAs[addr] = { name = name, h = h, p = p, boss = true, players = players }
-        scaledMax[addr] = maxOf(e)
+        noteMax(addr, e)
         log(string.format("Co-op difficulty: %s is a boss: %d%% health, %d%% posture.", name,
             math.floor(forPlayers(h, players) * 100 + 0.5), math.floor(forPlayers(p, players) * 100 + 0.5)))
         return true
@@ -535,9 +675,9 @@ return function(api)
                 if not game.isDead(e) then
                     local set = e.AttributeSetBase
                     local health, posture, boss = numbersFor(e, addr)
-                    scaleAttr(set, "Health", "Health_Max", health)
+                    scaleHealth(set, addr, name, health)
                     scalePosture(set, addr, name, posture, 2, posture)
-                    scaledMax[addr] = maxOf(e)
+                    noteMax(addr, e)
                     scaledAs[addr] = { name = name, h = health, p = posture, boss = boss, players = 2 }
                     n = n + 1
                     return
@@ -552,9 +692,16 @@ return function(api)
     -- shared with a guest is also looked at in each snapshot, puppets.watchHost, before a flinch could go out as a move; a
     -- ghost twin only there.) Not a tick of its own: a new entry in coop's extraTicks changes the order they all run in.
     local function armourTick()
-        if scaling.bossArmor then
+        local host = api.coop.isHost()
+        if scaling.bossArmor or host then
             for _, boss in ipairs(game.bossActors()) do
-                scaling.letGo(boss)
+                if scaling.bossArmor then
+                    scaling.letGo(boss)
+                end
+                -- (Before the look at the enemies: one kept at its game's most is the body that look scaled.)
+                if host then
+                    watchBoss(boss)
+                end
             end
         end
         return tick()

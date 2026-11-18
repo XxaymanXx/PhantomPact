@@ -376,16 +376,27 @@ inline bool readable(uintptr_t at, size_t bytes, uintptr_t* from = nullptr, uint
 
 // A look is kept half a second: the same few regions hold every character read, sixty times a second, and a look
 // each time was 2 microseconds a character against 10 nanoseconds without. What's kept can hardly turn harmful
-// meanwhile: a page found committed with no guard gets a guard by being freed and handed out again as a stack (a
-// stack's own guard moves down into pages that were only reserved), or by someone's VirtualProtect, both rare and
-// neither likely inside half a second; freed alone it's an access violation, caught, no harm. Only the region looked
-// at is kept, by its own bounds: a stack's guard page is a region of its own and gets a look of its own.
+// meanwhile. A thread's stack isn't kept (in_stack): when its thread ends, the next one's stack takes the same place
+// at once, its guard inside what was looked at (12 of 12 on Windows 11: the seventh review). Anything else kept gets
+// a guard only by being freed and handed out again as a stack, or by someone's VirtualProtect, both rare and neither
+// likely inside half a second; freed alone it's an access violation, caught, no harm. Only the region looked at is
+// kept, by its own bounds.
 struct Look {
     uintptr_t from = 0, to = 0;
     ULONGLONG at = 0;
 };
 constexpr ULONGLONG LOOK_KEPT_MS = 500;
 inline std::array<Look, 256> looks;     // by the address's 64 KB block
+
+// Whether that's a thread's stack: its allocation begins with pages only reserved, then the guard.
+inline bool in_stack(uintptr_t at) {
+    MEMORY_BASIC_INFORMATION m, low, next;
+    if (!VirtualQuery(reinterpret_cast<LPCVOID>(at), &m, sizeof m) || !VirtualQuery(m.AllocationBase, &low, sizeof low))
+        return true;
+    if (low.State != MEM_RESERVE) return false;
+    const uintptr_t after = reinterpret_cast<uintptr_t>(low.BaseAddress) + low.RegionSize;
+    return !VirtualQuery(reinterpret_cast<LPCVOID>(after), &next, sizeof next) || (next.Protect & PAGE_GUARD);
+}
 
 inline bool looked(uintptr_t at, size_t bytes) {
     if (!look_first) return true;
@@ -397,7 +408,7 @@ inline bool looked(uintptr_t at, size_t bytes) {
         read_stats.passed_over++;
         return false;
     }
-    kept = {from, to, now};
+    if (!in_stack(from)) kept = {from, to, now};
     return true;
 }
 

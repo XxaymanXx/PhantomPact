@@ -2271,6 +2271,28 @@ void test_fast_reads() {
     VirtualFree(later, page, MEM_DECOMMIT);
     check(was && read_pointer(reinterpret_cast<uintptr_t>(later), 8) == 0 && read_stats.caught == 1 && read_stats.guard == 0,
           "a page that goes within a kept look: caught, nothing read");
+    // (Only the region looked at is kept, and for half a second: the guard page below it, or a guard a page gets
+    // after, is looked at again. The seventh review: neither was pinned.)
+    check(read_pointer(reinterpret_cast<uintptr_t>(guard), 16) == 0 && read_stats.guard == 0 && guarded(guard),
+          "the guard page below a kept look: passed over, its guard kept");
+    const uintptr_t at = reinterpret_cast<uintptr_t>(mem) + 64;
+    const bool good = read_pointer(at, 0) == 0x1122334455667788ull;
+    VirtualProtect(mem, page, PAGE_READWRITE | PAGE_GUARD, &old);
+    looks[(at >> 16) & 255].at -= LOOK_KEPT_MS;
+    check(good && read_pointer(at, 0) == 0 && read_stats.guard == 0 && guarded(mem),
+          "a look half a second old is looked at again: passed over, its guard kept");
+    // (A thread's stack isn't kept at all: pages only reserved, the guard, then what's committed. The next thread's
+    // stack takes the same place at once, its guard where this one was read.)
+    auto* stack = static_cast<char*>(VirtualAlloc(nullptr, 8 * page, MEM_RESERVE, PAGE_READWRITE));
+    VirtualAlloc(stack + 4 * page, 4 * page, MEM_COMMIT, PAGE_READWRITE);
+    VirtualProtect(stack + 4 * page, page, PAGE_READWRITE | PAGE_GUARD, &old);
+    char* deep = stack + 6 * page;
+    *reinterpret_cast<uintptr_t*>(deep + 8) = 7;
+    const bool read = read_pointer(reinterpret_cast<uintptr_t>(deep), 8) == 7;
+    VirtualProtect(deep, page, PAGE_READWRITE | PAGE_GUARD, &old);
+    check(read && read_pointer(reinterpret_cast<uintptr_t>(deep), 8) == 0 && read_stats.guard == 0 && guarded(deep),
+          "a thread's stack is read but its look isn't kept: the next thread's guard there is passed over, kept");
+    VirtualFree(stack, 0, MEM_RELEASE);
 
     look_first = false;
     check(read_pointer(reinterpret_cast<uintptr_t>(guard), 16) == 0 && read_stats.guard == 1, "as the reads were: a pointer at a guard page is caught");
