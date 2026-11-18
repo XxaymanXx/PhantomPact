@@ -4438,6 +4438,7 @@ local function finisherWithTheHostDown()
     check(net(g).hostDownAt ~= nil and g.now - net(g).hostDownAt < 10, "and the fight that ends is one the host lost, for the guest's copy")
     s:run(20)
     check(told(h) == 1, "and not again")
+    check(count(h.sent, "^E FB ") == 0, "nor the word for a host on their feet (FB, finisherWithTheHostUp)")
     allErrors(s)
 
     -- At a floor with nobody's killing blow stopped there: nothing shows that it holds anyone up. The wait stays.
@@ -4523,8 +4524,8 @@ local function finisherWithTheHostDown()
     xh.sent = {}
     strike(x, xg, xcopy)
     x:run(30)
-    check(told(xh) == 0 and xh.env.PBZ.game.bossFightActive() and count(xg.logs, "only the host can finish") == 0,
-        "the host up at such a boss, the guest's killing blow stopped at his floor: nothing said, the fight goes on")
+    check(told(xh) == 0 and xh.env.PBZ.game.bossFightActive() and count(xg.logs, "the fight starts over") == 0,
+        "the host up at such a boss, the guest's killing blow stopped at his floor: no fight starts over, it goes on (what's said there: finisherWithTheHostUp)")
     -- (And the host going down after it: counted from then, the blow stopped before still standing.)
     Session.die(xh)
     xh.hudLayout:UnRegisterBossHPBar(xboss)
@@ -12156,6 +12157,15 @@ local function localDifficulty()
     check(select(1, Fake.health(boss)) == 3700 and select(2, Fake.health(boss)) == 4000
         and count(pc.logs, "holds no more than its own health") == 0,
         "a boss's blows take all they take, and its game's own writes of its numbers stand (" .. tostring((Fake.health(boss))) .. ")")
+    -- (Nor is one at a floor of its game's own said to be anyone's alone to finish, online's word for a guest's killing
+    -- blow not taken there, 393: one PC, one game, and player 2's blows are that game's own.)
+    Fake.put(set.Health_Min, "BaseValue", 1)
+    Fake.put(set.Health_Min, "CurrentValue", 1)
+    swing(pc, boss, 2)
+    s:run(30)
+    check(pc.env.PBZ.status.lastShown.finisher == nil and count(pc.sent or {}, "^E FB ") == 0
+        and count(pc.logs, "isn't its end") == 0,
+        "a boss at a floor of its game's own for half a minute: nothing said of whose it is to finish")
     allErrors(s)
     -- (A mode an older version still holds, the player's own in its file: put back, as for anyone alone.)
     local t = Session.new(SIM_SCRIPTS, { "Local" }, false, ENEMIES)
@@ -15655,6 +15665,112 @@ local function fittedOnScreen()
     allErrors(s)
 end
 
+-- A boss only the host can finish, the host up (393). A guest's killing blow at a floor of the host's game's own isn't
+-- taken, and its copy stands up again; in the game the guest's own finishing move plays on its copy each time (the
+-- bench, run205), and nothing told either player why. Once he has stood at that floor for 20 s since such a blow, no
+-- scene playing (a phase's scene starts from such a floor by itself, well inside that), each side is told it's the
+-- host's to make: once in two minutes a boss, and then only for a blow not taken since.
+local function finisherWithTheHostUp()
+    part("a boss only the host can finish, the host up")
+    local HOSTS = "only you can finish this boss: your partner's killing blow doesn't count here."
+    local GUESTS = "only the host can finish this boss: your killing blow doesn't count here."
+    local function shown(pc)
+        local tip = pc.env.PBZ.status.lastShown.finisher
+        return tip and tip.text or nil
+    end
+    -- The host up and in the fight with the guest, the host's boss low with a floor of the game's own under him (or none).
+    local function upAt(floor)
+        local s, h, g = pair()
+        bossStart(s)
+        local boss, copy = Session.enemyOn(h, "boss"), Session.enemyOn(g, "boss")
+        swing(g, copy, select(1, Fake.health(copy)) - 50)
+        s:run(5)
+        local min = field(field(boss, "AttributeSetBase"), "Health_Min")
+        Fake.put(min, "BaseValue", floor)
+        Fake.put(min, "CurrentValue", floor)
+        Fake.setHealth(boss, 300)
+        s:run(2)
+        h.sent = {}
+        return s, h, g, boss, copy
+    end
+    -- (The guest's killing blow, and the seconds after it.)
+    local function strike(s, g, copy, wait)
+        swing(g, copy, 1)
+        s:run(wait or 1)
+    end
+    local function told(h)
+        return count(h.sent, "^E FB sp:boss$")
+    end
+
+    local s, h, g, boss, copy = upAt(1)
+    strike(s, g, copy)
+    check(select(1, Fake.health(boss)) == 2 and field(boss, "dead") ~= true and count(g.logs, "The host didn't take the killing blow") == 1
+        and told(h) == 0 and shown(h) == nil and shown(g) == nil,
+        "a guest's killing blow at a floor of the game's own isn't taken, and nothing is said at once: a phase's scene may be coming")
+    for _ = 1, 4 do
+        strike(s, g, copy, 3)
+    end
+    check(told(h) == 0 and shown(g) == nil, "13 s at that floor, the guest's blows stopped there one after another: nothing said yet")
+    for _ = 1, 3 do
+        strike(s, g, copy, 3)
+    end
+    check(told(h) == 1 and shown(h) == HOSTS and shown(g) == GUESTS,
+        "22 s there, no scene: each side is told it's the host's to finish: " .. tostring(shown(h)) .. " / " .. tostring(shown(g)))
+    check(count(h.logs, "isn't its end: this game lets only this player finish it") == 1
+        and count(g.logs, "Only the host can finish sp:boss") == 1 and h.env.PBZ.game.bossFightActive() and field(boss, "dead") ~= true,
+        "once in each log, and the fight goes on")
+    for _ = 1, 10 do
+        strike(s, g, copy, 3)
+    end
+    s:run(85)
+    check(told(h) == 1, "not again at each blow that follows, nor in the two minutes after")
+    s:run(6)
+    check(told(h) == 2, "two minutes on, blows stopped there since: said again")
+    s:run(130)
+    check(told(h) == 2, "two more with no blow stopped there since: not a third time")
+    strike(s, g, copy, 3)
+    check(told(h) == 3, "a new one stopped there: said")
+    allErrors(s)
+
+    -- A phase's scene starts from such a floor by itself: nothing is said through it, nor of the phase after it.
+    local v, vh, vg, vboss, vcopy = upAt(1)
+    strike(v, vg, vcopy, 3)
+    Session.scene(vh, true, "Seq023")
+    for _ = 1, 10 do
+        strike(v, vg, vcopy, 3)         -- (the guest, not in that scene, strikes on)
+    end
+    check(told(vh) == 0 and shown(vg) == nil,
+        "a scene playing in the host's world, the guest's blows stopped at his floor all through it (30 s): nothing said")
+    Fake.setHealth(vboss, select(2, Fake.health(vboss)))
+    Session.scene(vh, false)
+    v:run(30)
+    check(told(vh) == 0 and shown(vg) == nil and shown(vh) == nil, "its end, his next phase begun off that floor: nothing said")
+    allErrors(v)
+
+    -- Off his floor before those 20 s (healed), back at it by a new blow: counted anew.
+    local w, wh, wg, wboss, wcopy = upAt(1)
+    strike(w, wg, wcopy)
+    w:run(12)
+    Fake.setHealth(wboss, 500)
+    w:run(3)
+    Fake.setHealth(wboss, 300)
+    w:run(2)
+    strike(w, wg, wcopy)
+    w:run(12)
+    check(told(wh) == 0, "off his floor for a moment, a new killing blow stopped there: counted from it (13 s)")
+    w:run(10)
+    check(told(wh) == 1, "and said once 20 s have run from it")
+    allErrors(w)
+
+    -- No floor of the game's: the guest's killing blow is his death, as ever, and nothing is said.
+    local u, uh, ug, uboss, ucopy = upAt(0)
+    strike(u, ug, ucopy)
+    u:run(25)
+    check(field(uboss, "dead") == true and told(uh) == 0 and shown(uh) == nil and shown(ug) == nil,
+        "no floor under him: the guest's killing blow is his death, nothing said")
+    allErrors(u)
+end
+
 -- The ninth review (d0412af..50221b8, 383-386): what it found, each with a check of its own.
 local function ninthReview()
     part("the ninth review")
@@ -16399,6 +16515,7 @@ return function(print_, scripts)
     fittedOnScreen()
     cost()
     backToTwo()
+    finisherWithTheHostUp()
     ninthReview()
     thePlayLog()
     return failed == 0

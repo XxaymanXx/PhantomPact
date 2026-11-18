@@ -3240,7 +3240,8 @@ return function(api)
                 if net.deadSent[name] or (valid(actor) and game.isDead and game.isDead(actor)) then
                     sendEvent("K", name)
                 elseif valid(actor) then
-                    -- (Not taken at a floor of its game's own: noted, for a host who's down. net.finisherWaits.)
+                    -- (Not taken at a floor of its game's own: noted. For a host who's down, net.finisherWaits; for one
+                    -- who's up, net.finisherSaid.)
                     if game.atOwnFloor and game.atOwnFloor(actor) then
                         net.floorRefused[name] = os.clock()
                     end
@@ -5254,7 +5255,7 @@ return function(api)
         net.partnerFighting, net.toldFighting = false, nil
         game.holdRespawn(nil, false)
         net.holdLooking, net.holdWanted, net.respawnHeld, net.deadSince, net.struck = false, false, false, nil, {}
-        net.finisherSince, net.floorRefused = nil, {}
+        net.finisherSince, net.finisherUpSince, net.floorRefused = nil, nil, {}
         -- (And what a boss owed this player for a death while down: given in a session after, its share went to whoever
         -- was there then. pbz.lua's payOwed.)
         game.owedBosses, game.downAt, game.owedNames, net.downBossFell = nil, nil, nil, nil
@@ -5566,6 +5567,22 @@ return function(api)
         end
     end
 
+    -- Guest: a boss has stood at a floor of the host's game's own, a killing blow from a guest's world not taken there
+    -- (FB <boss>, the host's net.finisherSaid): what takes it past that floor is the host's game's to bring. Said, so
+    -- a finishing move that plays here and leaves the boss standing isn't a riddle. (This game can't tell by itself:
+    -- every copy here is held at 1 till the host says.)
+    handlers.FB = function(name, from)
+        if from ~= nil or not isClient() or not name or name == "" or #name > MAX_CHEST_NAME then
+            return
+        end
+        if valid(enemyByName[name]) then
+            log("Only the host can finish " .. name .. ": a killing blow from here isn't its end.")
+            if api.status then
+                api.status.notify("finisher", "only the host can finish this boss: your killing blow doesn't count here.", true)
+            end
+        end
+    end
+
     -- Guest: the host, down, has let its fight with this boss go (FN <boss>): it stood at a floor of its game's own that
     -- only the host's own player takes it past, and no blow from here ends it (net.finisherWaits). Said, since nothing
     -- else told why the killing blows weren't taken. And the fight that ends now is one the host lost, however long ago
@@ -5842,17 +5859,11 @@ return function(api)
     -- (On net, as LOST_FIGHT_S is: this function is at Lua's 200 locals.)
     net.FINISHER_WAIT_S = 20.0
     net.floorRefused = net.floorRefused or {}       -- boss id -> os.clock() of a partner's killing blow not taken at its floor
-    function net.finisherWaits(now)
+    -- (The boss of this player's fight that stands so just now, or nil: asked by a host who's down, here, and by one
+    -- who's up, net.finisherSaid.)
+    function net.finisherAt()
         local waits = nil
         local quiet = isHost() and game.atOwnFloor and not (game.sequenceOn and game.sequenceOn())
-        -- (Nor while another player's own fight is on, in a party: this respawn refreshes the world under it, a host's
-        -- death being everyone's (handlers.R). The hold waited for that fight before 383, and does still. The ninth review.)
-        for other in pairs(net.party and net.partnerBosses or {}) do
-            local slot = net.fightOf[other] or 1
-            if slot ~= 1 and net.peers[slot] and net.peers[slot].fights and net.upHere(net.peers[slot]) then
-                quiet = false
-            end
-        end
         for name in pairs(net.fightNames or {}) do
             local actor = enemyByName[name]
             if not (game.atOwnFloor and valid(actor) and game.atOwnFloor(actor)) then
@@ -5861,12 +5872,60 @@ return function(api)
                 waits = name
             end
         end
+        return waits
+    end
+    function net.finisherWaits(now)
+        local waits = net.finisherAt()
+        -- (Nor while another player's own fight is on, in a party: this respawn refreshes the world under it, a host's
+        -- death being everyone's (handlers.R). The hold waited for that fight before 383, and does still. The ninth review.)
+        for other in pairs(waits and net.party and net.partnerBosses or {}) do
+            local slot = net.fightOf[other] or 1
+            if slot ~= 1 and net.peers[slot] and net.peers[slot].fights and net.upHere(net.peers[slot]) then
+                waits = nil
+            end
+        end
         if not waits then
             net.finisherSince = nil
             return nil
         end
         net.finisherSince = net.finisherSince or now
         return now - net.finisherSince >= net.FINISHER_WAIT_S and waits or nil
+    end
+
+    -- Host, up: such a boss has stood at its floor for FINISHER_WAIT_S since a partner's killing blow wasn't taken there.
+    -- What takes it past that floor is this game's own to bring (the first map's Axe chief: its own player's finishing
+    -- move). The partner's game does play its own finishing move on its copy (it can't tell: every copy there is held
+    -- at 1 till the host says), the blow isn't taken here, the copy stands up again, and nothing told either player
+    -- why, over and over (the bench, 11-18, run205: the Nexus report's "glitched" finish). Said to each side now, FB to
+    -- the guests: once in FINISHER_TELL_S a boss, and then only for a blow not taken since. By the wait of a host who's
+    -- down, and for its reason: a phase's scene starts from such a floor by itself, well inside it. (The lines say
+    -- whose it is to end, not how: what lifts such a floor isn't known for every boss. And a count of its own: a host
+    -- who goes down after is counted from then, as before.)
+    net.FINISHER_TELL_S = 120.0
+    net.finisherTold = net.finisherTold or {}       -- boss id -> os.clock() of when it was last said
+    function net.finisherSaid(now)
+        -- (A note of one that's of no fight of this player's, off its floor or gone: dropped, so this isn't asked for good.)
+        for name in pairs(net.floorRefused) do
+            if not (game.atOwnFloor and valid(enemyByName[name]) and game.atOwnFloor(enemyByName[name])) then
+                net.floorRefused[name] = nil
+            end
+        end
+        local waits = net.finisherAt()
+        if not waits then
+            net.finisherUpSince = nil
+            return
+        end
+        net.finisherUpSince = net.finisherUpSince or now
+        local last = net.finisherTold[waits] or -1e9
+        if now - net.finisherUpSince >= net.FINISHER_WAIT_S and now - last >= net.FINISHER_TELL_S
+            and net.floorRefused[waits] > last then
+            net.finisherTold[waits] = now
+            sendEvent("FB", waits)
+            log("A partner's killing blow on " .. waits .. " isn't its end: this game lets only this player finish it.")
+            if api.status then
+                api.status.notify("finisher", "only you can finish this boss: your partner's killing blow doesn't count here.", true)
+            end
+        end
     end
 
     local function holdForFight(pawn)
@@ -5948,6 +6007,7 @@ return function(api)
         if game.isDead(pawn) then
             if net.deadSince == nil then
                 net.deadSince = os.clock()
+                net.finisherUpSince = nil           -- (net.finisherSaid's count is of a player who's up)
                 -- (Or F 1 still told: a bar the game took down for a scene, a boss's grab say, more than 3 s before.)
                 net.holdLooking = net.toldFighting == true or net.deadSince - (net.fightSeenAt or -1e9) <= IN_FIGHT_S
                 net.holdTold, net.holdWanted, net.respawnHeld = false, false, false
@@ -6001,6 +6061,14 @@ return function(api)
                 end
             end
             net.deadSince, net.finisherSince = nil, nil
+            -- (Up, a partner's killing blow not taken at a floor of this game's own: does that boss wait for this
+            -- player's finishing move? Asked a second apart, and only while such a blow is noted. net.finisherSaid.)
+            if next(net.floorRefused) == nil then
+                net.finisherUpSince = nil           -- (no such blow noted: nothing is counted)
+            elseif os.clock() >= (net.finisherLookAt or 0) then
+                net.finisherLookAt = os.clock() + 1.0
+                net.finisherSaid(os.clock())
+            end
             if net.holdLooking then
                 net.holdLooking, net.holdWanted, net.respawnHeld = false, false, false
                 game.holdRespawn(nil, false)
