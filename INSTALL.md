@@ -268,8 +268,9 @@ Not in PvPvE yet: executions (posture break only staggers). It's for two players
 - If you join while the host is in a boss fight, you watch it (F3 takes you in now), and go to them when it's over; after
   30 s you're free to move. From another map there's nothing to watch: F3 takes you there now, or you go at the end.
 - Bells: a bell one of you rings for the first time is rung for the other too if they're within 30 m of it, in the
-  host's world as well, with its scene where it has one. Further off, the host's bells light for you when you come to
-  them, not before.
+  host's world as well. A bell with a scene of its own (a crane's) is each player's to ring: ring it within 30 s of
+  each other and its scenes play together. Further off, the host's bells light for you when you come to them, not
+  before.
 - Not shared yet: dialogue and spending dust (a scene is, when you're together: above). Quests and story: see The
   host's story, above.
 - Never press Ctrl+R (UE4SS hot reload) while playing together: it can crash the game. Restart the game instead.
