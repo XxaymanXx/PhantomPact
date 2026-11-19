@@ -524,14 +524,17 @@ return function(api)
     -- itself waits for such a weapon (moves.lua's weaponConfig, 358: a report on 1.7.3, the host's game gone seconds
     -- after a guest was back). This read began 0.7 s after the load (the bench, run126), and at a sync's start by
     -- itself, the only work of PartnerHitSounds that does: a report on 1.7.3, 11-19, the game gone seconds after two
-    -- players linked over Steam, and not with the setting off.
+    -- players linked over Steam, and not with the setting off. A partner with no figure here yet isn't settled either:
+    -- at a link their W comes a second or so before the figure is made (the bench, run126: 0.1 s and 1.1 s), and
+    -- moves.settled, asked of no figure, says yes (no time of one, or the last figure's): a weapon this PC already
+    -- had was read then, 1.7.3's moment. The review of 399.
     local function tooNew(p, path)
         local m = api.moves
         if not m then
             return false
         end
         local ago = m.loadedAgo and m.loadedAgo(path)
-        return (ago ~= nil and ago < LEARN_AFTER_LOAD_S) or (m.settled ~= nil and not m.settled(p))
+        return (ago ~= nil and ago < LEARN_AFTER_LOAD_S) or (m.settled ~= nil and not (valid(p.ghost) and m.settled(p)))
     end
 
     local learning = false

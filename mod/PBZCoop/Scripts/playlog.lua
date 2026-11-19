@@ -72,6 +72,13 @@ return function(api)
     local function maskIp(a, b)
         return "<" .. ipKind(a, b) .. " address>"
     end
+    -- The partner in the panel's line: an address already written as its kind, or "<Steam ID>", is left.
+    local function partnerIn(head, who, tail)
+        if who == "<Steam ID>" or who:match("^<[%a' ]+ address>$") then
+            return nil
+        end
+        return head .. "<the partner>" .. tail
+    end
     local function mask(text)
         if text:find("%d+%.%d+%.%d+%.%d+") then
             text = text:gsub("(%d+)%.(%d+)%.%d+%.%d+", maskIp)
@@ -87,23 +94,27 @@ return function(api)
             text = text:gsub("([/\\]home[/\\])[^/\\]+", "%1<user>")
             text = text:gsub("(/run/media/)[^/\\]+", "%1<user>")
         end
-        -- A partner by name: a friend's Steam name, or a host's name on a virtual LAN. (One already written as its kind,
-        -- "<...>", is left.)
+        -- A partner by name: a friend's Steam name, or a host's name on a virtual LAN. (Only the mask's own words are
+        -- left, each matched whole: a name can begin with "<" too, "<3 Mika" or a clan's "<WB>Mika", and taken for
+        -- one of them it was written as it is. The tenth review.)
         if text:find(", joining ", 1, true) then       -- (autostart.lua's line)
             text = text:gsub(", joining .- over Steam", ", joining <a Steam friend> over Steam")
             text = text:gsub("(, joining )[^<%s]%S*( on UDP)", "%1<the host>%2")
         end
         if text:find(" peer=", 1, true) and text:find("via=steam", 1, true) then       -- (the relay's own line: over Steam its peer is a name)
             text = text:gsub("( peer=)(.-)( rtt_ms=)", function(head, who, tail)
-                if who == "-" or who:sub(1, 1) == "<" then
+                if who == "-" or who == "<Steam ID>" then
                     return nil
                 end
                 return head .. "<a Steam friend>" .. tail
             end)
         end
         if text:find("Connected to ", 1, true) then     -- (the panel's line, and its tip)
-            text = text:gsub("(Connected to )[^<\n][^\n]-(%. Ping )", "%1<the partner>%2")
-            text = text:gsub("(Connected to )[^<\n][^\n]-%.$", "%1<the partner>.")
+            local n
+            text, n = text:gsub("(Connected to )([^\n]-)(%. Ping )", partnerIn)
+            if n == 0 then      -- (only a line with no ping: the first rule's own "<the partner>." isn't masked again)
+                text = text:gsub("(Connected to )([^\n]-)(%.)$", partnerIn)
+            end
         end
         if text:find("Looking for ", 1, true) and not text:find("Looking for a Steam friend who's hosting", 1, true) then
             text = text:gsub("(Looking for )[^<\n][^\n]-(%.%.%.)", "%1<the host>%2")
