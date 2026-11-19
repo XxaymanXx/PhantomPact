@@ -16676,6 +16676,25 @@ local function bellsTogether()
         "one in a fight, left alone for a partner's ring, is told why in the log, once")
     allErrors(w)
 
+    -- A first ring made in the quiet after a link's start, a load or a stall is seen and told all the same (406:
+    -- the bench, run236). The scenes' look rests through that quiet, and told only once it was over, 5 s on, the
+    -- ring was older than the 3 s a telling allows: the partner beside the bell was never rung for.
+    local z, zh, zg = pair()
+    zh.groundTraces, zg.groundTraces = true, true
+    Session.moveTo(zg, 700, 0)
+    Session.moveTo(zh, 600, 0)
+    z:run(2)
+    net(zh).quietUntil, net(zg).quietUntil = zh.now + 5, zg.now + 5
+    pressE(zg)
+    z:run(1)
+    local toldInIt = count(zg.sent, "^E BELL ring ")
+    z:run(7)
+    check(toldInIt == 1 and woken(zg) and woken(zh) and zh.bellTouches == 1
+        and count(zh.logs, "rung in this world too") == 1,
+        "a first ring made in the quiet after a link's start is told at once (" .. toldInIt
+            .. "), and the partner beside the bell is rung for once their own quiet is over")
+    allErrors(z)
+
     -- A partner whose game takes no ring just now (busy with something of their own) keeps the bell.
     local r, rh, rg = pair()
     rh.groundTraces, rg.groundTraces = true, true

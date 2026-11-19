@@ -1431,10 +1431,28 @@ return function(api)
 
     -- (The pace each frame's own way, SCENE_S apart, not with the scenes' look below: that one rests in the quiet
     -- after a stall, and a rate raised just before stayed raised all through it.)
-    local paceAt = 0
+    local paceAt, ringAt = 0, 0
+    -- A first ring's hook, and its telling: each frame's own way too, SCENE_S apart. The scenes' look below rests in
+    -- the quiet after a link's start, a load or a stall, and a first ring made in that quiet was not seen (the hook
+    -- was made by that look: the bench, 11-19, run236, a guest's ring 10 s into a link, the hook registered 2 s
+    -- after it) or, seen, was told too late (one older than 3 s is taken for a ring made with sync off): the
+    -- partner beside the bell rang their own. Neither searches the world, which is what the quiet is for.
+    local function ringLook(now)
+        if now >= touchHookAt and game.hookFirstTouch then
+            touchHookAt = now + 5
+            if game.hookFirstTouch() then
+                touchHookAt = math.huge         -- (hooked: once a game run)
+            end
+        end
+        tellBell(now)
+    end
     if coop.frameTicks then
         coop.frameTicks.scenePace = function()
             local now = os.clock()
+            if now >= ringAt then
+                ringAt = now + SCENE_S
+                ringLook(now)
+            end
             if now >= paceAt and (tog.fast or next(tog.at) ~= nil) then
                 paceAt = now + SCENE_S
                 keepPace(now, game.sceneName())
@@ -1448,17 +1466,11 @@ return function(api)
             return
         end
         nextScene = now + SCENE_S
-        if now >= touchHookAt and game.hookFirstTouch then
-            touchHookAt = now + 5
-            if game.hookFirstTouch() then
-                touchHookAt = math.huge         -- (hooked: once a game run)
-            end
-        end
+        ringLook(now)           -- (here too, for a coop.lua with no frame ticks: twice does nothing more)
         local name = game.sceneName()
         -- (What this world's last scene gained by playing faster, keepPace: it ended that much early, and that's no skip.)
         local gained = tog.gained
         tellScene(now, name)
-        tellBell(now)
         joinScene(now, name)
         joinBell(now, name)
         watchSetDown(now, name)
