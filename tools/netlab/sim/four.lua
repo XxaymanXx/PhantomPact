@@ -116,6 +116,13 @@ local function joining()
     local s = party()
     spread(s)
     s:run(3)
+    -- (409: Lua's collector begins a round once the mod's memory has grown by half, set as the mod loads. Read back
+    -- through the old setter, which answers what was set. The game's Lua keeps it in quarters: 150 reads 148 there, on
+    -- both copies of the bench as built, run249.)
+    local pause = collectgarbage("setpause", 150)
+    collectgarbage("setpause", pause)
+    check(pause >= 144 and pause <= 152, "Lua's collector begins a round at half as much again, set as the mod loads ("
+        .. tostring(pause) .. ")")
     check(net(s.pcs[1]).party == 4 and net(s.pcs[1]).slot == 1, "the host knows it's a party")
     check(net(s.pcs[2]).slot == 2 and net(s.pcs[3]).slot == 3 and net(s.pcs[4]).slot == 4, "each guest knows its number, from the host's hello")
     check(everyone(s, function(pc) return #pc.spawned == 3 end), "everyone has three ghosts, no more")
@@ -16188,6 +16195,42 @@ local function watchingTogether()
     s:run(1)
     check(count(h.sent, "^E SCENE skip") == 0, "watched to its end by both: no skip is told")
     allErrors(s)
+
+    -- A boss its opening scene has only just made reads no health yet (408: the user's play logs of 11-19, "Enemy
+    -- died here" a tenth of a second before "a scene begins" at each of three such bosses). Not seen alive, it's
+    -- no death: nothing is told of it, no fall is counted, and the scene that begins then is told like any other,
+    -- the guest 15 m back set down for it.
+    local n8, n8h, n8g = pair()
+    local n8step, n8begun = boxes(n8, "Seq022")
+    local function numbers(e, hp)
+        local most = rawget(e, "__fields").AttributeSetBase.Health_Max
+        Fake.setHealth(e, hp)
+        Fake.put(most, "CurrentValue", hp)
+        Fake.put(most, "BaseValue", hp)
+    end
+    local hook = Fake.enemy(n8h, "hook", "BP_Monster_Boss_C", SPOT.X + 600, SPOT.Y, 100.0, 5000, 400, true)
+    numbers(hook, 0)
+    n8:run(0.3)
+    Session.moveTo(n8h, SPOT.X, SPOT.Y)
+    n8:run(1.6, n8step)
+    check(n8begun[n8h] == true and count(n8h.sent, "^E K ") == 0 and count(n8h.logs, "Enemy died here") == 0
+        and net(n8h).bossFellAt == nil,
+        "a boss made as its opening scene begins, no health on it yet: no death is told of it, no fall counted")
+    check(count(n8h.sent, "^E SCENE on Seq022 ") == 1, "and its scene is told as it begins")
+    numbers(hook, 5000)
+    n8:run(2.2, n8step)
+    check(n8begun[n8g] == true and count(n8g.logs, "set down in the story") == 1 and count(n8h.sent, "^E K ") == 0,
+        "the guest is set down for it; the boss, its health set, is an enemy like any other")
+    -- (One that stays so is a body: told once it has lain three seconds, where it was told at once.)
+    local lying = Fake.enemy(n8h, "lying", THUG, SPOT.X + 900, SPOT.Y, 100.0, 600, 100)
+    Fake.setHealth(lying, 0)
+    n8:run(1.0, n8step)
+    local early = count(n8h.sent, "^E K ")
+    n8:run(3.6, n8step)
+    check(early == 0 and count(n8h.sent, "^E K ") == 1 and count(n8h.logs, "Enemy died here") == 1,
+        "one met dead that stays so is a body: told once it has lain three seconds (" .. early .. ", "
+            .. count(n8h.sent, "^E K ") .. ")")
+    allErrors(n8)
 
     -- The host skips while the guest's, begun later, is still played faster: ended at its own speed, the faster one not
     -- left on a player the game uses again (404: the eleventh review).

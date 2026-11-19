@@ -114,6 +114,9 @@ return function(api)
         remoteEnemies = {},       -- client: name -> latest host record
         hostLethal = {},          -- host: enemy id -> true: the host's killing blow on one the guest's game runs
         deadBodies = {},          -- host: actor address -> true: its death was told (see shareEnemy)
+        livedAt = {}, livedAs = {},         -- host: actor address -> when, and under which id, it was last seen alive
+        metDeadAt = {}, metDeadAs = {},     -- host: actor address -> when, and under which id, it was first met dead
+                                            -- with no such sight of it (net.metDead)
         enemyNames = {},          -- client: number -> { name, class }
         enemyNumbers = {},        -- host: name -> number
         announced = {},           -- host: number -> true once the client was told what it means
@@ -992,6 +995,23 @@ return function(api)
         link.enemy(text)
     end
 
+    -- Whether an enemy read as dead is one only met so: not seen alive here, at this address and under this id, a
+    -- moment ago. True while it has yet to lie MET_DEAD_S: then it's a body, and told as ever. (By address and id
+    -- both: a new actor at an address another had isn't the one seen alive there. And a rest or a death of this
+    -- player's, which makes every enemy anew, forgets who was seen: onLocalRest.)
+    net.MET_DEAD_S, net.LIVED_S = 3.0, 5.0
+    function net.metDead(name, addr)
+        local now = net.frameNow or link.now()
+        if net.livedAs[addr] == name and now - (net.livedAt[addr] or -1e9) < net.LIVED_S then
+            return false
+        end
+        if net.metDeadAt[addr] == nil or net.metDeadAs[addr] ~= name then
+            net.metDeadAt[addr], net.metDeadAs[addr] = now, name
+            return true
+        end
+        return now - net.metDeadAt[addr] < net.MET_DEAD_S
+    end
+
     -- Host, one enemy's turn: announce its death (reliably), or send where it is.
     local function shareEnemy(actor, addr, aggro)
         local name = enemyName(actor, addr)
@@ -1020,6 +1040,18 @@ return function(api)
         -- (One already announced is asked every turn: dead by the game's word at full health, it mustn't flip back.)
         if not dead and game.isDead and (round.number % 3 == 0 or net.deadSent[name]) then
             dead = game.isDead(actor)
+        end
+        -- (A death is of one seen alive. An actor whose numbers aren't set yet reads no health: a boss its opening
+        -- scene has only just made. Met so, it was told as dead that turn: "Enemy died here", by its actor's own
+        -- name, a tenth of a second before "a scene begins" at each such boss of the user's play logs of 11-19. By
+        -- that name it means nothing to a guest; but it counted as a boss's fall, and a scene within FELL_S of one
+        -- isn't told (story.lua's fellLately): the opening scene, of all scenes, wasn't shared with a partner
+        -- standing by, and the phase after it was called a fight a whole scene early. One met dead that this world
+        -- hasn't seen alive a moment ago is a body only once it has lain MET_DEAD_S, and nothing is said of it till
+        -- then. (The enemies a rest or a death makes anew aren't such: each comes with its health on its first
+        -- frame, the bench's run247.) 408.)
+        if dead and not net.deadSent[name] and net.metDead(name, addr) then
+            return
         end
         local paidThere = false
         -- (Not one the guest's game ran: the floor on its copy here is the handover's own, and its death ran its whole
@@ -1150,6 +1182,8 @@ return function(api)
             -- Alive (again, after a bell respawn): its next death must be announced too.
             net.deadSent[name] = nil
             net.deadBodies[addr] = nil
+            -- (And it's one seen alive, here and now: net.metDead.)
+            net.livedAt[addr], net.livedAs[addr], net.metDeadAt[addr] = net.frameNow or link.now(), name, nil
             if net.bossPaid then
                 net.bossPaid[addr] = nil
             end
@@ -3823,6 +3857,8 @@ return function(api)
         net.unsettle()
         -- (A guest's own death refreshes only its own world: the host's enemies, and their twins, go on.)
         net.restRefreshes = isHost()
+        -- (Every enemy of this world is made anew: none is one seen alive, whatever stood at its address. net.metDead.)
+        net.livedAt, net.livedAs = {}, {}
         restEvent(kind)
         if kind == "death" and net.role == "client" then
             log("You died and respawned: your world refreshed, the host's goes on. Enemies the host already killed stay dead.")
@@ -5008,6 +5044,7 @@ return function(api)
                 reach.list, reach.at, reach.near = {}, 1, {}
                 net.matchSticky = {}    -- (the old map's addresses are free for new enemies: a late K must not find them)
                 net.deadBodies = {}
+                net.livedAt, net.livedAs, net.metDeadAt, net.metDeadAs = {}, {}, {}, {}
                 if game.forgetActors then
                     game.forgetActors()
                 end
@@ -5254,6 +5291,7 @@ return function(api)
         -- a fight of their own too. A host restarting while the guest stays linked still does.)
         net.hostWorld = nil
         net.hostLethal, net.deadBodies = {}, {}
+        net.livedAt, net.livedAs, net.metDeadAt, net.metDeadAs = {}, {}, {}, {}
         net.everHeard, net.gapped, net.retellAt = nil, nil, nil
         net.bagSent, net.bagDue, net.bagWaiting = false, nil, nil
         net.remoteEnemies = {}
