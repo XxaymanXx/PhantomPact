@@ -1128,7 +1128,12 @@ return function(api)
             or (net.fightingHere and net.fightingHere(pawn)) then
             return false, "a boss fight was on"
         end
-        if game.inCombat and game.inCombat(pawn) then
+        -- (On a guest the game's count alone isn't a fight: copies of the host's enemies that only noticed them hold
+        -- it for as long as they live, and by live enemies, at a boss's box or a bell, a guest was never set down or
+        -- rung for (the bench: counted in a fight by 3 copies within a second of arriving, for 8 s). Really in one:
+        -- lesson.fighting. The eleventh review.)
+        if game.inCombat and game.inCombat(pawn)
+            and (coop.isHost() or not (api.lesson and api.lesson.fighting) or api.lesson.fighting(pawn)) then
             return false, "you were in a fight"
         end
         if (game.inDialogue and game.inDialogue()) or (api.qte and api.qte.active)

@@ -16203,6 +16203,27 @@ local function watchingTogether()
             .. tostring(rate(kg)) .. ")")
     allErrors(k)
 
+    -- A guest the game counts in a fight only because copies of the host's enemies noticed them is come for all the
+    -- same (407: the eleventh review). Nothing has gone for them, they have lost no health and told no blow: by live
+    -- enemies such a guest was never set down. One who told a blow of their own a moment ago is in a fight.
+    local c7, c7h, c7g = pair()
+    local c7step, c7begun = boxes(c7, "Seq014")
+    c7g.env.PBZ.game.inCombat = function() return true end
+    Session.moveTo(c7h, SPOT.X, SPOT.Y)
+    c7:run(3.4, c7step)
+    check(c7begun[c7g] == true and count(c7g.logs, "set down in the story's box for it") == 1,
+        "a guest only counted in a fight, nothing going for them, is set down for the host's scene all the same")
+    allErrors(c7)
+    local d7, d7h, d7g = pair()
+    local d7step, d7begun = boxes(d7, "Seq014")
+    d7g.env.PBZ.game.inCombat = function() return true end
+    net(d7g).struckAt["sp:near"] = d7g.now + 1000
+    Session.moveTo(d7h, SPOT.X, SPOT.Y)
+    d7:run(3.4, d7step)
+    check(d7begun[d7h] == true and not d7begun[d7g] and count(d7g.logs, "set down in the story's box") == 0,
+        "one who told a blow of their own a moment ago is in a fight, and left where they are")
+    allErrors(d7)
+
     -- The other way round: the guest steps in, the host 15 m back.
     local t, th, tg = pair()
     local tstep, tbegun = boxes(t, "Seq014")
@@ -16262,6 +16283,7 @@ local function watchingTogether()
     end)
     left("one fighting anything is left", function(_, _, ug)
         ug.env.PBZ.game.inCombat = function() return true end
+        net(ug).aimedAt = ug.now + 1000         -- (something of the host's is going for them: a real fight)
     end)
     left("one in the air is left", function(_, _, ug)
         Fake.put(field(ug.pawn, "CharacterMovement"), "MovementMode", 3)
@@ -16669,6 +16691,7 @@ local function bellsTogether()
     wh.groundTraces, wg.groundTraces = true, true
     Session.moveTo(wh, 600, 0)
     wg.env.PBZ.game.inCombat = function() return true end
+    net(wg).aimedAt = wg.now + 1000             -- (something of the host's is going for them: a real fight)
     w:run(2)
     pressE(wh)
     w:run(8)
@@ -16767,6 +16790,7 @@ local function bellsTogether()
     end)
     left("one fighting anything is left: the game itself refuses a bell in combat", function(_, _, ug)
         ug.env.PBZ.game.inCombat = function() return true end
+        net(ug).aimedAt = ug.now + 1000         -- (something of the host's is going for them: a real fight)
     end)
     left("with no ground behind the ringer in their world, neither set down nor rung", function(_, _, ug)
         Session.moveTo(ug, 1700, 0)
