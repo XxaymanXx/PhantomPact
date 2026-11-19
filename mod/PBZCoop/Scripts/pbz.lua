@@ -4755,10 +4755,17 @@ return function(api)
                             local class = StaticFindObject("/Script/ProjectPBZ.PBZInteractComponent")
                             local ic = valid(class) and pawn:GetComponentByClass(class) or nil
                             if valid(ic) then
-                                why = "the game said no"
-                                ic:SetCurrentInteractActor(b)
-                                if ic:DoInteract(b) ~= false then
-                                    out, why = "rung", nil
+                                -- (Not over something this player is using now, this bell by their own E among it:
+                                -- the walk up to a bell takes 2 s before its first touch, and a ring asked in it
+                                -- was a second one of the same bell. The eleventh review.)
+                                if valid(ic:GetInteractingActor()) then
+                                    why = "you were using something"
+                                else
+                                    why = "the game said no"
+                                    ic:SetCurrentInteractActor(b)
+                                    if ic:DoInteract(b) ~= false then
+                                        out, why = "rung", nil
+                                    end
                                 end
                             end
                         else
@@ -7424,7 +7431,10 @@ return function(api)
     -- scene begins as this world's player stands in its box: set down in one, the game begins it as for a player who
     -- walked in (the bench's boss sweeps, 11-17, and run219). A box is taken by its own size and turn, not its middle
     -- (the Axe chief's is 43 m by 36): the one that holds the place, or else the only one whose side is within cm of
-    -- it (a player runs on a few metres in the 2 s before the scene). The spot is the place itself where the box
+    -- it, its middle too (a player runs on a few metres in the 2 s before the scene: out of a small box. A big one
+    -- still holds whoever its scene is for, and one only near its side is another's: a talk's scene told 10 m outside
+    -- an arena's box set the partner down in it, the boss's scene and fight begun in their world alone. The eleventh
+    -- review). The spot is the place itself where the box
     -- holds it, else the box's nearest point a pace inside. With two or more in reach and not just one holding the
     -- place: nil, and how many (in Zhengdaodaying's underground they stand 6 to 12 m apart: nobody is set down on a
     -- guess). A world that has played a scene mostly has no box for it, but one can stay (run101). The eleventh
@@ -7465,7 +7475,8 @@ return function(api)
                 end
                 local spot = { X = l.X + px * math.cos(yaw) - py * math.sin(yaw),
                     Y = l.Y + px * math.sin(yaw) + py * math.cos(yaw),
-                    Z = out > 0 and math.max(l.Z - ex.Z, math.min(l.Z + ex.Z, z)) or z, out = out }
+                    Z = out > 0 and math.max(l.Z - ex.Z, math.min(l.Z + ex.Z, z)) or z, out = out,
+                    far = math.sqrt(dx * dx + dy * dy + dz * dz) > cm }
                 if out == 0 then
                     holds[#holds + 1] = spot
                 end
@@ -7477,7 +7488,7 @@ return function(api)
         if #holds == 1 then
             return holds[1], n
         end
-        if n == 1 then
+        if n == 1 and not near.far then
             return near, n
         end
         return nil, n
@@ -7505,6 +7516,9 @@ return function(api)
         pcall(function()
             local p = game.inCutscene() and scenePlayer()
             if p then
+                -- (At its own speed first: one still played faster to catch a partner's up (story.lua's keepPace) kept
+                -- that speed on a player the game uses again.)
+                pcall(function() p:SetPlayRate(1) end)
                 p:GoToEndAndStop()
                 ok = true
             end

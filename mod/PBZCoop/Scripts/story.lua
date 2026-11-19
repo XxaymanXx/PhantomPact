@@ -1181,15 +1181,20 @@ return function(api)
         if tog.rungFor and now - tog.rungFor <= BELL_SCENE_S then
             return
         end
+        -- (How far first: mayJoin searches all the game's objects for a talk, a menu and a screen, and asked before
+        -- this it did so four times a second for every scene a partner began, however far off. The eleventh review.)
         local controller, pawn = api.getPlayer1()
-        local free, why = mayJoin(controller, pawn)
-        if not free then
-            s.why = why or s.why
+        if not valid(pawn) then
             return
         end
         local l = pawn:K2_GetActorLocation()
         local d = math.sqrt((l.X - s.x) ^ 2 + (l.Y - s.y) ^ 2 + (l.Z - s.z) ^ 2)
         if d > tog.NEAR_CM then
+            return
+        end
+        local free, why = mayJoin(controller, pawn)
+        if not free then
+            s.why = why or s.why
             return
         end
         tog.on = nil                    -- (looked for once a scene: the boxes are a whole map's)
@@ -1370,16 +1375,23 @@ return function(api)
             tog.bell = nil
             return
         end
+        -- (How far first, as joinScene: one far off is asked nothing more.)
         local controller, pawn = api.getPlayer1()
+        if not valid(pawn) then
+            return
+        end
+        local l = pawn:K2_GetActorLocation()
+        local d = math.sqrt((l.X - b.bx) ^ 2 + (l.Y - b.by) ^ 2 + (l.Z - b.bz) ^ 2)
+        if d > tog.NEAR_CM then
+            return
+        end
         local free, why = mayJoin(controller, pawn)
         if not free then
             b.why = why or b.why
             return
         end
         tog.bell = nil
-        local l = pawn:K2_GetActorLocation()
-        local d = math.sqrt((l.X - b.bx) ^ 2 + (l.Y - b.by) ^ 2 + (l.Z - b.bz) ^ 2)
-        local state = d <= tog.NEAR_CM and game.bellAt(b.bx, b.by, b.bz) or nil
+        local state = game.bellAt(b.bx, b.by, b.bz)
         if state == "scene" then
             log(string.format("Your partner rang a bell with a scene of its own %.0f m from you: its first ring stays yours. Rung within %d s of theirs, its scenes are kept with theirs.",
                 d / 100, tog.TOGETHER_S))

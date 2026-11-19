@@ -108,7 +108,7 @@ online panel doesn't pause, and a pause by the game (its menu) is undone at once
   where that is the boss's end: a floor of the last point, the boss low, no scene playing there, no other phase of
   it to come (396). A plain killing blow of the client's there isn't taken, and each side is told what is (`FB`).
   A killing blow read as the host's world refreshes (till half a second after its `R`) is of a body that's gone:
-  a plain blow (397). So is one on a boss with more than half its health there, by a blow that took less than
+  a plain blow (397). One read from a guest not heard for 3 s, or heard again less than 1.5 s ago, was told in a gap of their link: a plain blow too, answered with what the boss has; and what a guest told of its blows in a gap in which the host's world refreshed isn't taken at all (404). So is one on a boss with more than half its health there, by a blow that took less than
   half of that, whenever it comes (401). The refresh, and the boss back
   at full health, come only once everyone in the fight is down, the boss is dead, the client leaves, 15 minutes pass,
   or such a boss has stood three minutes at that floor with nobody's finishing move (`net.finisherWaits`): then the

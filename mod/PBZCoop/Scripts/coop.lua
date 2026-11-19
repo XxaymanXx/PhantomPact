@@ -3151,6 +3151,10 @@ return function(api)
         if amount == nil or amount < 0 or amount > MAX_EVENT_DAMAGE then
             return
         end
+        -- (Told in a gap of that guest's link in which this world refreshed: struck at a body that's gone. net.gapOld.)
+        if net.gapOld(from, "a blow on " .. tostring(name)) then
+            return
+        end
         posture = num(posture)
         posture = posture and math.max(0, math.min(posture, MAX_EVENT_DAMAGE)) or 0
         local told = amount
@@ -3164,7 +3168,13 @@ return function(api)
             log("Partner's killing blow on " .. tostring(name) .. " came as this world refreshed: of the one that's gone, a plain blow here.")
             lethal, finisher = "-", false
         end
-        if lethal == "L" then
+        -- (Told in a gap of that guest's link, net.gapKill: a plain blow. It is still answered below with what this
+        -- one has (LR), as any killing blow not taken: the guest's game stops telling it again, and its copy takes
+        -- that. With no answer it was told again past the gap, and taken where the gap's blows had left the boss low.)
+        local gapTold = lethal == "L" and not finisher and net.gapKill(from)
+        if gapTold then
+            log("Partner's killing blow on " .. tostring(name) .. " was told in a gap of theirs: a plain blow here.")
+        elseif lethal == "L" then
             amount = math.huge      -- the client's killing blow (its copy can't show the full damage)
             log("Partner's " .. (finisher and "finishing move" or "killing blow") .. " on " .. tostring(name)
                 .. (valid(enemyByName[name]) and "." or ", which isn't loaded here."))
@@ -3232,11 +3242,13 @@ return function(api)
                 -- half of what it has: of a body that's gone. The sender's copy stood at its floor, and this one is
                 -- whole again: by this world's refresh, read past net.lateKill's half second; by a sit's reset
                 -- (net.sitBossesToFull); by the game's own, a boss that lost its target (the bench, run223: 2 back to
-                -- 27680 with no refresh at all). By the blow, not by a clock from the refresh: a guest whose link went
-                -- quiet for longer than any window kept striking its copy at 2, the relay sent those killing blows as
-                -- the link came back, and the whole boss died (REVIEW-10). A plain blow, and LR says what this one
-                -- has. One that took it whole is still its end.)
-                if lethal == "L" and boss and before and most and before > most / 2 and told < before / 2 then
+                -- 27680 with no refresh at all), once that has it over half again. By the blow, not by a clock from
+                -- the refresh: a guest whose link went quiet for longer than any window kept striking its copy at 2,
+                -- the relay sent those killing blows as the link came back, and the whole boss died (REVIEW-10). A
+                -- plain blow, and LR says what this one has. One that took it whole is still its end. This judges
+                -- the one blow as it's read: the plain blows of a quiet link, read before it, can have taken the
+                -- boss under half, and a reset is under half in its first seconds. Those are net.gapKill's, above.)
+                if lethal == "L" and not gapTold and boss and before and most and before > most / 2 and told < before / 2 then
                     log(string.format("Partner's killing blow on %s isn't one here: it has %.0f of %.0f. A plain blow.", name, before, most))
                     amount, finisher = told, false
                 end
@@ -3412,7 +3424,13 @@ return function(api)
         local waited = net.lethalPending[name]
         net.lethalPending[name] = nil
         local actor = enemyByName[name]
-        if waited and valid(actor) and game.setHealth and not (game.isDead and game.isDead(actor)) then
+        -- (And only on a copy still held. One let go since the blow went, the host's lines of it run out with no word
+        -- (the host gone off, its boss at a floor of its game's own), stands whole and is this game's own (net.letGo):
+        -- the answer put it at 2 with no floor, and the next blow was its death here alone, told to a party's other
+        -- guests. A blow is told only of a held copy, and held it stays while the host's lines come: no answer that's
+        -- needed is dropped. The tenth review's checks.)
+        if waited and valid(actor) and net.heldAlive[actor:GetAddress()] ~= nil and game.setHealth
+            and not (game.isDead and game.isDead(actor)) then
             -- (A copy kept at its own game's most: the host's share of that.)
             local cap, r = net.capped[actor:GetAddress()], net.remoteEnemies[name]
             if cap and cap.name == name and r and r.MaxHp and r.MaxHp > cap.most + 1 then
@@ -3896,6 +3914,7 @@ return function(api)
             net.pendingBosses[name] = true
         end
         net.killsFrom = link.now() + net.LINES_AFTER_S      -- (net.lateKill)
+        net.worldNew(nil)
         sendEvent("R", kind)
     end
 
@@ -3917,6 +3936,74 @@ return function(api)
         end
         local at = game.refreshedHere
         return (at ~= nil and os.clock() - at < net.REFRESH_TOLD_S) or link.now() < (net.killsFrom or 0)
+    end
+
+    -- Host: a killing blow read from a guest not heard for GAP_KILL_AFTER_S, or heard again less than GAP_KILL_S ago,
+    -- was told in that gap, where the guest heard nothing of this world either. Its copy stood at this world's
+    -- numbers from before the gap, lifted back to them each second, and the boss here can be another by then: a new
+    -- body (the host down and held, the guest taken for gone at 12 s, the hold let go, the respawn's refresh inside the
+    -- gap), or the same one made whole by its own game as the guest's figure went quiet (the bench, run223: the Axe
+    -- chief from 2 to 27680, the host down). The relay keeps what a guest tells for as long as the gap lasts and sends
+    -- it all as the link comes back, plain blows and killing blows in their order: the plain ones took the boss under
+    -- half, where the rule by the blow (handlers.D) no longer holds, and the next killing blow was its end in both
+    -- worlds, its pay out and "beaten" in both saves (the tenth review's run-checkers, and the review of 401). A plain
+    -- blow then, answered with what this one has; the next one, struck with the link up, is taken. From 3 s: a boss
+    -- here resets only once the guest's figure has been quiet that long (FIGHT_SILENT_S), and a hiccup of a second or
+    -- two is common: a killing blow across one of 2.5 s still lands at once (the sim). A stall of this game's own
+    -- counts the same: what came in it is read late. Not a finishing move of theirs (X): that's its end, the user's
+    -- word, and handlers.D's own checks hold it where it isn't. Not judged: the gap's plain blows, which land on
+    -- the body that's here (a guest's own damage, no more), and a guest's own kill in a world it ran alone (GK),
+    -- which counts as it did. (A frame takes its events before the partner's place: the first after a gap still
+    -- has the old time here. backAt: heard, below.)
+    net.GAP_KILL_AFTER_S, net.GAP_KILL_S = 3.0, 1.5
+    function net.gapKill(from)
+        local p = isHost() and peerOf(from) or nil
+        if p == nil or p.lastRemoteAt == nil then
+            return false
+        end
+        local now = os.clock()
+        return now - p.lastRemoteAt > net.GAP_KILL_AFTER_S or now - (p.backAt or -1e9) < net.GAP_KILL_S
+    end
+
+    -- Host: this world refreshed, and the guests are told (R, or RH for a party guest's rest; but: the guest whose
+    -- rest it was, who knows). When, by guest: net.gapOld.
+    function net.worldNew(but)
+        if isHost() then
+            for _, p in ipairs(partners()) do
+                if but == nil or p.number ~= but then
+                    p.worldNewAt = os.clock()
+                end
+            end
+        end
+    end
+
+    -- Host: what a guest told of its blows in a gap of its link in which this world refreshed was struck at bodies
+    -- that are gone, plain blows and killing blows alike: none of it is taken. The host down and held, the
+    -- guest quiet for 18 s: at 12 s the hold lets go, the respawn refreshes this world, and the guest's 18 s of blows
+    -- at the old boss, kept by the relay, were read on the new one as the link came back: 6300 of its 7500 gone
+    -- before its fight had begun (the sim). The guest's game hears of the refresh in the same moment, and what it
+    -- tells from there is of the new ones. Without a refresh in it, a gap's plain blows are the guest's own damage on
+    -- the body that's still here, and are taken; its killing blows are net.gapKill's. (Its own kill of an enemy it
+    -- ran alone, GK, counts as it did: the relay gives it to a party's other guests whatever is done with it here,
+    -- and refused here alone the worlds would disagree.) what: for the log, once a gap.
+    function net.gapOld(from, what)
+        local p = isHost() and peerOf(from) or nil
+        if p == nil or p.lastRemoteAt == nil or p.worldNewAt == nil then
+            return false
+        end
+        local now = os.clock()
+        local old
+        if now - p.lastRemoteAt > net.GAP_KILL_AFTER_S then
+            old = p.worldNewAt > p.lastRemoteAt         -- (not heard since before the refresh)
+        else
+            old = now - (p.backAt or -1e9) < net.GAP_KILL_S and p.worldNewAt > (p.gapFrom or math.huge)
+        end
+        if old and now - (p.oldSaidAt or -1e9) > 5 then
+            p.oldSaidAt = now
+            log("What the other player told in a gap of theirs, this world refreshed meanwhile, is of what's gone: not taken ("
+                .. tostring(what) .. " the first).")
+        end
+        return old
     end
 
     -- The fights of others this player is shown that are still on (their player's bar is up): names.
@@ -4053,6 +4140,7 @@ return function(api)
             end
         end
         if isHost() and net.party and from and not elsewhere then
+            net.worldNew(from)
             sendEvent("RH", kind, from)     -- (the host's world refreshed for that guest's rest: the other guests' do too)
         end
     end
@@ -4357,7 +4445,12 @@ return function(api)
             net.farFight = { name = name, p = p, at = { X = at.X, Y = at.Y, Z = at.Z } }
             -- (Not for a boss that fell here a moment ago and is up again, a rise: this player was by its fight, most
             -- often in it, and was told to press E at a wall they stood inside. The bench, 11-18, Xiao Xue's.)
-            if not (net.killedAt and net.killedAt[name] and os.clock() - net.killedAt[name] < net.RISE_S) then
+            -- (Nor to one whose own game began that fight as the partner's did, their scenes ending together (402):
+            -- told to press E at a wall they stood inside.)
+            local mine = enemyByName[name]
+            local begun = valid(mine) and game.bossAt and game.bossAt(mine:GetAddress(), mine)
+                and not (game.isMirrorBar and game.isMirrorBar(mine))
+            if not begun and not (net.killedAt and net.killedAt[name] and os.clock() - net.killedAt[name] < net.RISE_S) then
                 api.status.notify("join", "your partner is in a boss fight: press E at the black wall, or F3, to join.")
             end
         end
@@ -4665,6 +4758,17 @@ return function(api)
                 net.bossesSeen = net.bossesSeen or {}
                 net.bossesSeen[name] = true     -- (any sit puts it back to full health: net.sitBossesToFull)
                 log("The other player started a boss fight with " .. name .. " as this game did: it stays this game's own.")
+                return
+            end
+        end
+        -- (Guest: another guest's word of a fight this world has as the host's, or has begun itself, isn't that
+        -- guest's. Three whose scenes end together each tell their start, the host's word first here (another guest's
+        -- comes through the host's relay): filed as that guest's, their drop or their F 0 took this player's bar down
+        -- and opened its walls mid-fight, the host and this player still in it. 402, for a guest: the review of 401.)
+        if isClient() and from ~= nil then
+            local own = enemyByName[name]
+            if (net.partnerBosses[name] and net.fightOf[name] == 1) or (valid(own) and not game.isDead(own)
+                and game.bossAt and game.bossAt(own:GetAddress(), own) and not (game.isMirrorBar and game.isMirrorBar(own))) then
                 return
             end
         end
@@ -5074,6 +5178,9 @@ return function(api)
         local t0 = p.target
         if p == net and isClient() and (loadEnded or (t0 and t0.X and (x - t0.X) ^ 2 + (y - t0.Y) ^ 2 > 3000 * 3000)) then
             net.hostSettleUntil = clock + net.UNSETTLED_S
+        end
+        if p.lastRemoteAt and heardAt - p.lastRemoteAt > net.GAP_KILL_AFTER_S then
+            p.backAt, p.gapFrom = clock, p.lastRemoteAt     -- (back after a gap, and when it began: net.gapKill, net.gapOld)
         end
         p.lastRemoteAt = heardAt
         local t = p.target or {}

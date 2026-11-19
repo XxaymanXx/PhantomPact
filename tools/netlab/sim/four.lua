@@ -9419,6 +9419,26 @@ local function partnerSwingSounds()
     check(#heard[h] == 0 and count(h.logs, "Partner swing sounds") == 0, "the row left out of the ini: nothing learned or played")
     allErrors(s)
 
+    -- A partner with no figure here yet isn't read (404: the review of 399). At a link their weapon's word comes a
+    -- second or so before their figure is made, and "settled", asked of no figure, said yes: a weapon this PC already
+    -- had was read at once, 1.7.3's moment. Here the world takes the guest's figure (a load's), and the guest takes
+    -- up the sword in the same moment: read once the figure made anew has stood its 6 s, not before.
+    s, h, g = pair(ON, both)
+    s:run(4)
+    local made0 = count(h.logs, "Remote player ghost spawned")
+    rawset(net(h).ghost, "__alive", false)
+    Session.hold(g, SWORD, true)
+    local madeAt, learnedAt, tookAt = nil, nil, h.now
+    s:run(12, function()
+        madeAt = madeAt or (count(h.logs, "Remote player ghost spawned") > made0 and h.now or nil)
+        learnedAt = learnedAt or (count(h.logs, "Partner swing sounds: Sword learned") > 0 and h.now or nil)
+    end)
+    check(madeAt ~= nil and learnedAt ~= nil and learnedAt - madeAt >= 6,
+        string.format("a partner's weapon isn't read while they have no figure here: read %s s after the sword was taken up, %s s after the figure was made",
+            learnedAt and string.format("%.2f", learnedAt - tookAt) or "never",
+            (learnedAt and madeAt) and string.format("%.2f", learnedAt - madeAt) or "?"))
+    allErrors(s)
+
     -- In PvP the figure plays their abilities (M), which make their own sounds: nothing from here.
     s, h, g = pair(ON .. "PvP = On\n", both)
     Session.hold(g, SWORD, true)
@@ -16080,6 +16100,20 @@ local function watchingTogether()
     check(count(h.sent, "^E SCENE skip") == 0, "watched to its end by both: no skip is told")
     allErrors(s)
 
+    -- The host skips while the guest's, begun later, is still played faster: ended at its own speed, the faster one not
+    -- left on a player the game uses again (404: the eleventh review).
+    local k, kh, kg = pair()
+    local kstep, kbegun = boxes(k, "Seq014")
+    Session.moveTo(kh, SPOT.X, SPOT.Y)
+    k:run(4.9, kstep)
+    local kfast = rate(kg)
+    Session.scene(kh, false)
+    k:run(1)
+    check(kbegun[kg] == true and kfast > 1 and field(kg.scene, "skipped") == 1 and rate(kg) == 1,
+        "the host skips while the guest's is still played faster (" .. tostring(kfast) .. "): it ends at its own speed ("
+            .. tostring(rate(kg)) .. ")")
+    allErrors(k)
+
     -- The other way round: the guest steps in, the host 15 m back.
     local t, th, tg = pair()
     local tstep, tbegun = boxes(t, "Seq014")
@@ -16151,6 +16185,11 @@ local function watchingTogether()
         Fake.storyBox(ug, SPOT.X + 800, SPOT.Y, 100, 8)
         Fake.storyBox(ug, SPOT.X - 800, SPOT.Y, 100, 9)
     end)
+    left("the only box in reach an arena's, its side 10 m from the spot and its middle 40: another scene's, nobody is set down in it",
+        function(_, _, ug, ubox)
+            rawset(ubox[ug], "__alive", false)
+            Fake.storyBox(ug, SPOT.X + 4000, SPOT.Y, 100, 8, 3000)
+        end)
     left("with no ground under the box's spot in their world, they're left", function(_, _, ug)
         ug.noFloor = function() return true end
     end)
@@ -16218,7 +16257,41 @@ local function watchingTogether()
         "a boss both games start in the same moment: the host's fight stays the host's own")
     check(net(bg).partnerBosses["sp:boss"] == true and net(bg).hostBosses["sp:boss"] == true,
         "and it's the host's fight in the guest's world, as when the host began first")
+    check(count(bg.logs, "press E at the black wall") == 0 and count(bh.logs, "press E at the black wall") == 0,
+        "neither is told to press E at a black wall they stand inside, the guest's own game having begun it too")
     allErrors(b)
+
+    -- With three, each guest hears the host's start and then the other guest's, through the host (404: the review of
+    -- 401). Filed as that guest's, their drop took this player's own bar down and opened its walls mid-fight, the
+    -- host and this player still in it.
+    local b3 = party(nil, nil, { "Host", "Guest", "Guest" })
+    Session.moveTo(b3.pcs[1], 0, 0)
+    Session.moveTo(b3.pcs[2], 500, 0)
+    Session.moveTo(b3.pcs[3], 0, 500)
+    b3:run(3)
+    for _, pc in ipairs(b3.pcs) do
+        pc.hudLayout:RegisterBossHPBar(Session.enemyOn(pc, "boss"))
+    end
+    b3:run(2)
+    local ba, bb = b3.pcs[2], b3.pcs[3]
+    -- (The other guest's word after the host's, as it comes over a real link, through the host; and as each fighter
+    -- tells their fight again when someone joins.)
+    b3.relay:post(bb, "sure", "B sp:boss")
+    b3:run(0.5)
+    local function bars(pc)
+        return #pc.env.PBZ.game.bossActors()
+    end
+    check(net(ba).fightOf["sp:boss"] == 1 and net(bb).fightOf["sp:boss"] == 1 and bars(ba) == 1 and bars(bb) == 1
+        and #net(b3.pcs[1]).ownBosses() == 1,
+        "three whose games start a boss in the same moment: in each guest's world it's the host's fight, not the other guest's ("
+            .. tostring(net(ba).fightOf["sp:boss"]) .. ", " .. tostring(net(bb).fightOf["sp:boss"]) .. ")")
+    bb.cut = true
+    b3:run(14)
+    check(count(ba.logs, "Lost player 3") == 1 and bars(ba) == 1 and net(ba).partnerBosses["sp:boss"] == true
+        and net(ba).fightOf["sp:boss"] == 1,
+        "and the other guest's drop takes nothing of it down: this player's own bar stays up (" .. bars(ba)
+            .. "), the host's fight still shown")
+    allErrors(b3)
 
     -- A scene played faster ends that much sooner by the clock: the host's own, caught up by some five seconds, isn't
     -- told as skipped at its end.
@@ -16506,6 +16579,22 @@ local function bellsTogether()
         "a partner whose game takes no ring just now keeps the bell for their own, and it's said")
     allErrors(r)
 
+    -- Nor is a ring asked over something that partner is using now, the same bell by their own E among it: its walk
+    -- up takes 2 s before the first touch, and a ring asked in it was a second one (404: the eleventh review).
+    local i, ih, ig = pair()
+    ih.groundTraces, ig.groundTraces = true, true
+    Session.moveTo(ig, 1700, 0)
+    Session.moveTo(ih, 600, 0)
+    i:run(2)
+    local comp = ig.interactComps[1]
+    Fake.put(comp, "InteractingActor", ig.bell)
+    pressE(ih)
+    i:run(1.5)
+    check(woken(ih) and not woken(ig) and ig.bellTouches == nil and #field(comp, "used") == 0
+        and count(ig.logs, "took no ring for you just now %(you were using something%)") == 1,
+        "a partner using something of their own just now isn't rung for: the game isn't even asked, and it's said")
+    allErrors(i)
+
     -- Left as it was: a partner 50 m off, one whose world has it woken, one in a boss fight of their own, one on
     -- another map, anyone with WatchTogether off.
     local function left(why, before, ini, rungAlready)
@@ -16783,6 +16872,188 @@ local function restartWithOldLines()
     x:run(0.5)
     check(field(thug, "dead") == true and count(xh.sent, "^E K sp:near$") == 1, "one read past it: its death, told")
     allErrors(x)
+
+    -- A killing blow told in a gap of the guest's link (404: the tenth review's run-checkers, and the review of 401).
+    -- No refresh at all. The host down and held, the boss at a tenth; the guest's link goes quiet, its game runs on,
+    -- and it brings its copy to its floor, lifted back to the host's last line each second: plain blows and killing
+    -- blows wait in the relay. With the guest's figure silent the host's game makes its boss whole again by itself
+    -- (the bench, run223), here a twentieth of his health a second from 3 s in. The link back after 9 s, the boss at
+    -- two fifths: under the half where the rule by the blow holds, and the first killing blow read was his end.
+    local q, qh, qg = pair()
+    bossStart(q)
+    local qboss, qcopy = Session.enemyOn(qh, "boss"), Session.enemyOn(qg, "boss")
+    local qmost = select(2, Fake.health(qboss))
+    swing(qg, qcopy, hpOf(qcopy) - 50)
+    q:run(5)
+    Session.die(qh)
+    qh.hudLayout:UnRegisterBossHPBar(qboss)
+    q:run(6)
+    Fake.setHealth(qboss, qmost * 0.1)
+    q:run(3)
+    check(field(qh.deathWidget, "NotTick") == true and math.abs(hpOf(qcopy) - qmost * 0.1) < 1,
+        "(the host down and held in the guest's fight, the boss at a tenth in both worlds)")
+    qg.sent = {}
+    local press, heal = qh.now + 0.3, qh.now + 3.0
+    qg.cut = true
+    q:run(9, function()
+        if qh.now >= press then
+            press = qh.now + 0.5
+            if hpOf(qcopy) > 1.01 then
+                swing(qg, qcopy, math.max(1, hpOf(qcopy) - 150))
+            end
+        end
+        if qh.now >= heal then
+            heal = qh.now + 0.5
+            Fake.setHealth(qboss, math.min(qmost, hpOf(qboss) + qmost * 0.025))
+        end
+    end)
+    local qtold, qback = count(qg.sent, "^E D sp:boss %S+ %S+ L"), hpOf(qboss)
+    qg.cut = false
+    q:run(3)
+    check(qtold >= 2 and qback < qmost / 2 and field(qboss, "dead") ~= true and count(qh.sent, "^E K sp:boss$") == 0
+        and count(qh.logs, "Beaten in this world too") == 0 and count(qh.logs, "was told in a gap of theirs") >= 2,
+        "killing blows told in a 9 s gap of the guest's link, the host's game having healed its boss meanwhile ("
+            .. string.format("%.0f of %.0f", qback, qmost) .. " as the link came back, " .. qtold
+            .. " waiting): plain blows, he stands (" .. string.format("%.0f", hpOf(qboss)) .. ")")
+    check(count(qh.sent, "^E LR sp:boss ") >= 1 and net(qg).lethalPending["sp:boss"] == nil
+        and math.abs(hpOf(qcopy) - hpOf(qboss)) < 1,
+        "each is answered with what he has there: the guest's game tells none again, and its copy takes that ("
+            .. string.format("%.0f", hpOf(qcopy)) .. ")")
+    swing(qg, qcopy, 1)
+    q:run(2)
+    check(field(qboss, "dead") == true and count(qh.sent, "^E K sp:boss$") == 1,
+        "and the next killing blow, struck with the link up, is his end")
+    allErrors(q)
+
+    -- The gap that ends the host's hold. The host down and held, the boss low; the guest's link quiet for 18 s. At
+    -- 12 s the host takes the guest for gone, its hold lets go, it respawns by the arena and its world refreshes: a
+    -- new body, whole. The guest's queue of that gap, read as the link comes back: its plain blows took the new body
+    -- under half, and a killing blow struck at the old one's floor was then the new one's end. None of it is taken:
+    -- all of it was struck at the body that's gone. What the guest strikes once it has heard of the refresh is.
+    local o, oh, og = pair()
+    bossStart(o)
+    local oboss, ocopy = Session.enemyOn(oh, "boss"), Session.enemyOn(og, "boss")
+    local omost = select(2, Fake.health(oboss))
+    swing(og, ocopy, hpOf(ocopy) - 50)
+    o:run(5)
+    Fake.setHealth(oboss, 900)
+    o:run(2)
+    Session.die(oh)
+    oh.hudLayout:UnRegisterBossHPBar(oboss)
+    o:run(6)
+    newAtRefresh(oh, oboss)
+    newAtRefresh(og, ocopy)
+    og.sent = {}
+    local nextAt, letGoAt, respawned, rAt = 0, nil, false, nil
+    og.cut = true
+    o:run(18, function()
+        if og.now >= nextAt then
+            nextAt = og.now + 0.5
+            if hpOf(ocopy) > 1.5 then
+                swing(og, ocopy, math.max(1, hpOf(ocopy) - 250))
+            end
+        end
+        if not letGoAt and field(oh.deathWidget, "NotTick") ~= true then
+            letGoAt = oh.now
+        end
+        if letGoAt and not respawned and oh.now >= letGoAt + 2.0 then
+            respawned = true
+            Session.moveTo(oh, 2200.0, 2200.0)      -- (its bell, 11 m from the boss: the new body is in its reach)
+            Session.respawned(oh)
+            Session.revive(oh)
+        end
+        rAt = rAt or (count(oh.sent, "^E R death") > 0 and oh.now or nil)
+    end)
+    local otold, onew = count(og.sent, "^E D sp:boss %S+ %S+ L"), hpOf(oboss)
+    og.cut = false
+    o:run(1.5)
+    check(rAt ~= nil and onew == omost and otold >= 2 and field(oboss, "dead") ~= true
+        and count(oh.sent, "^E K sp:boss$") == 0 and count(oh.logs, "Beaten in this world too") == 0,
+        "killing blows told in an 18 s gap, the host's hold let go and its world refreshed inside it (" .. otold
+            .. " waiting): the new body isn't ended by the old one's (" .. string.format("%.0f of %.0f", hpOf(oboss), omost) .. ")")
+    check(hpOf(oboss) == omost and count(oh.logs, "this world refreshed meanwhile, is of what's gone") == 1,
+        "nor does it take the plain blows of that gap, struck at the old one: whole, and said once ("
+            .. string.format("%.0f of %.0f", hpOf(oboss), omost) .. ")")
+    o:run(1)
+    local ohad = hpOf(ocopy)
+    swing(og, ocopy, ohad - 250)
+    o:run(1)
+    check(ohad == omost and hpOf(oboss) == omost - 250,
+        "a blow the guest strikes after it has heard of the refresh, its copy whole too, is taken ("
+            .. string.format("%.0f", hpOf(oboss)) .. ")")
+    allErrors(o)
+
+    -- Not a hiccup: a killing blow told 0.6 s into a gap of 2.5 s is his end as the link comes back.
+    local c, ch, cg = pair()
+    bossStart(c)
+    local cboss, ccopy = Session.enemyOn(ch, "boss"), Session.enemyOn(cg, "boss")
+    swing(cg, ccopy, hpOf(ccopy) - 50)
+    c:run(3)
+    Fake.setHealth(cboss, 300)
+    c:run(3)
+    local cutAt, fellAt = ch.now, nil
+    cg.cut = true
+    c:run(0.6)
+    swing(cg, ccopy, 1)
+    c:run(1.9)
+    cg.cut = false
+    c:run(3, function()
+        fellAt = fellAt or (field(cboss, "dead") == true and ch.now or nil)
+    end)
+    check(fellAt ~= nil and fellAt - cutAt < 3.5 and count(ch.logs, "was told in a gap of theirs") == 0,
+        "a killing blow across a hiccup of 2.5 s still lands as the link comes back ("
+            .. (fellAt and string.format("%.1f s after it began", fellAt - cutAt) or "never") .. ")")
+    allErrors(c)
+
+    -- The host's answer to a killing blow, read after the copy was let go by another way than a refresh: the host
+    -- up at a boss its game holds at a floor of its own walks off, its lines of him run out, and the copy stands whole
+    -- again, this game's own. An answer still on its way put that copy at 2 with no floor: the next blow was his
+    -- death in the guest's world alone (the tenth review's V6). The blow is struck a few frames before the release
+    -- (found by a first run), at each of several: none leaves the copy low.
+    local function walksOff(off, relFrame)
+        local s, h, g, _, copy = stopped()
+        local from, frame, rel, swung = #g.logs, 0, nil, false
+        Session.moveTo(h, 90000.0, 0.0)
+        s:run(4.0, function()
+            frame = frame + 1
+            if not rel then
+                for i = from + 1, #g.logs do
+                    rel = rel or (g.logs[i]:find("was let go at the floor it was held at", 1, true) and frame or nil)
+                end
+            end
+            if relFrame and not swung and frame >= relFrame - off then
+                swung = true
+                swing(g, copy, 1)
+            end
+        end)
+        local written = 0
+        for i = from + 1, #g.logs do
+            written = written + (g.logs[i]:find("The host didn't take the killing blow on sp:boss", 1, true) and 1 or 0)
+        end
+        local before = hpOf(copy)
+        if relFrame then
+            swing(g, copy, math.max(0, hpOf(copy) - 400))
+            s:run(1.5)
+        end
+        return { s = s, rel = rel, before = before, written = written, dead = g.env.PBZ.game.isDead(copy) == true,
+            gk = count(g.sent, "^E GK sp:boss") }
+    end
+    local dry = walksOff(0, nil)
+    local low, tried = nil, 0
+    if dry.rel then
+        for off = 1, 10 do
+            local r = walksOff(off, dry.rel)
+            tried = tried + 1
+            if r.dead or r.gk > 0 or r.before < most * 0.9 then
+                low = low or string.format("a blow %d frames before the release: copy %.0f, dead %s, GK %d, answers written %d",
+                    off, r.before, tostring(r.dead), r.gk, r.written)
+            end
+            allErrors(r.s)
+        end
+    end
+    check(dry.rel ~= nil and tried == 10 and low == nil,
+        "the host's answer to a killing blow, read after his copy was let go whole, isn't written on it: no death by the next blow ("
+            .. tostring(low or "none in 10 timings") .. ")")
 end
 
 -- The ninth review (d0412af..50221b8, 383-386): what it found, each with a check of its own.
@@ -17178,6 +17449,21 @@ local function thePlayLog()
         and has(text, "files in c:\\users\\<user>\\x and Z:\\home\\<user>\\.steam\\y and /run/media/<user>/games/z")
         and not has(text, "Some Friend") and not has(text, "somebody") and not has(text, "hosts-pc") and not has(text, "tailnet"),
         "nor a partner's Steam name, a host's name, a user's folder in any case, a Linux login")
+    -- A name can begin with "<" ("<3 Sakura", a clan's "<WB> Kenji"), or with digits an address's rule rewrote: taken
+    -- for one of the mask's own words, it was written as it is (the tenth review). The relay writes a name's spaces
+    -- as _. An address's kind and "<Steam ID>" are still left as they are.
+    h.env.PBZ.log("role=client via=steam connected=yes peer=<3_Sakura rtt_ms=31 route=relay")
+    h.env.PBZ.log("role=client via=steam connected=yes peer=1.2.3.4Aiko rtt_ms=32 route=relay")
+    h.env.PBZ.log("Online panel: Connected to <WB>_Kenji. Ping 41 ms. Route: relay.")
+    h.env.PBZ.log("Online panel: Connected to <Clan>Bob.")
+    h.env.PBZ.log("Online panel: Connected to 192.168.1.20. Ping 3 ms.")
+    h.env.PBZ.log("Online panel: Connected to 76561198000000003.")
+    text = logOf(h)
+    check(not has(text, "Sakura") and not has(text, "Aiko") and not has(text, "Kenji") and not has(text, "Bob")
+        and has(text, " peer=<a Steam friend> rtt_ms=31 route=relay\n") and has(text, " peer=<a Steam friend> rtt_ms=32 route=relay\n")
+        and has(text, "Connected to <the partner>. Ping 41 ms. Route: relay.") and has(text, "Online panel: Connected to <the partner>.\n")
+        and has(text, "Connected to <home network address>. Ping 3 ms.") and has(text, "Online panel: Connected to <Steam ID>.\n"),
+        "nor a partner's name that begins with \"<\", or with an address: only the mask's own words are left as they are")
     -- How the game stands, every ten seconds.
     s:run(11)
     text = logOf(h)
