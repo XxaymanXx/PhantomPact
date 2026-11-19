@@ -141,6 +141,8 @@ PlayStation pads need these steps, with one pad or two. Without them the game se
 
 Xbox pads shouldn’t need any of this, but we haven’t tested them yet.
 
+[b]If both pads move player 1[/b], or one pad moves both players, the game still sees the real PlayStation pads: in HidHide tick both pads and [b]Enable device hiding[/b], with DS4Windows.exe under [b]Applications[/b]; in DS4Windows check the [b]Ex[/b] tick for each pad; keep Steam Input off; then restart the game. The keyboard and mouse can only be player 1’s: the game ties its menus and the F4 panel to player 1’s keyboard.
+
 [b]3. Play[/b]
 Start the game and press CONTINUE. Player 2 appears beside you within a few seconds. Press [b]F4[/b], hold a button on each pad to light up its card, drag the cards onto the players and press [b]APPLY[/b]. The zip’s [b]Phantom Pact - LOCAL CO-OP.md[/b] has player 2’s controls.
 

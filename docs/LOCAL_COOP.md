@@ -20,7 +20,8 @@ played through all ten regions of the story with player 2's presses injected, an
 
 Player 2 shares player 1's save, backpack, dust and gourd count, and rests at the same bells, but wears and holds their
 own: see "Player 2's own gear" below. Player 2 cannot die for good: at zero health they are down for a while and come back
-beside player 1.
+beside player 1, where there's floor: to player 1's right, else their left, behind or in front of them, else on player 1's
+own spot. So a comeback by a cliff's edge never puts player 2 over the drop.
 
 ## Player 2's own gear
 
@@ -85,8 +86,20 @@ APPLY stays grey while a player's slot is empty, or their card is a pad Windows 
 or a PlayStation pad without DS4Windows): click it and a line says which player it waits for. Changing only the screen
 layout or the monitors never waits for a pad.
 
-Xbox pads shouldn't need any of this, but they haven't been tested. Keyboard and mouse for player 1 with a pad for
-player 2 also works: drag the Keyboard & Mouse card onto player 1 in the same panel.
+Two layouts work: a pad for each player, or the keyboard and mouse for player 1 with a pad for player 2 (drag the
+Keyboard & Mouse card onto player 1 in the same panel). The keyboard and mouse can't be player 2's: the game ties its
+menus, its map and the F4 panel to player 1's keyboard, so a pad on player 1 with the keyboard on player 2 leaves
+some of each player's controls on the other.
+
+If both pads move player 1, or one pad moves both players, the game is still seeing the real PlayStation pads:
+
+- In HidHide, both pads ticked on the Devices tab, Enable device hiding on, and `DS4Windows.exe` under Applications.
+- In DS4Windows, a tick in the Ex column for each pad.
+- Steam Input off for the game.
+- Then restart the game. In F4, holding a button on a pad lights up its own card; a pad that lights no card isn't
+  reaching the game as an Xbox pad, and one that lights the other's card is the other one.
+
+Xbox pads shouldn't need any of this, but they haven't been tested.
 
 Online co-op needs none of this. If your pads stop working in other games, turn off Enable device hiding in HidHide. A
 game update can break two-pad play until the mod is updated, because it depends on the game's exact build.
