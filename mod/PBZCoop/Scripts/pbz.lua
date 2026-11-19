@@ -4739,6 +4739,18 @@ return function(api)
     -- rung from here: its first ring, with its scene and the story's steps, stays the player's own. Says "rung"
     -- when the game took the ring, "refused" and why when it didn't (busy with something of their own: the bell
     -- stays theirs to ring).
+    -- Whether this player is using something just now, a chest, a lever, a bell by their own E: their interact
+    -- component has an actor in hand (nothing when idle, the bell while its menu is up: the bench, run230, run236).
+    function game.usingSomething(pawn)
+        local busy = false
+        pcall(function()
+            local class = StaticFindObject("/Script/ProjectPBZ.PBZInteractComponent")
+            local ic = valid(pawn) and valid(class) and pawn:GetComponentByClass(class) or nil
+            busy = valid(ic) and valid(ic:GetInteractingActor())
+        end)
+        return busy
+    end
+
     function game.bellAt(x, y, z, pawn)
         local out, why = nil, nil
         for _, b in ipairs(FindAllOf("MelodiousBell") or {}) do
@@ -7434,7 +7446,8 @@ return function(api)
     -- it, its middle too (a player runs on a few metres in the 2 s before the scene: out of a small box. A big one
     -- still holds whoever its scene is for, and one only near its side is another's: a talk's scene told 10 m outside
     -- an arena's box set the partner down in it, the boss's scene and fight begun in their world alone. The eleventh
-    -- review). The spot is the place itself where the box
+    -- review. Such a one isn't counted either: beside it, the one small box by the place is still the only one in
+    -- reach). The spot is the place itself where the box
     -- holds it, else the box's nearest point a pace inside. With two or more in reach and not just one holding the
     -- place: nil, and how many (in Zhengdaodaying's underground they stand 6 to 12 m apart: nobody is set down on a
     -- guess). A world that has played a scene mostly has no box for it, but one can stay (run101). The eleventh
@@ -7461,7 +7474,7 @@ return function(api)
                 local ox, oy = math.max(math.abs(lx) - ex.X, 0), math.max(math.abs(ly) - ex.Y, 0)
                 local oz = math.max(math.abs(dz) - ex.Z, 0)
                 local out = math.sqrt(ox * ox + oy * oy + oz * oz)
-                if out > cm then
+                if out > cm or (out > 0 and math.sqrt(dx * dx + dy * dy + dz * dz) > cm) then
                     return
                 end
                 n = n + 1
@@ -7475,8 +7488,7 @@ return function(api)
                 end
                 local spot = { X = l.X + px * math.cos(yaw) - py * math.sin(yaw),
                     Y = l.Y + px * math.sin(yaw) + py * math.cos(yaw),
-                    Z = out > 0 and math.max(l.Z - ex.Z, math.min(l.Z + ex.Z, z)) or z, out = out,
-                    far = math.sqrt(dx * dx + dy * dy + dz * dz) > cm }
+                    Z = out > 0 and math.max(l.Z - ex.Z, math.min(l.Z + ex.Z, z)) or z, out = out }
                 if out == 0 then
                     holds[#holds + 1] = spot
                 end
@@ -7488,7 +7500,7 @@ return function(api)
         if #holds == 1 then
             return holds[1], n
         end
-        if n == 1 and not near.far then
+        if n == 1 then
             return near, n
         end
         return nil, n

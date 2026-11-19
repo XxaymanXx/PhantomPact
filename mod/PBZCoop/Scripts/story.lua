@@ -1135,6 +1135,11 @@ return function(api)
             or (game.inPrologue and game.inPrologue()) then
             return false, "you were in a talk or a scene's own step"
         end
+        -- (Using something just now, a chest, a lever, a bell by their own E: not moved out of it. game.bellAt asks
+        -- the same before it rings, but by then joinBell had set the player down by the ringer.)
+        if game.usingSomething and game.usingSomething(pawn) then
+            return false, "you were using something"
+        end
         local busy = true
         pcall(function()
             busy = pawn.CharacterMovement.MovementMode ~= 1         -- (walking: on their feet)

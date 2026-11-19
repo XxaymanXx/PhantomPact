@@ -16190,6 +16190,9 @@ local function watchingTogether()
             rawset(ubox[ug], "__alive", false)
             Fake.storyBox(ug, SPOT.X + 4000, SPOT.Y, 100, 8, 3000)
         end)
+    left("one using something just now, a chest say, is left: not pulled out of it", function(_, _, ug)
+        Fake.put(ug.interactComps[1], "InteractingActor", ug.pawn)
+    end)
     left("with no ground under the box's spot in their world, they're left", function(_, _, ug)
         ug.noFloor = function() return true end
     end)
@@ -16227,6 +16230,25 @@ local function watchingTogether()
         and count(zg.logs, "set down in the story's box for it") == 1,
         "a box 60 m across, its middle 25 m from where the host stood: the guest is set down where the host stood, in it")
     allErrors(z)
+
+    -- An arena's box only near its side isn't counted among the boxes in reach: beside it, the one small box by the
+    -- place, which the host ran a few metres past, is still the only one, and the guest is set down in it (405).
+    local n, nh, ng = pair()
+    for _, pc in ipairs(n.pcs) do
+        pc.scene = pc.scene or Fake.sceneManager(pc)
+        pc.groundTraces = true
+    end
+    Fake.storyBox(ng, 2800, 0, 100, 8)              -- (a 6 m box, its middle 8 m past where the host stood)
+    Fake.storyBox(ng, -2000, 0, 100, 9, 3000)       -- (an arena's: its side 10 m from that spot, its middle 40)
+    n:run(2.5)
+    Session.moveTo(nh, 2000, 0)
+    n:run(1)
+    Session.scene(nh, true, "Seq021")
+    n:run(1.5)
+    check(count(ng.logs, "set down in the story's box for it") == 1 and math.abs(at(ng.pawn).X - 2600) < 10,
+        "a small box 5 m from where the host stood and an arena's 10 m from it by its side: the guest is set down in the small one ("
+            .. string.format("%.0f", at(ng.pawn).X) .. ")")
+    allErrors(n)
 
     -- The same scene come to on one's own, long after a partner, isn't chased.
     local y, yh, yg = pair()
@@ -16589,10 +16611,13 @@ local function bellsTogether()
     local comp = ig.interactComps[1]
     Fake.put(comp, "InteractingActor", ig.bell)
     pressE(ih)
-    i:run(1.5)
+    i:run(8)
+    -- (Nor moved to the ringer's side first, 11 m off: set down and then refused, they were pulled out of what they
+    -- were using. 405.)
     check(woken(ih) and not woken(ig) and ig.bellTouches == nil and #field(comp, "used") == 0
-        and count(ig.logs, "took no ring for you just now %(you were using something%)") == 1,
-        "a partner using something of their own just now isn't rung for: the game isn't even asked, and it's said")
+        and math.abs(at(ig.pawn).X - 1700) < 1
+        and count(ig.logs, "first ring of a bell near you: you were using something") == 1,
+        "a partner using something of their own just now is neither moved nor rung for: the game isn't even asked, and it's said")
     allErrors(i)
 
     -- Left as it was: a partner 50 m off, one whose world has it woken, one in a boss fight of their own, one on
