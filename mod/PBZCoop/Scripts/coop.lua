@@ -3228,11 +3228,15 @@ return function(api)
                 local wasAlive = not (game.isDead and game.isDead(actor))
                 local boss = net.partnerBosses[name] or (game.isBoss and game.isBoss(actor))
                 local before, most = game.getHealth(actor)
-                -- (A killing blow on a boss with more than half its health left here, this world's bodies new within
-                -- NEW_BODY_S: of the body that's gone, read past net.lateKill's half second, the guest's word of the
-                -- refresh late and the blow told again. A plain blow, and LR says what this one has.)
-                if lethal == "L" and boss and before and most and before > most / 2
-                    and os.clock() - (net.worldNewAt or -1e9) < net.NEW_BODY_S then
+                -- (A killing blow on a boss with more than half its health left here, by a blow that took less than
+                -- half of what it has: of a body that's gone. The sender's copy stood at its floor, and this one is
+                -- whole again: by this world's refresh, read past net.lateKill's half second; by a sit's reset
+                -- (net.sitBossesToFull); by the game's own, a boss that lost its target (the bench, run223: 2 back to
+                -- 27680 with no refresh at all). By the blow, not by a clock from the refresh: a guest whose link went
+                -- quiet for longer than any window kept striking its copy at 2, the relay sent those killing blows as
+                -- the link came back, and the whole boss died (REVIEW-10). A plain blow, and LR says what this one
+                -- has. One that took it whole is still its end.)
+                if lethal == "L" and boss and before and most and before > most / 2 and told < before / 2 then
                     log(string.format("Partner's killing blow on %s isn't one here: it has %.0f of %.0f. A plain blow.", name, before, most))
                     amount, finisher = told, false
                 end
@@ -3891,7 +3895,7 @@ return function(api)
             net.partnerBosses[name], net.hostBosses[name], net.fightOf[name] = s.p, s.h, s.f
             net.pendingBosses[name] = true
         end
-        net.killsFrom, net.worldNewAt = link.now() + net.LINES_AFTER_S, os.clock()      -- (net.lateKill)
+        net.killsFrom = link.now() + net.LINES_AFTER_S      -- (net.lateKill)
         sendEvent("R", kind)
     end
 
@@ -3902,11 +3906,11 @@ return function(api)
     -- guest striking: a copy at 2 is struck till the word comes. The tenth review, on the base too). From this
     -- world's refresh (pbz.lua's game.refreshedHere, half a second before R is told, a load's stall longer: for
     -- REFRESH_TOLD_S at most) till LINES_AFTER_S after R has gone, the twin of a guest's half second
-    -- (net.dropHostLines): a plain blow then, and a real one is told again and taken. For NEW_BODY_S from the refresh
-    -- (net.worldNewAt) a killing blow on a boss with more than half its health left here is a plain blow too: one told
-    -- again by a guest whose word of the refresh came late (LETHAL_TRIES of them, LETHAL_AGAIN_S apart), and no boss
-    -- is brought from whole to its end in that time.
-    net.REFRESH_TOLD_S, net.NEW_BODY_S = 60.0, 10.0
+    -- (net.dropHostLines): a plain blow then, and a real one is told again and taken. (A boss has a rule of its own
+    -- besides, for all time, in handlers.D: a killing blow on one with more than half its health, by a blow that took
+    -- less than half of that, is a plain blow. For a day it was a clock, ten seconds from the refresh: a link quiet
+    -- for longer than that sent the old body's killing blows after it. REVIEW-10.)
+    net.REFRESH_TOLD_S = 60.0
     function net.lateKill()
         if not isHost() then
             return false
@@ -4045,7 +4049,7 @@ return function(api)
         if game.refreshEnemies and not elsewhere then
             game.refreshEnemies()
             if isHost() then
-                net.killsFrom, net.worldNewAt = link.now() + net.LINES_AFTER_S, os.clock()      -- (net.lateKill)
+                net.killsFrom = link.now() + net.LINES_AFTER_S      -- (net.lateKill)
             end
         end
         if isHost() and net.party and from and not elsewhere then
@@ -4648,6 +4652,21 @@ return function(api)
         -- (Told again, by the same player, and shown here already: a newcomer's J has every fighter tell their fight.)
         if net.partnerBosses[name] and (not net.party or net.fightOf[name] == (from or 1)) then
             return
+        end
+        -- (Host: a fight this game has started itself, its own bar up on that boss, stays this game's own. Two players
+        -- whose scenes end together each tell their start in the same moment (398 makes that the common case: the
+        -- bench, 11-19, run225, the two starts 0.8 ms apart), and filed here as the guest's, the host's own fight was
+        -- nobody's: that guest's F 0 takes the host's bar down and opens its walls mid-fight, and a guest's rest
+        -- refreshes the host's world (announceBoss, where the same is put right for a guest who began first).)
+        if isHost() then
+            local own = enemyByName[name]
+            if valid(own) and not game.isDead(own) and game.bossAt and game.bossAt(own:GetAddress(), own)
+                and not (game.isMirrorBar and game.isMirrorBar(own)) then
+                net.bossesSeen = net.bossesSeen or {}
+                net.bossesSeen[name] = true     -- (any sit puts it back to full health: net.sitBossesToFull)
+                log("The other player started a boss fight with " .. name .. " as this game did: it stays this game's own.")
+                return
+            end
         end
         log("The other player started a boss fight with " .. name .. ".")
         -- (The host's word only. Another guest's fight, passed on by the relay, isn't the host's: taken for it, it stayed

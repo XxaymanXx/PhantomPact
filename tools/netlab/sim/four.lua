@@ -16295,6 +16295,20 @@ local function watchingTogether()
         "the same scene begun 20 s after a partner's, on this player's own: not played faster to chase theirs")
     allErrors(y)
 
+    -- Their scenes ending together, both games start the boss in the same moment and each tells it (the bench, run225:
+    -- 0.8 ms apart). The host's fight stays the host's own: filed as the guest's, that guest's F 0 took the host's bar
+    -- down mid-fight (402).
+    local b, bh, bg = pair()
+    bh.hudLayout:RegisterBossHPBar(Session.enemyOn(bh, "boss"))
+    bg.hudLayout:RegisterBossHPBar(Session.enemyOn(bg, "boss"))
+    b:run(2)
+    check(#net(bh).ownBosses() == 1 and net(bh).partnerBosses["sp:boss"] == nil
+        and count(bh.logs, "as this game did: it stays this game's own") == 1,
+        "a boss both games start in the same moment: the host's fight stays the host's own")
+    check(net(bg).partnerBosses["sp:boss"] == true and net(bg).hostBosses["sp:boss"] == true,
+        "and it's the host's fight in the guest's world, as when the host began first")
+    allErrors(b)
+
     -- A scene played faster ends that much sooner by the clock: the host's own, caught up by some five seconds, isn't
     -- told as skipped at its end.
     local v, vh, vg = pair()
@@ -16617,6 +16631,16 @@ local function restartWithOldLines()
         and count(wh.logs, "isn't one here: it has") == 1,
         "nor one told again seconds later: a boss with more than half his health isn't ended by a killing blow ("
             .. tostring(hpOf(wboss)) .. ")")
+    -- (Nor long after: a guest's link quiet for longer than any window, its blows at the old one's floor sent as it
+    -- came back. By the blow, not by a clock from the refresh: REVIEW-10.)
+    w:run(14)
+    for _ = 1, 3 do
+        w.relay:post(wg, "sure", blow)
+    end
+    w:run(1)
+    check(field(wboss, "dead") ~= true and hpOf(wboss) >= wmost * 0.9 and count(wh.sent, "^E K sp:boss$") == 0
+        and count(wh.logs, "Beaten in this world too") == 0,
+        "nor ones that come a quarter of a minute on, held by a quiet link: the whole boss stands (" .. tostring(hpOf(wboss)) .. ")")
     allErrors(w)
 
     -- Any enemy's, in that half second (a thug's by the host's bell); and past it a killing blow is one, as ever.

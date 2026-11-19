@@ -254,7 +254,8 @@ Not in PvPvE yet: executions (posture break only staggers). It's for two players
   when you're about to start one: far from the host, enemies that aren't loaded on the host's PC fight on their own on the
   guest's. Scenes are watched together: when a scene begins for one of you and the other stands within 30 m with that
   scene still ahead of them, they're set down at its start and it plays for both, the later one a touch faster till
-  the two are at the same moment. Further off, a story boss's opening scene is each player's own: it may play for you
+  the two are at the same moment. Only the host's skip ends a scene for both; a guest's skip ends their own. Further
+  off, a story boss's opening scene is each player's own: it may play for you
   as you go in, while the fight goes on. `WatchTogether = Off` in PhantomPact.ini keeps scenes and bells each
   player's own.
 - If your partner disappears, they are down, in a cutscene, on another map or disconnected; they come back.
