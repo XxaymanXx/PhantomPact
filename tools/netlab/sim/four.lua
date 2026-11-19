@@ -16265,6 +16265,16 @@ local function bellsTogether()
     local function woken(pc)
         return field(pc.bell, "active") == true and has(pc.bellIds, "Bell_Sim_001")
     end
+    -- (E at the bell: the player's own interact component, as the game's button asks it.)
+    local function pressE(pc)
+        return field(pc.pawn, "interact"):DoInteract(pc.bell)
+    end
+    local function where(pc)
+        return pc.env.PBZ.game.scenePos() or -1
+    end
+    local function rate(pc)
+        return field(pc.scene, "rate")
+    end
 
     -- The host rings it, the guest 10 m off.
     local s, h, g = pair()
@@ -16272,12 +16282,17 @@ local function bellsTogether()
     Session.moveTo(g, 1700, 0)
     Session.moveTo(h, 600, 0)
     s:run(2)
-    h.bell:OnInteract(h.pawn)
+    pressE(h)
     s:run(1.5)
-    check(woken(h) and count(h.sent, "^E BELL ring 700 0 100 600 0 %S+ %S+$") == 1,
+    check(woken(h) and h.bellTouches == 1 and count(h.sent, "^E BELL ring 700 0 100 600 0 %S+ %S+$") == 1,
         "the host's first ring of a bell is told with where the bell stands and where the host stood")
     check(woken(g) and count(g.logs, "rung in this world too") == 1 and gap(at(g.pawn), BELL) < 400,
         "the guest, 10 m off, is set down by it and its world's bell rung for it: woken there too, the game's own ring")
+    -- (403. The bench, run228: rung by the bell's own OnInteract from the mod, the partner's bell was woken with no
+    -- first touch. By the player's own interact component, as E: run230, its first touch 2.8 s after the ringer's.)
+    check(g.bellTouches == 1 and has(field(field(g.pawn, "interact"), "used"), g.bell),
+        "by the guest's own interact component, as E rings it: with its first touch there ("
+            .. tostring(g.bellTouches) .. ")")
     check(count(g.sent, "^E BELL ring") == 0, "and that ring isn't told back")
     allErrors(s)
 
@@ -16286,11 +16301,210 @@ local function bellsTogether()
     th.groundTraces, tg.groundTraces = true, true
     Session.moveTo(tg, 600, 0)
     t:run(2)
-    tg.bell:OnInteract(tg.pawn)
+    pressE(tg)
     t:run(1.5)
-    check(woken(tg) and woken(th) and count(th.logs, "rung in this world too") == 1,
-        "the guest's first ring with the host by: rung in the host's world too")
+    check(woken(tg) and woken(th) and count(th.logs, "rung in this world too") == 1 and th.bellTouches == 1,
+        "the guest's first ring with the host by: rung in the host's world too, with its first touch")
     allErrors(t)
+
+    -- A bell with a scene of its own, a crane's. The bench, run230: rung for a partner by their interact component,
+    -- its first touch came and then the bell's menu, the crane's scene and the story's steps never: the bell spent,
+    -- its scene unseen. It is never rung for a partner: each rings their own. Rung within 30 s of each other, their
+    -- scenes are kept together, the later one a little faster.
+    local function crane(pc)
+        rawset(pc.bell, "__classObject", { IsValid = function() return true end,
+            GetFName = function() return Fake.name("BP_MelodiousBell_StoneCrane_C") end })
+        pc.groundTraces = true
+        pc.scene = Fake.sceneManager(pc)        -- (the game's scene manager, there all along)
+        Fake.put(pc.scene, "frames", 1800)      -- (one long sequence, 60 s here: the crane's scene is its first seconds)
+    end
+    local c, ch, cg = pair()
+    crane(ch)
+    crane(cg)
+    Session.moveTo(cg, 900, 0)
+    Session.moveTo(ch, 600, 0)
+    c:run(2.5)
+    local gx = at(cg.pawn).X
+    pressE(ch)
+    c:run(1.5)
+    check(woken(ch) and not woken(cg) and cg.bellTouches == nil and math.abs(at(cg.pawn).X - gx) < 1
+        and count(cg.logs, "rung in this world too") == 0 and count(cg.logs, "a scene of its own") == 1,
+        "a crane's bell rung by the host, the guest 2 m off: not rung for the guest, its first ring stays theirs, and it's said")
+    Session.scene(ch, true, "SeqsCrane")
+    c:run(1.5)
+    pressE(cg)
+    c:run(0.5)
+    Session.scene(cg, true, "SeqsCrane")
+    c:run(1.5)
+    check(cg.bellTouches == 1 and woken(cg) and rate(cg) > 1 and rate(ch) == 1 and where(ch) - where(cg) > 0.2
+        and count(ch.sent, "^E SCENE on") == 0 and count(cg.sent, "^E SCENE on") == 0,
+        "the guest rings its own 3 s after: its scene, begun two seconds later, plays a little faster ("
+            .. tostring(rate(cg)) .. "); it is told as begun by neither")
+    c:run(6)
+    check(math.abs(where(ch) - where(cg)) < 0.3 and rate(cg) == 1 and count(cg.logs, "is where your partner's is now") == 1,
+        "till both are at the same moment of it (" .. string.format("%.2f / %.2f", where(ch), where(cg)) .. ")")
+    -- (run228 and run229: the crane's scene is the first 18 s of one long sequence, and from 40 s in its camera is
+    -- back for the story's scene there, to the sequence's end: a second scene by the same name. Taken as an
+    -- ordinary scene it was told as begun, a partner by set down in the story's box there; and watched whole it
+    -- read as skipped, the sequence being longer than the part.)
+    Session.scene(ch, false)
+    Session.scene(cg, false)
+    c:run(20)
+    check(count(ch.sent, "^E SCENE skip") == 0 and count(ch.logs, "its end isn't told as a skip") == 1,
+        "the bell's scene ends 10 s into its 60 s sequence: no skip is told of it")
+    Session.scene(ch, true, "SeqsCrane")
+    Session.scene(cg, true, "SeqsCrane")
+    Fake.put(ch.scene, "posAt", 30)     -- (the later part: from the middle of the sequence)
+    Fake.put(cg.scene, "posAt", 30)
+    c:run(20)
+    -- (Its camera goes back to the players 10 s before the sequence's end, the sequence playing on: run231, the
+    -- crane's second part over 8 s before its sequence, "skipped after 164.5 of 213.2 s: the guest's too".)
+    Fake.put(ch.controller, "viewTarget", nil)
+    Fake.put(cg.controller, "viewTarget", nil)
+    c:run(2)
+    check(count(ch.sent, "^E SCENE on") == 0 and count(cg.sent, "^E SCENE on") == 0,
+        "its camera comes back 20 s on, a later part of that sequence: told as begun by neither")
+    check(count(ch.sent, "^E SCENE skip") == 0 and field(cg.scene, "skipped") == nil
+        and count(ch.logs, "which plays on: the camera's part was over, no skip") == 1,
+        "that part over by itself, its sequence playing on for seconds more: no skip is told of it")
+    Session.scene(ch, false)
+    Session.scene(cg, false)
+    c:run(1)
+    allErrors(c)
+
+    -- The later part is the story's scene: the host's skip of it ends it for both. (The user, 11-19, asked whose
+    -- skip ends a scene watched together: "Only the host's".)
+    local v, vh, vg = pair()
+    crane(vh)
+    crane(vg)
+    Session.moveTo(vg, 600, 0)
+    Session.moveTo(vh, 900, 0)
+    v:run(2.5)
+    pressE(vg)
+    v:run(1)
+    pressE(vh)
+    v:run(0.5)
+    Session.scene(vg, true, "SeqsCrane")
+    Session.scene(vh, true, "SeqsCrane")
+    v:run(6)
+    Session.scene(vg, false)
+    Session.scene(vh, false)
+    v:run(12)
+    Session.scene(vg, true, "SeqsCrane")
+    Session.scene(vh, true, "SeqsCrane")
+    Fake.put(vg.scene, "posAt", 30)
+    Fake.put(vh.scene, "posAt", 30)
+    v:run(5)
+    Session.scene(vh, false)
+    v:run(1)
+    check(vh.bellTouches == 1 and count(vh.sent, "^E SCENE skip SeqsCrane$") == 1 and field(vg.scene, "skipped") == 1,
+        "the host skips the later part, the story's scene: told, and the guest's ends with it")
+    allErrors(v)
+    -- One who rings long after their partner watches at the scene's own pace.
+    local x, xh, xg = pair()
+    crane(xh)
+    crane(xg)
+    Session.moveTo(xg, 900, 0)
+    Session.moveTo(xh, 600, 0)
+    x:run(2.5)
+    pressE(xh)
+    x:run(1.5)
+    Session.scene(xh, true, "SeqsCrane")
+    x:run(40)
+    pressE(xg)
+    x:run(0.5)
+    Session.scene(xg, true, "SeqsCrane")
+    x:run(3)
+    check(xg.bellTouches == 1 and rate(xg) == 1 and count(xg.logs, "played a little faster") == 0,
+        "one who rings 42 s after their partner watches at the scene's own pace")
+    allErrors(x)
+
+    -- A part that ends while it's still played faster: the sequence plays on with the camera back on the player
+    -- (the crane's, 22 s between its two parts), at its own speed again. Whichever of the mod's two looks sees the
+    -- part's end first: six ends, a twentieth of a second apart. (The first review of 403: the frame's own look, come
+    -- first, let the speed stand.)
+    local slow, wasFast = 0, 0
+    for phase = 0, 5 do
+        local y, yh, yg = pair()
+        crane(yh)
+        crane(yg)
+        Session.moveTo(yg, 900, 0)
+        Session.moveTo(yh, 600, 0)
+        y:run(2.5)
+        pressE(yh)
+        y:run(1.5)
+        Session.scene(yh, true, "SeqsCrane")
+        y:run(7.5)
+        pressE(yg)
+        y:run(0.5)
+        Session.scene(yg, true, "SeqsCrane")
+        y:run(3 + phase * 0.05)
+        wasFast = wasFast + (rate(yg) > 1 and 1 or 0)
+        Fake.put(yh.controller, "viewTarget", nil)      -- (the camera back on the players: the part is over,
+        Fake.put(yg.controller, "viewTarget", nil)      -- the sequence still playing)
+        y:run(1)
+        slow = slow + (rate(yg) == 1 and 1 or 0)
+        allErrors(y)
+    end
+    check(wasFast == 6 and slow == 6,
+        "a part over while the guest's was still played faster: its sequence, playing on, is at its own speed again ("
+            .. slow .. " of 6 ends)")
+
+    -- Three players: two ring together long after the first. They are kept with each other, not sent after the
+    -- first, which neither would ever catch. (The first review of 403.)
+    local p3 = party(nil, nil, { "Host", "Guest", "Guest" })
+    local pa, pb, pd = p3.pcs[1], p3.pcs[2], p3.pcs[3]
+    crane(pa)
+    crane(pb)
+    crane(pd)
+    Session.moveTo(pa, 600, 0)
+    Session.moveTo(pb, 900, 0)
+    Session.moveTo(pd, 900, 200)
+    p3:run(2.5)
+    pressE(pa)
+    p3:run(1.5)
+    Session.scene(pa, true, "SeqsCrane")
+    p3:run(38)
+    pressE(pb)
+    p3:run(1)
+    pressE(pd)
+    Session.scene(pb, true, "SeqsCrane")
+    p3:run(1)
+    Session.scene(pd, true, "SeqsCrane")
+    p3:run(1.5)
+    check(rate(pb) == 1 and rate(pd) > 1,
+        "three players, two ringing together 40 s after the first: the later of the two is played faster ("
+            .. tostring(rate(pd)) .. "), the earlier at its own speed (" .. tostring(rate(pb)) .. ")")
+    p3:run(5)
+    check(rate(pb) == 1 and rate(pd) == 1 and math.abs(where(pb) - where(pd)) < 0.3,
+        "and they are level with each other, neither sent after the first (" .. string.format("%.2f / %.2f", where(pb), where(pd)) .. ")")
+    allErrors(p3)
+
+    -- Why not, said once: one left alone for a partner's ring is told why in the log.
+    local w, wh, wg = pair()
+    wh.groundTraces, wg.groundTraces = true, true
+    Session.moveTo(wh, 600, 0)
+    wg.env.PBZ.game.inCombat = function() return true end
+    w:run(2)
+    pressE(wh)
+    w:run(8)
+    check(not woken(wg) and count(wg.logs, "first ring of a bell near you: you were in a fight") == 1,
+        "one in a fight, left alone for a partner's ring, is told why in the log, once")
+    allErrors(w)
+
+    -- A partner whose game takes no ring just now (busy with something of their own) keeps the bell.
+    local r, rh, rg = pair()
+    rh.groundTraces, rg.groundTraces = true, true
+    Session.moveTo(rg, 1700, 0)
+    Session.moveTo(rh, 600, 0)
+    rg.busyUsing = true
+    r:run(2)
+    pressE(rh)
+    r:run(1.5)
+    check(woken(rh) and not woken(rg) and rg.bellTouches == nil and count(rg.logs, "rung in this world too") == 0
+        and count(rg.logs, "took no ring for you just now") == 1,
+        "a partner whose game takes no ring just now keeps the bell for their own, and it's said")
+    allErrors(r)
 
     -- Left as it was: a partner 50 m off, one whose world has it woken, one in a boss fight of their own, one on
     -- another map, anyone with WatchTogether off.
@@ -16303,7 +16517,7 @@ local function bellsTogether()
         end
         u:run(2)
         local wx = at(ug.pawn).X
-        uh.bell:OnInteract(uh.pawn)
+        pressE(uh)
         u:run(1.5)
         check(woken(uh) and (rungAlready or not woken(ug)) and math.abs(at(ug.pawn).X - wx) < 1
             and count(ug.logs, "rung in this world too") == 0, why)

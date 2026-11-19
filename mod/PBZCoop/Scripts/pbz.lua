@@ -4728,32 +4728,50 @@ return function(api)
     end
 
     -- This world's bell standing where a partner's does (within 3 m): "woken" if it is here, "asleep" if not, nil if
-    -- there's none. With a player, one asleep is rung for them as E rings it, the bell's own OnInteract (the bench,
-    -- 11-18, run220: by the mod's call the bell's walk up and sit ran, RestoreHealth, UpdateQuest, UpdateFlowTag, the
-    -- save; the bell woken and lit after it, the player in hand again, no menu left up). Whether the ring's first
-    -- touch, and a crane bell's scene with it, comes by a ring made so is not shown yet: that bell had been sent
-    -- OnFirstTouchBell alone before, which wakes nothing and may have spent it (bellshare.ps1 is to show it). Says
-    -- "rung" then.
+    -- there's none; "scene" for one asleep that has a scene of its own, a crane's (BP_MelodiousBell_StoneCrane_C).
+    -- With a player, a plain bell asleep is rung for them the way E rings it: the player's own interact component
+    -- is asked (SetCurrentInteractActor, DoInteract: as local co-op has player 1 rest at a bell for player 2). The
+    -- bench, 11-19, the camp's crane bell, a guest's real ring with the host 6 m off. By the bell's own OnInteract
+    -- called from here, as 398 had it (run228): the walk up, the sit's steps, the save, the bell woken, but no
+    -- first touch at all (no PlayRingSound, no OnFirstTouchBell). By the component (run230): the first touch too,
+    -- 2.8 s after the ringer's, and then the bell's menu, as after any sit; the crane's scene never came, and of
+    -- the flag and three flow steps a real ring of it tells (run220) one flow step. So a bell with a scene is never
+    -- rung from here: its first ring, with its scene and the story's steps, stays the player's own. Says "rung"
+    -- when the game took the ring, "refused" and why when it didn't (busy with something of their own: the bell
+    -- stays theirs to ring).
     function game.bellAt(x, y, z, pawn)
-        local out = nil
+        local out, why = nil, nil
         for _, b in ipairs(FindAllOf("MelodiousBell") or {}) do
             if out == nil and valid(b) then
-                pcall(function()
+                local ok, err = pcall(function()
                     local l = b:K2_GetActorLocation()
                     if math.sqrt((l.X - x) ^ 2 + (l.Y - y) ^ 2 + (l.Z - z) ^ 2) <= 300 then
                         if b:GetActive() == true then
                             out = "woken"
+                        elseif b:GetClass():GetFName():ToString():find("StoneCrane", 1, true) then
+                            out = "scene"
                         elseif valid(pawn) then
-                            b:OnInteract(pawn)
-                            out = "rung"
+                            out, why = "refused", "no interact component"
+                            local class = StaticFindObject("/Script/ProjectPBZ.PBZInteractComponent")
+                            local ic = valid(class) and pawn:GetComponentByClass(class) or nil
+                            if valid(ic) then
+                                why = "the game said no"
+                                ic:SetCurrentInteractActor(b)
+                                if ic:DoInteract(b) ~= false then
+                                    out, why = "rung", nil
+                                end
+                            end
                         else
                             out = "asleep"
                         end
                     end
                 end)
+                if not ok and out == "refused" then
+                    why = tostring(err)
+                end
             end
         end
-        return out
+        return out, why
     end
 
     -- Rest this player as a sit would: only for a partner's sit during a boss fight this player is in (their own, or a
@@ -7348,11 +7366,14 @@ return function(api)
     -- Where this world's scene is, in seconds from its start, or nil; and its speed set (1 is its own): one begun a
     -- moment after a partner's same scene is played a little faster till the two are at the same moment of it
     -- (story.lua's scenes; the bench, 11-18, run219: a sequence's player takes both).
-    function game.scenePos()
+    -- (wanted: of the sequence by that name only. The player found can be another sequence's: the last scene's,
+    -- still known, or one playing on behind a fight. The bench's logs of 11-18 have two scenes in a row read with one
+    -- length, the first's.)
+    function game.scenePos(wanted)
         local at = nil
         pcall(function()
             local p = game.inCutscene() and scenePlayer()
-            if p then
+            if p and (wanted == nil or sceneOf(p) == wanted) then
                 local t = p:GetCurrentTime()
                 local fps = t.Rate.Numerator / t.Rate.Denominator
                 if fps > 0 then
@@ -7363,11 +7384,34 @@ return function(api)
         return at
     end
 
-    function game.sceneRate(rate)
+    -- Where this world's sequence is, in seconds, whether or not it has the camera: a long one plays on between its
+    -- camera's parts and after the last (the camp's crane bell's: its second part ends 8 s before the sequence does).
+    -- Nil when none plays: one stopped where it stood, or sent to its end, as a skip leaves it, is not playing. (By
+    -- its player's own word, not the manager's "in sequence": what that says as a camera's part ends isn't known.)
+    -- wanted: of the sequence by that name only (another, begun the moment a scene was skipped, is not that scene's).
+    function game.sequencePos(wanted)
+        local at = nil
+        pcall(function()
+            local p = valid(seqManager) and scenePlayer()
+            if p and playing(p) and (wanted == nil or sceneOf(p) == wanted) then
+                local t = p:GetCurrentTime()
+                local fps = t.Rate.Numerator / t.Rate.Denominator
+                if fps > 0 then
+                    at = t.Time.FrameNumber.Value / fps
+                end
+            end
+        end)
+        return at
+    end
+
+    -- (Back to its own speed, 1, whether or not it has the camera just then: a long sequence plays on between its
+    -- camera's parts, the camp's crane bell's for 22 s, and one left faster as a part ended ran on so, its next
+    -- part with it.)
+    function game.sceneRate(rate, wanted)
         local ok = false
         pcall(function()
-            local p = game.inCutscene() and scenePlayer()
-            if p then
+            local p = (game.inCutscene() or (rate == 1 and valid(seqManager))) and scenePlayer()
+            if p and (wanted == nil or sceneOf(p) == wanted) then
                 p:SetPlayRate(rate)
                 ok = true
             end

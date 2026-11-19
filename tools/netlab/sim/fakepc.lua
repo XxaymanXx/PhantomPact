@@ -1054,6 +1054,8 @@ function Fake.sceneManager(pc)
         IsInSequence = function(self) return rawget(self, "__fields").playing end,
         GetCurrentSequence = function(self) return rawget(self, "__fields").sequence end,
         -- (The manager stands in for its own sequence player.)
+        IsPlaying = function(self) return rawget(self, "__fields").playing end,
+        GetSequence = function(self) return rawget(self, "__fields").sequence end,
         GetFrameDuration = function(self) return rawget(self, "__fields").frames end,
         GetFrameRate = function() return { Numerator = 30, Denominator = 1 } end,
         -- (Where it is, at 30 frames a second: from where it was when it began or its speed last changed.)
@@ -1598,6 +1600,10 @@ function Fake.new(id, scripts, ini, link)
         defs(pc, ic, {
             GetOwner = function() return p end,
             DoInteract = function(self, target)
+                -- (Still busy with the last thing it says no: pc.busyUsing, a test's.)
+                if pc.busyUsing then
+                    return false
+                end
                 local used = rawget(self, "__fields").used
                 used[#used + 1] = target
                 put(self, "theplayer", rawget(pc.controller, "__fields").Pawn)
@@ -1608,6 +1614,13 @@ function Fake.new(id, scripts, ini, link)
                 if finish and not pc.walksUp then
                     finish(target)
                 end
+                -- (A bell: E at it. Its ring knows it came by the component: the bell's OnInteract, below.)
+                if target == pc.bell then
+                    put(self, "InteractingActor", target)
+                    target:OnInteract(p)
+                    put(self, "InteractingActor", nil)
+                end
+                return true
             end,
             CheckAndForceEndInteract = false,
             SetCurrentInteractActor = false,
@@ -1932,14 +1945,21 @@ function Fake.new(id, scripts, ini, link)
     end,
         K2_GetActorLocation = function(self) return rawget(self, "__fields").loc end,
         GetActive = function(self) return rawget(self, "__fields").active end,
-        -- (E at it, or the same asked by a mod: its first ring wakes it, with its first touch; then its sit.)
-        OnInteract = function(self)
+        -- (Its first ring wakes it, then its sit. By E, the player's own interact component (DoInteract), the ring has
+        -- its first touch. Called by a mod, not through the component, it wakes and sits the same with no first touch
+        -- at all: the bench, 11-19, run228.)
+        OnInteract = function(self, player)
             local f = rawget(self, "__fields")
+            local ic = player and rawget(player, "__fields") and rawget(player, "__fields").interact
+            local byE = ic ~= nil and rawget(ic, "__fields").InteractingActor == self
             if not f.active then
                 put(self, "active", true)
                 pc.bellIds[#pc.bellIds + 1] = f.id
-                for _, fn in ipairs(pc.hooks[BELL_TOUCH] or {}) do
-                    fn({ get = function() return self end })
+                if byE then
+                    pc.bellTouches = (pc.bellTouches or 0) + 1
+                    for _, fn in ipairs(pc.hooks[BELL_TOUCH] or {}) do
+                        fn({ get = function() return self end })
+                    end
                 end
             end
             self:RestoreHealth()
