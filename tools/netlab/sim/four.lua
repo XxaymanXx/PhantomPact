@@ -17888,6 +17888,172 @@ local function thePlayLog()
     allErrors(off)
 end
 
+-- 410: a rider and its mount (players on 1.7.4, 11-20: "the horse boss riding doesn't appear to guest, only host can
+-- see it"). Jing Ye's horse is an enemy of its own, from a spawner the game makes as it runs: no designer id, and a name
+-- of that session's alone ("BP_AISpawner_C_2147456939" on the bench's host, "..._2147449150" on its guest, run250).
+local function aRiderAndItsMount()
+    part("a rider and its mount")
+    local HORSE = "BP_Monster_Horse_JingYe_C"
+    local world = {
+        { "rider", "BP_Monster_JingYe_C", 2000.0, 0.0, 100.0, 5000, 400, false },
+        { "horse", HORSE, 2000.0, 0.0, 100.0, 1800, 100, false },
+    }
+    -- Each PC's own horse: its spawner with no designer id and a name of this session's, its rider attached to it.
+    -- The guest's stand at guestPairX (30 m from the host's: its own game's, run off while the host fought). hostHas
+    -- false: the host's horse is dead already. The players at hostX and guestX.
+    local function ride(hostHas, hostX, guestX, guestPairX)
+        local horses, riders = {}, {}
+        local s = Session.new(SIM_SCRIPTS, { "Host", "Guest" }, false, world, nil, nil, function(pc, i)
+            local sp = pc.spawners[Session.indexOf(pc, "horse")]
+            local horse, rider = rawget(sp, "__fields").SpawnedAI, Session.enemyOn(pc, "rider")
+            local n = i == 1 and 2147456939 or 2147449150
+            Fake.put(sp, "SpawnerID", Fake.name("None"))
+            rawset(sp, "__name", "BP_AISpawner_C_" .. n)
+            rawset(horse, "__name", HORSE .. "_" .. (n - 1425))
+            rawset(horse, "__classObject", { IsValid = function() return true end, GetFName = function() return Fake.name(HORSE) end })
+            horses[i], riders[i] = { actor = horse, ridden = true }, rider
+            Fake.put(rider, "GetAttachParentActor", function() return horses[i].ridden and horse or nil end)
+            if i == 2 then
+                Fake.put(horse, "loc", { X = guestPairX, Y = 0.0, Z = 100.0 })
+                Fake.put(rider, "loc", { X = guestPairX, Y = 0.0, Z = 100.0 })
+            elseif not hostHas then
+                Fake.put(horse, "dead", true)
+                Fake.setHealth(horse, 0)
+                horses[i].ridden = false
+            end
+        end)
+        s:run(4)
+        Session.moveTo(s.pcs[1], hostX, 0)
+        Session.moveTo(s.pcs[2], guestX, 0)
+        s:run(6)
+        return s, s.pcs[1], s.pcs[2], horses, riders
+    end
+    local function brain(e)
+        return field(field(field(e, "Controller"), "BrainComponent"), "running")
+    end
+    local s, h, g, horses, riders = ride(true, 1500, 2500, 5000.0)
+    local hostHorse, guestHorse = horses[1].actor, horses[2].actor
+    local hostName, guestName = h.env.PBZ.game.enemyId(hostHorse), g.env.PBZ.game.enemyId(guestHorse)
+    check(hostName == rawget(hostHorse, "__name") and guestName == rawget(guestHorse, "__name"),
+        "an enemy from a spawner the game made as it ran goes by its own name: its spawner's is no id (" .. tostring(hostName) .. ")")
+    check(count(g.sent, "^E HAS ") == 0 and count(h.sent, "^E NOT ") == 0, "the guest doesn't ask the host after its own horse, and no \"no\" comes")
+    check(field(guestHorse, "hidden") ~= true and at(guestHorse).Z < 1000, "so it isn't put out of the way")
+    check(net(g).matchSticky[hostName] == guestHorse:GetAddress(), "what the rider's copy rides is paired with the host's horse, 30 m from it")
+    check(gap(at(guestHorse), at(hostHorse)) < 150, "and brought to it (" .. string.format("%.0f", gap(at(guestHorse), at(hostHorse))) .. " cm off)")
+    check(field(field(field(guestHorse, "Controller"), "BrainComponent"), "running") == false, "its mind the host's, like any copy's")
+    check(gap(at(riders[2]), { X = 5000, Y = 0 }) < 1, "the rider's copy isn't moved by itself: its place is its mount's")
+    -- The rider gets down (its mount dead, its own move): steered by its own line again.
+    horses[2].ridden = false
+    s:run(1.5)
+    check(gap(at(riders[2]), at(riders[1])) < 150, "off its mount, the rider's copy goes by the host's line of it again ("
+        .. string.format("%.0f", gap(at(riders[2]), at(riders[1]))) .. " cm off)")
+    -- Names: what is one PC's alone, and what both share.
+    local own, runtime = net(g).ownName, g.env.PBZ.game.runtimeName
+    check(own ~= nil and own("sp:BP_AISpawner_C_2147456939") and own("BP_Monster_Horse_JingYe_C_2147455514") and not own("sp:JingYe")
+        and not own("sp:BP_AISpawner_C_UAID_60CF848A6689B9D402_1721359969") and not own("tw1:sp:JingYe")
+        and not own("sp:WanJun_Seq074") and not own("sp:LeiDang_Seq123-3") and not own("sp:Camp_12"),
+        "one PC's alone: an actor's own name, and a spawner's made as the game ran; not a level's spawner, a designer's id, a twin")
+    check(runtime ~= nil and not runtime("sp:BP_Teleport_C_UAID_E89C25A75120AE5002_2091202670") and not runtime(nil) and runtime("X_2000000000")
+        and not runtime("X_1999999999"), "(a level's own name stays one, whatever number ends it)")
+    -- An older guest still asks after its horse by its spawner's name: no "no" for a name that is the asker's alone.
+    g.env.PBZ.coop.sendEvent("HAS", "sp:BP_AISpawner_C_2147449150")
+    g.env.PBZ.coop.sendEvent("HAS", "sp:nobody")
+    s:run(1)
+    check(count(h.sent, "^E NOT sp:BP_AISpawner_C_2147449150$") == 0 and count(h.sent, "^E NOT sp:nobody$") == 1,
+        "an older guest asks by its spawner's name: the host says nothing of it (and still \"no\" of a level's)")
+    allErrors(s)
+    -- The host's horse dead, the guest's own alive under its rider: no line to pair it with. The rider's copy is steered
+    -- by its own line as ever (nothing else would bring it), after the moment it's left on its mount.
+    local s2, _, g2, horses2, riders2 = ride(false, 1500, 2500, 5000.0)
+    check(gap(at(riders2[2]), at(riders2[1])) < 150, "a rider whose mount is no copy of the host's is steered by its own line, as ever")
+    check(field(horses2[2].actor, "hidden") ~= true and count(g2.sent, "^E HAS ") == 0, "and its mount is left be: not asked after, not hidden")
+    allErrors(s2)
+    -- The guest's game runs the rider (the guest by it, the host 45 m behind: handed over). What it rides is the guest's
+    -- game's too: no copy of the host's horse, though that one stands at the very same place.
+    local s3, h3, g3, horses3 = ride(true, -2500, 1800, 2000.0)
+    local name3 = h3.env.PBZ.game.enemyId(horses3[1].actor)
+    check(net(g3).mine["sp:rider"] == true, "(a rider by the guest, the host 45 m behind: the guest's game runs it)")
+    check(net(g3).matchSticky[name3] == nil and brain(horses3[2].actor) == true and field(horses3[2].actor, "hidden") ~= true,
+        "what a rider this game runs rides is this game's own too: no copy of the host's horse, its mind its own")
+    -- The host comes up: the rider is the host's game's again, and its mount a copy of the host's with it.
+    Session.moveTo(h3, 1600, 300)
+    s3:run(5)
+    check(net(g3).mine["sp:rider"] == nil and net(g3).matchSticky[name3] == horses3[2].actor:GetAddress()
+        and brain(horses3[2].actor) == false, "the host beside them: the rider the host's game's again, and its mount a copy with it")
+    allErrors(s3)
+end
+
+-- 411: a jump of the host's enemy, taken at once by its copy (players on 1.7.4, 11-20: "boss teleport doesn't sync up
+-- for guest ... near impossible for guest to fight"). On the bench (run251) A-Hua's teleport move goes 5 to 6 m in a
+-- tenth of a second, and the guest's copy, walked after it, was 5.9 m behind and 0.66 s in coming.
+local function anEnemysJump()
+    part("an enemy's jump")
+    local s, h, g = pair()
+    local hostE, copy = Session.enemyOn(h, "near"), Session.enemyOn(g, "near")
+    local function off()
+        return gap(at(copy), at(hostE))
+    end
+    local function move(dx, dy)
+        local l = at(hostE)
+        Fake.put(hostE, "loc", { X = l.X + dx, Y = l.Y + dy, Z = l.Z })
+    end
+    s:run(1)
+    check(off() < 30, "(a copy stands where the host's enemy does)")
+    -- A blink: 6 m off in one frame, standing before and after.
+    move(600, 0)
+    s:run(0.15)
+    check(off() < 30, "the host's enemy is 6 m off in one step: its copy is there at once (" .. string.format("%.0f", off()) .. " cm off, 0.15 s on)")
+    check(net(g).remoteEnemies["sp:near"].jumpAt ~= nil, "(its line's record says it jumped)")
+    -- A dash: 130 cm a frame for five frames, then it stands.
+    s:run(1)
+    for _ = 1, 5 do
+        move(0, 130)
+        s:run(1 / 60)
+    end
+    local took = nil
+    for frame = 1, 60 do
+        s:run(1 / 60)
+        if not took and off() < 30 then
+            took = frame / 60
+        end
+    end
+    check(took ~= nil and took <= 0.15, "a dash of 78 m a second, 6.5 m: its copy is there within 0.15 s of its end ("
+        .. (took and string.format("%.2f s", took) or "not in a second") .. ")")
+    -- A walk is no jump: 10 cm a frame (6 m a second) for a second.
+    s:run(1)
+    local was = net(g).remoteEnemies["sp:near"].jumpAt
+    Fake.put(field(hostE, "CharacterMovement"), "Velocity", { X = -600.0, Y = 0.0, Z = 0.0 })
+    for _ = 1, 60 do
+        move(-10, 0)
+        s:run(1 / 60)
+    end
+    Fake.put(field(hostE, "CharacterMovement"), "Velocity", { X = 0.0, Y = 0.0, Z = 0.0 })
+    check(net(g).remoteEnemies["sp:near"].jumpAt == was, "a walk is no jump")
+    -- A copy that makes the dash itself (it plays the host's move for real) is a little ahead of the host's line of it,
+    -- on the jump's own way: left there. One behind, or off to the side, is set to the line.
+    s:run(1)
+    move(300, 0)
+    s:run(0.15)
+    check(off() < 30, "(a jump of 3 m: its copy set there)")
+    local l = at(hostE)
+    Fake.put(copy, "loc", { X = l.X + 200, Y = l.Y, Z = l.Z })
+    s:run(2 / 60)
+    check(off() > 100, "a copy ahead of the host's line on the jump's own way is left: its own dash, a link's delay before the line ("
+        .. string.format("%.0f", off()) .. " cm ahead, two frames on)")
+    Fake.put(copy, "loc", { X = l.X - 200, Y = l.Y, Z = l.Z })
+    s:run(2 / 60)
+    check(off() < 30, "one behind it is set to the line (" .. string.format("%.0f", off()) .. " cm off, two frames on)")
+    Fake.put(copy, "loc", { X = l.X + 50, Y = l.Y + 200, Z = l.Z })
+    s:run(2 / 60)
+    check(off() < 30, "and one off to its side")
+    -- The hold over, a copy off its line is walked there as ever, no more set.
+    s:run(1)
+    Fake.put(copy, "loc", { X = l.X - 200, Y = l.Y, Z = l.Z })
+    s:run(2 / 60)
+    check(off() > 100, "a moment after the jump a copy off its line is walked to it as ever, not set (" .. string.format("%.0f", off()) .. " cm, two frames on)")
+    allErrors(s)
+end
+
 return function(print_, scripts)
     out = print_
     SIM_SCRIPTS = scripts
@@ -18026,5 +18192,7 @@ return function(print_, scripts)
     restartWithOldLines()
     ninthReview()
     thePlayLog()
+    aRiderAndItsMount()
+    anEnemysJump()
     return failed == 0
 end

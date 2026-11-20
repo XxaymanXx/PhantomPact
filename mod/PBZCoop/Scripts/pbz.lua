@@ -242,11 +242,29 @@ return function(api)
     local actorNames = {}           -- address -> actor name, for the enemies without a spawner, kept for a pass
     local spawnedOffset = nil       -- where a spawner keeps SpawnedAI; false: it can't be read directly
 
+    -- A name the game gave an actor as it made it while running, not the level's own: "<class>_<a number of two
+    -- thousand million or more>" (the engine counts such names down from 2147483647; a level's own actors are
+    -- "..._UAID_<hex>_<n>" or carry a small number). It differs from PC to PC and from session to session: no id.
+    function game.runtimeName(name)
+        if type(name) ~= "string" or name:find("_UAID_", 1, true) then
+            return false
+        end
+        local n = tonumber(name:match("_(%d+)$"))
+        return n ~= nil and n >= 2000000000
+    end
+
+    -- (false, read once like a name: a spawner with no designer id that the game made as it ran, a mount's. Its own
+    -- name is this session's alone, "BP_AISpawner_C_2147456939" on the host and "..._2147449150" on the guest for
+    -- Jing Ye's horse (the bench, 11-20, run250), and taken for an id, "sp:" and all, a guest asked the host after
+    -- its own horse by a name the host never had: "no", and the horse was put out of the way, its rider left riding
+    -- nothing ("the horse boss riding doesn't appear to guest, only host can see it", players on 1.7.4). Its enemy
+    -- keeps its actor's name, this PC's alone, and is paired by its kind: coop.lua's matchRemoteEnemies. 410.)
     local function spawnerName(s, addr)
         local name = spawnerNames[addr]
         if name == nil then
             local id = s.SpawnerID:ToString()
-            name = "sp:" .. (id ~= "None" and id or s:GetFName():ToString())
+            local own = id == "None" and s:GetFName():ToString() or nil
+            name = not (own and game.runtimeName(own)) and "sp:" .. (own or id)
             spawnerNames[addr] = name
         end
         return name
@@ -273,7 +291,7 @@ return function(api)
             end
             local aiAddr = a:GetAddress()
             local name = spawnerName(s, addr)
-            spawnerIds[aiAddr] = name
+            spawnerIds[aiAddr] = name       -- (false: no id from this spawner, and none to look for: enemyId)
             into[aiAddr] = name
         end
     end
@@ -290,7 +308,7 @@ return function(api)
         end
         if spawnedOffset then
             local aiAddr = link.pointer(addr, spawnedOffset)
-            if aiAddr ~= 0 and spawnerNames[addr] then
+            if aiAddr ~= 0 and spawnerNames[addr] ~= nil then
                 spawnerIds[aiAddr] = spawnerNames[addr]
                 into[aiAddr] = spawnerNames[addr]
                 return
@@ -367,13 +385,26 @@ return function(api)
         if id then
             return id
         end
-        idMissing = true
+        -- (Not one whose spawner gives it none, false: a mount's, 410. Taken for an enemy with no id yet, every
+        -- spawner was searched for again each second it was about.)
+        if id == nil then
+            idMissing = true
+        end
         id = actorNames[addr]
         if id == nil then
             id = actor:GetFName():ToString()
             actorNames[addr] = id
         end
         return id
+    end
+
+    -- What a body rides: the address of the actor it's attached to (a rider on its horse), or nil.
+    function game.mountOf(actor)
+        local ok, addr = pcall(function()
+            local m = actor:GetAttachParentActor()
+            return valid(m) and m:GetAddress() or nil
+        end)
+        return ok and addr or nil
     end
 
     -- Guest copies of the host's enemies: their own AI stays out of it (puppets.lua). The game starts a stopped AI again

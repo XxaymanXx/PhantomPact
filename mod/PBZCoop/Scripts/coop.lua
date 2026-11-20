@@ -960,6 +960,8 @@ return function(api)
         since = {},             -- host: id -> net.frameNow when it was handed over
         retryAt = {},           -- host: id -> os.clock() before which it isn't handed over again
         asleep = {},            -- a party's host: id -> true while it sleeps here with a guest by it (asleepHere)
+        mountAt = {},           -- guest: id of one this game runs -> os.clock() when what it rides is next asked
+        mineMounts = {},        -- guest: address of what such a one rides -> os.clock() when it was last seen to (410)
     }
 
     -- An enemy's line goes the moment it says something new, and one that says the same as the last only every ENEMY_SAME_S,
@@ -1277,6 +1279,17 @@ return function(api)
         end
     end
 
+    -- A name that is one PC's alone: an actor's own (an enemy no spawner with an id made), or an older build's name
+    -- for a spawner the game made as it ran (game.runtimeName, 410). Never a ghost twin's.
+    net.MOUNTS_S = 0.5            -- client: who rides what is asked at most this often (matchRemoteEnemies)
+    net.MINE_MOUNT_S = 1.5        -- client: what a rider this game runs rode this lately is still its mount
+    function net.ownName(id)
+        if id:match("^tw%d+:") then
+            return false
+        end
+        return id:sub(1, 3) ~= "sp:" or (game.runtimeName ~= nil and game.runtimeName(id))
+    end
+
     -- Client: which local enemy is each of the host's? Same id first; then the actor this id was matched to
     -- before (sticky, while it's loaded and alive); otherwise the nearest still-unmatched local enemy of the same
     -- class within ENEMY_MATCH_CM (covers enemies whose ids differ between PCs). Ids go in sorted order, so two
@@ -1303,6 +1316,15 @@ return function(api)
             matched[id] = e.actor
             used[e.addr] = true
         end
+        -- (What a rider this game runs rides is this game's own too, no copy of any line of the host's: a boss the
+        -- guest fights and the host doesn't is the guest's game's to run, 263, and in a party one asleep on the host
+        -- is each guest's by it, 277; its horse, paired with the host's own, asleep there, was held and steered to
+        -- where that one stood, the rider on it. handover.rides notes what each such rider rides. 410.)
+        local roundClock = os.clock()
+        local function ridden(e)
+            local at = handover.mineMounts[e.addr]
+            return at ~= nil and roundClock - at < net.MINE_MOUNT_S
+        end
         -- (The host's boss only ever paired with one of its own kind here: a late joiner's world with no copy of it had
         -- another enemy paired by the id, which played the boss's moves under its bar (player report 11-09: Tie Gui as a mob
         -- with Jing Ye's name), and hits on it reached nothing. By class, not by the codex's boss mark: some story bosses
@@ -1325,7 +1347,7 @@ return function(api)
         end
         for _, id in ipairs(ids) do
             local e = byAddr[net.matchSticky[id]]
-            if matched[id] == nil and e and not used[e.addr] and not (game.isDead and game.isDead(e.actor)) then
+            if matched[id] == nil and e and not used[e.addr] and not (game.isDead and game.isDead(e.actor)) and not ridden(e) then
                 -- (Still the same kind: another enemy can be at a gone one's address, and was steered as the host's.)
                 local want = net.remoteEnemies[id] and net.remoteEnemies[id].Class
                 e.class = e.class or (want and enemyClass(e.actor))
@@ -1343,7 +1365,7 @@ return function(api)
                 for _, e in pairs(locals) do
                     -- (Not a body either: one lying where the host's live enemy stood was paired as it, and as one
                     -- found it was never brought back, so the host's enemy had no body here to hit.)
-                    if not used[e.addr] and not isDead(e.actor) then
+                    if not used[e.addr] and not isDead(e.actor) and not ridden(e) then
                         e.class = e.class or enemyClass(e.actor)    -- three calls through UE4SS, for each pair, each round
                         if e.class == r.Class then
                             local d = distance(e.loc, r)
@@ -1355,6 +1377,37 @@ return function(api)
                 end
                 if best and fits(id, best) then
                     take(id, best)
+                end
+            end
+        end
+        -- A mount: what a copy paired above rides here is the host's enemy of that kind that goes by no id of both
+        -- PCs, however far off it stands. (Jing Ye's horse is an enemy of its own, from a spawner the game makes as
+        -- it runs, with no name the two PCs share. Within ENEMY_MATCH_CM of the host's it was paired above; further
+        -- off, its own game's horse run after this player while the host fought, it never was: it ran by itself, or
+        -- was put out of the way as one the host hasn't got, and its rider's copy, dragged to the host's line, rode
+        -- nothing. Players on 1.7.4, 11-20. Who rides what is asked only while such an enemy of the host's has no
+        -- copy here, and then at most every MOUNTS_S: a call through UE4SS for each copy. 410.)
+        for _, id in ipairs(ids) do
+            local r = net.remoteEnemies[id]
+            if matched[id] == nil and r.Class and not r.Boss and game.mountOf and net.ownName(id) then
+                local asked = os.clock()
+                if asked - (net.mountsAt or -1e9) >= net.MOUNTS_S then
+                    net.mountsAt, net.mounts = asked, {}
+                    for _, a in pairs(matched) do
+                        local mount = game.mountOf(a)
+                        if mount then
+                            net.mounts[mount] = true
+                        end
+                    end
+                end
+                for _, e in pairs(locals) do
+                    if net.mounts[e.addr] and not used[e.addr] and not isDead(e.actor) and not ridden(e) then
+                        e.class = e.class or enemyClass(e.actor)
+                        if e.class == r.Class then
+                            take(id, e)
+                            break
+                        end
+                    end
                 end
             end
         end
@@ -1765,6 +1818,7 @@ return function(api)
                     -- (Its death here is told, GK, with no blow before it too: a sneak kill, an execution. Told only
                     -- for one this player had hurt, it died here, was told to nobody, and came back. The review of 11-16.)
                     net.hitHere[name] = true
+                    handover.rides(name, actor)     -- (what it rides is this game's to run with it: 410)
                 end
                 if game.setMinHealth and not asleep then
                     game.setMinHealth(actor, HELD_HP)
@@ -2382,7 +2436,21 @@ return function(api)
 
     -- Guest, the turn of one this game runs for the host: where it is and what it does go to the host's game, as the host's
     -- enemies come here.
+    -- Guest: one this game runs (handed over, or asleep on a party's host with this player by it): what it rides is
+    -- this game's to run with it. Its mount's address is noted every MOUNTS_S, and matchRemoteEnemies leaves that one
+    -- unpaired while the note is fresh. 410.
+    function handover.rides(name, actor)
+        if game.mountOf and os.clock() >= (handover.mountAt[name] or 0) then
+            handover.mountAt[name] = os.clock() + net.MOUNTS_S
+            local mount = game.mountOf(actor)
+            if mount then
+                handover.mineMounts[mount] = os.clock()
+            end
+        end
+    end
+
     function handover.share(name, actor, addr)
+        handover.rides(name, actor)
         local x, y, z, yaw, vx, vy, _, _, hp, maxhp, posture = game.read(actor, addr)
         if hp and maxhp and maxhp > 0 and x == x and y == y and z == z and yaw == yaw then
             local number = enemyNumber(actor, name)
@@ -2415,6 +2483,7 @@ return function(api)
         net.guestRuns, net.guestLines, net.mine = {}, {}, {}
         handover.seen, handover.since, handover.retryAt, handover.on, handover.woken = {}, {}, {}, false, {}
         handover.asleep, handover.live, handover.calm = {}, {}, {}
+        handover.mountAt, handover.mineMounts = {}, {}
     end
 
     local function startHostRound(now)
@@ -2558,8 +2627,10 @@ return function(api)
         -- seconds on and paid that player its dust, shared on: 330 to everyone every 20 s, for ten minutes. And asked again
         -- less and less often: whatever takes a copy away, it's no way to dust.)
         for name, r in pairs(net.remoteEnemies) do
+            -- (Not one named by a spawner its game made as it ran, an older host's word for a mount: no spawner here goes
+            -- by that name, and each ask was a search of them all. 410.)
             if enemyByName[name] == nil and not r.Boss and (r.Hp or 0) > 0 and name:sub(1, 3) == "sp:" and not net.hostKilled[name]
-                and r.X ~= nil and inReach(r.X, r.Y, r.Z, net.localLoc) then
+                and not net.ownName(name) and r.X ~= nil and inReach(r.X, r.Y, r.Z, net.localLoc) then
                 local b = net.bringing[name] or { since = now, askedAt = -1e9, tries = 0 }
                 net.bringing[name] = b
                 local again = bring.AGAIN_S * math.min(2 ^ (b.tries or 0), bring.AGAIN_MOST)
@@ -2757,6 +2828,17 @@ return function(api)
         end
     end
 
+    -- A step of the other side's enemy that nothing runs: over JUMP_CM between two of its lines, and either faster
+    -- than JUMP_CMS or from standing still to standing still. A teleport, or a dash that is one in all but name: on
+    -- the bench, 11-20 (run251, A-Hua, her place every frame on both copies), her teleport move goes 5 to 6 m at 75
+    -- to 90 m a second, 150 to 390 cm between two lines, where her fastest plain attack goes 90 and a charging
+    -- horse 140; her blinks go 14 and 17 m at once. A copy further than SNAP_CM from its line is set there, and
+    -- that covered the blinks. Nearer, it was walked there at a copy's 14 m a second and nudged: after each such
+    -- move the guest's copy was 4 to 7 m behind the host's boss and took 0.5 to 0.7 s to come, her blow struck
+    -- meanwhile from where the host had her ("boss teleport doesn't sync up for guest ... near impossible for guest
+    -- to fight", players on 1.7.4). The line's record says when, and which way: puppets.lua's steer sets the copy
+    -- there. (Fields of net: this function is at Lua's 200 locals.) 411.
+    net.JUMP_CM, net.JUMP_CMS, net.JUMP_STILL = 150, 4500, 150
     local function readEnemies(now)
         local text = link.enemies()
         if text == nil or net.partnerGone then
@@ -2788,8 +2870,19 @@ return function(api)
                         net.notOnHost[who.name] = nil
                     end
                     local r = into[who.name] or { Class = who.class }
+                    local VX, VY = num(vx) or 0, num(vy) or 0
+                    if r.X ~= nil and r.at ~= nil then
+                        local sx, sy = X - r.X, Y - r.Y
+                        local step2 = sx * sx + sy * sy + (Z - r.Z) ^ 2
+                        if step2 > net.JUMP_CM ^ 2 and (step2 > (net.JUMP_CMS * (now - r.at)) ^ 2
+                            or (r.VX ^ 2 + r.VY ^ 2 < net.JUMP_STILL ^ 2 and VX ^ 2 + VY ^ 2 < net.JUMP_STILL ^ 2)) then
+                            local flat = math.sqrt(sx * sx + sy * sy)
+                            r.jumpAt = now
+                            r.jumpDX, r.jumpDY = flat > 1 and sx / flat or 0, flat > 1 and sy / flat or 0
+                        end
+                    end
                     r.X, r.Y, r.Z, r.Yaw, r.Hp, r.MaxHp = X, Y, Z, Yaw, Hp, MaxHp
-                    r.VX, r.VY = num(vx) or 0, num(vy) or 0
+                    r.VX, r.VY = VX, VY
                     -- (2, and 3 for a boss: asleep in the host's world with a guest by it. handover.asleepHere.)
                     r.Boss, r.Asleep = boss == "1" or boss == "3", boss == "2" or boss == "3"
                     r.Posture, r.at = num(posture), now
@@ -4355,6 +4448,11 @@ return function(api)
         -- known by their spawner, and a "no" hid an enemy it had on the guest's screen: invisible enemies after a teleport or a
         -- bell. The guest asks again.)
         if os.clock() < (net.unsettledUntil or 0) then
+            return
+        end
+        -- (Nor of a name that is the asker's own alone, an older guest's for a spawner its game made as it ran, a
+        -- mount's: this world's has another name, and a "no" hid the guest's horse under its rider. Nothing said. 410.)
+        if net.ownName(name) then
             return
         end
         -- (A fresh read at most once a second: a round of asks came together, and each one's full search hitched the host.)

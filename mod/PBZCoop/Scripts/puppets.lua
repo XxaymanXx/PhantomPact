@@ -33,6 +33,12 @@ return function(api)
     local RESTART_S = 0.05        -- the same montage at an earlier position = played again
     local AI_EVERY_S = 0.1        -- how often each copy's AI is stopped again: the game restarts it by itself
     local REACT_S = 2.5           -- a copy's own reaction to this player's hit plays out this long at most, before any move
+    local JUMP_HOLD_S = 0.35      -- after a jump of the host's enemy (coop.lua's readEnemies), its copy is kept to the line
+    local JUMP_OFF_CM = 120       -- ... set there whenever it is further from it than this
+    local JUMP_AHEAD_CM = 400     -- ... unless it is this little ahead of the line on the jump's own way
+    local RIDE_LOOK_S = 0.5       -- how often a copy is asked what it rides
+    local RIDE_SOON_S = 0.1       -- ... one whose mount is no copy of the host's yet
+    local RIDE_WAIT_S = 1.0       -- and for this long after it's first followed it's left on such a mount
     -- Abilities that stay on and aren't moves. (Bosses keep a "Subtitles" one up for their lines: taken for the move, the
     -- real attack was never replayed and only its animation reached the guest, which hurts no one.)
     local PASSIVE = { "Passive", "Locomotion", "SpaceState", "Stance", "Utilities", "HitMirror", "Subtitles" }
@@ -148,7 +154,7 @@ return function(api)
             p = nil
         end
         if p == nil then
-            p = { actor = actor, name = name, fname = fname, busyUntil = 0, aiAt = 0 }
+            p = { actor = actor, name = name, fname = fname, busyUntil = 0, aiAt = 0, since = os.clock() }
             pcall(function() p.walkSpeed = actor.CharacterMovement.MaxWalkSpeed end)
             p.boss = game.isBoss and game.isBoss(actor, addr) or false
             byAddr[addr] = p
@@ -296,7 +302,7 @@ return function(api)
             p.reactState, p.reactSince = nil, 0
         end
         local target = p.target
-        if target then
+        if target and not p.rides then      -- (a rider faces as its mount does: steer)
             pcall(function() actor:K2_SetActorRotation({ Pitch = 0.0, Yaw = target.Yaw, Roll = 0.0 }, false) end)
         end
         if after ~= "-" then
@@ -447,16 +453,30 @@ return function(api)
         if x == nil then
             return
         end
+        local clock = os.clock()
+        -- A rider: where it stands and how it faces is its mount's to say, a copy the host's line of the mount steers.
+        -- (Jing Ye is attached to his horse. Set to the host's line of him by itself, his copy slid off the saddle,
+        -- 0.3 to 2 m beside its horse at any look, and went back onto it with a jump of 3 to 6 m as each move began:
+        -- the bench, 11-20, run250, ten such jumps in 100 s with none of the host's. One whose mount is no copy of
+        -- the host's is steered as ever: nothing else would bring it. Asked every RIDE_LOOK_S, not every frame. 410.)
+        -- (Its mount's own turn, or its pairing as a mount, comes a moment after the rider's own: till then, RIDE_WAIT_S
+        -- at most, the rider is left on it, and asked again sooner. Steered meanwhile, it was off its saddle from
+        -- the first frame.)
+        if clock >= (p.rideLookAt or 0) then
+            local mount = game.mountOf and game.mountOf(actor)
+            local held = mount ~= nil and byAddr[mount] ~= nil
+            p.rideLookAt = clock + ((mount ~= nil and not held) and RIDE_SOON_S or RIDE_LOOK_S)
+            p.rides = held or (mount ~= nil and clock - p.since < RIDE_WAIT_S)
+        end
         local cur = { X = x, Y = y, Z = z }
         local ahead = math.min(now - t.at, AHEAD_S)
         local dx, dy, dz = t.X + t.VX * ahead - cur.X, t.Y + t.VY * ahead - cur.Y, t.Z - cur.Z
         local dist = math.sqrt(dx * dx + dy * dy)
-        if dist > SNAP_CM or math.abs(dz) > SNAP_CM then
+        if not p.rides and (dist > SNAP_CM or math.abs(dz) > SNAP_CM) then
             actor:K2_SetActorLocationAndRotation({ X = t.X, Y = t.Y, Z = t.Z },
                 { Pitch = 0.0, Yaw = t.Yaw, Roll = 0.0 }, false, {}, true)
             return
         end
-        local clock = os.clock()
         local busy = clock < p.busyUntil
         if busy and clock >= (p.moveLookAt or 0) then
             p.moveLookAt = clock + MOVE_LOOK_S
@@ -474,6 +494,33 @@ return function(api)
             -- boss is one only once its bar is up. Not every frame.)
             p.armourLookAt = clock + RESUME_LOOK_S / 2
             armourCopy(p, actor, addr, clock, busy)
+        end
+        if p.rides then
+            return
+        end
+        -- A jump of the host's enemy, a teleport or a dash no walk follows (coop.lua's readEnemies, 411): its copy is
+        -- set where the host's line has it, now and for JUMP_HOLD_S after, whenever it is over JUMP_OFF_CM from it.
+        -- The line itself, not carried forward: at a dash's speed a late line would carry the copy metres past its
+        -- end. One a little ahead of the line on the jump's own way is left: a copy that plays the host's move for
+        -- real makes the same dash itself, a link's delay before the host's line of it, and set back to the line each
+        -- frame it would stutter the whole way (the bench, run251: a copy playing the move itself was never over
+        -- 1.6 m off and there within 0.23 s; one that only followed the lines was 5.9 m off, 0.66 s).
+        if t.jumpAt ~= nil and t.jumpAt ~= p.jumpSeen then
+            p.jumpSeen, p.jumpUntil = t.jumpAt, now + JUMP_HOLD_S
+        end
+        if now < (p.jumpUntil or 0) then
+            local ox, oy = cur.X - t.X, cur.Y - t.Y
+            local off2 = ox * ox + oy * oy
+            if off2 > JUMP_OFF_CM * JUMP_OFF_CM or math.abs(dz) > JUMP_OFF_CM then
+                local along = ox * (t.jumpDX or 0) + oy * (t.jumpDY or 0)
+                if not (along > 0 and along < JUMP_AHEAD_CM and off2 - along * along < JUMP_OFF_CM * JUMP_OFF_CM
+                    and math.abs(dz) <= JUMP_OFF_CM) then
+                    actor:K2_SetActorLocationAndRotation({ X = t.X, Y = t.Y, Z = t.Z },
+                        { Pitch = 0.0, Yaw = t.Yaw, Roll = 0.0 }, false, {}, true)
+                    puppets.jumped = (puppets.jumped or 0) + 1
+                    return
+                end
+            end
         end
         if busy and dist < LOCKED_CM then
             if dist > BUSY_CM then
