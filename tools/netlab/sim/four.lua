@@ -17983,6 +17983,55 @@ local function aRiderAndItsMount()
     allErrors(s3)
 end
 
+-- 412: two riders, their horses of one kind (the spear riders of Pangzhen). By kind and nearness alone the two horses
+-- can be paired crosswise, and since 410 a rider's copy is left on its mount: each would stand where the other's is.
+local function twoRidersAndTheirMounts()
+    part("two riders and their mounts")
+    local HORSE = "BP_Monster_Horse_MonsterHorse_C"
+    local world = {
+        { "rider1", "BP_Monster_SpearMan_C", 2000.0, 0.0, 100.0, 900, 100, false },
+        { "horse1", HORSE, 2000.0, 0.0, 100.0, 1800, 100, false },
+        { "rider2", "BP_Monster_SpearMan_C", 2600.0, 0.0, 100.0, 900, 100, false },
+        { "horse2", HORSE, 2600.0, 0.0, 100.0, 1800, 100, false },
+    }
+    local horses = { {}, {} }       -- [pc][n]: that PC's horse of rider n
+    local s = Session.new(SIM_SCRIPTS, { "Host", "Guest" }, false, world, nil, nil, function(pc, i)
+        for n = 1, 2 do
+            local sp = pc.spawners[Session.indexOf(pc, "horse" .. n)]
+            local horse, rider = rawget(sp, "__fields").SpawnedAI, Session.enemyOn(pc, "rider" .. n)
+            local number = 2147456939 - i * 7000 - n * 100
+            Fake.put(sp, "SpawnerID", Fake.name("None"))
+            rawset(sp, "__name", "BP_AISpawner_C_" .. number)
+            rawset(horse, "__name", HORSE .. "_" .. (number - 1425))
+            rawset(horse, "__classObject", { IsValid = function() return true end, GetFName = function() return Fake.name(HORSE) end })
+            Fake.put(rider, "GetAttachParentActor", function() return horse end)
+            horses[i][n] = horse
+            if i == 2 then
+                -- (the guest's own two stand crosswise: its first pair where the host's second is)
+                local x = n == 1 and 2600.0 or 2000.0
+                Fake.put(horse, "loc", { X = x, Y = 0.0, Z = 100.0 })
+                Fake.put(rider, "loc", { X = x, Y = 0.0, Z = 100.0 })
+            end
+        end
+    end)
+    local h, g = s.pcs[1], s.pcs[2]
+    s:run(4)
+    Session.moveTo(h, 1500, 0)
+    Session.moveTo(g, 2300, 300)
+    s:run(6)
+    local name1, name2 = h.env.PBZ.game.enemyId(horses[1][1]), h.env.PBZ.game.enemyId(horses[1][2])
+    check(net(g).matchSticky[name1] == horses[2][1]:GetAddress() and net(g).matchSticky[name2] == horses[2][2]:GetAddress(),
+        "two riders, their horses of one kind, this world's standing crosswise: each mount is paired by its rider, not by which is nearer")
+    check(gap(at(horses[2][1]), at(horses[1][1])) < 150 and gap(at(horses[2][2]), at(horses[1][2])) < 150,
+        "and each stands where the host's has it (" .. string.format("%.0f and %.0f cm off",
+            gap(at(horses[2][1]), at(horses[1][1])), gap(at(horses[2][2]), at(horses[1][2]))) .. ")")
+    -- A rider gets down: its mount stays the copy it was (the pairing is kept, as any pairing is).
+    Fake.put(Session.enemyOn(g, "rider1"), "GetAttachParentActor", function() return nil end)
+    s:run(2)
+    check(net(g).matchSticky[name1] == horses[2][1]:GetAddress(), "a rider got down: its mount is still the copy it was")
+    allErrors(s)
+end
+
 -- 411: a jump of the host's enemy, taken at once by its copy (players on 1.7.4, 11-20: "boss teleport doesn't sync up
 -- for guest ... near impossible for guest to fight"). On the bench (run251) A-Hua's teleport move goes 5 to 6 m in a
 -- tenth of a second, and the guest's copy, walked after it, was 5.9 m behind and 0.66 s in coming.
@@ -18193,6 +18242,7 @@ return function(print_, scripts)
     ninthReview()
     thePlayLog()
     aRiderAndItsMount()
+    twoRidersAndTheirMounts()
     anEnemysJump()
     return failed == 0
 end

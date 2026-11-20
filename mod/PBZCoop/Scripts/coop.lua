@@ -1281,7 +1281,9 @@ return function(api)
 
     -- A name that is one PC's alone: an actor's own (an enemy no spawner with an id made), or an older build's name
     -- for a spawner the game made as it ran (game.runtimeName, 410). Never a ghost twin's.
-    net.MOUNTS_S = 0.5            -- client: who rides what is asked at most this often (matchRemoteEnemies)
+    net.MOUNTS_S = 0.5            -- client: what one this game runs rides is asked at most this often (handover.rides)
+    net.MOUNT_NEAR_CM = 500       -- client: the host's line of a mount is within this of its line of the rider
+    net.NO_RIDERS = {}
     net.MINE_MOUNT_S = 1.5        -- client: what a rider this game runs rode this lately is still its mount
     function net.ownName(id)
         if id:match("^tw%d+:") then
@@ -1356,6 +1358,44 @@ return function(api)
                 end
             end
         end
+        -- A mount is its rider's. What a copy of the host's rides here (puppets.ridden: each copy is asked twice a
+        -- second) is the host's enemy of that kind, with no id of both PCs, that stands where the host's line has the
+        -- rider: a rider is attached to its mount, so their two lines say one place. However far off this world's
+        -- own stands, and whatever it or that line was paired with before. (Jing Ye's horse is an enemy of its own,
+        -- from a spawner the game makes as it runs, with no name the two PCs share. By kind and nearness it was
+        -- paired only within ENEMY_MATCH_CM of the host's; further off, its own game's horse run after this player
+        -- while the host fought, it never was: it ran by itself, or was put out of the way as one the host hasn't
+        -- got, and its rider's copy, dragged to the host's line, rode nothing. Players on 1.7.4, 11-20: 410. And by
+        -- kind and nearness two riders' horses can be paired crosswise: each rider's copy is left on its mount now,
+        -- puppets.lua, and would stand where the other's is. 412.)
+        for mountAddr, riderId in pairs(api.puppets and api.puppets.ridden or net.NO_RIDERS) do
+            local e, rider = byAddr[mountAddr], net.remoteEnemies[riderId]
+            if e and rider and rider.X and matched[riderId] ~= nil and not isDead(e.actor) and not ridden(e) then
+                e.class = e.class or enemyClass(e.actor)
+                local best, bestD = nil, net.MOUNT_NEAR_CM
+                for _, id in ipairs(ids) do
+                    local r = net.remoteEnemies[id]
+                    if r.Class == e.class and not r.Boss and r.X and net.ownName(id) then
+                        local d = math.sqrt((r.X - rider.X) ^ 2 + (r.Y - rider.Y) ^ 2)
+                        if d < bestD then
+                            best, bestD = id, d
+                        end
+                    end
+                end
+                if best and matched[best] ~= e.actor then
+                    local had = matched[best]
+                    if had ~= nil then
+                        used[had:GetAddress()] = nil        -- (what held that line: free for another again)
+                    end
+                    for id, actor in pairs(matched) do
+                        if actor == e.actor then
+                            matched[id] = nil               -- (and the line this mount was paired with before)
+                        end
+                    end
+                    take(best, e)
+                end
+            end
+        end
         for _, id in ipairs(ids) do
             local r = net.remoteEnemies[id]
             -- (Never a ghost twin's id: this PC makes its own copy of it (twins.lua), and until then the nearest of the
@@ -1377,37 +1417,6 @@ return function(api)
                 end
                 if best and fits(id, best) then
                     take(id, best)
-                end
-            end
-        end
-        -- A mount: what a copy paired above rides here is the host's enemy of that kind that goes by no id of both
-        -- PCs, however far off it stands. (Jing Ye's horse is an enemy of its own, from a spawner the game makes as
-        -- it runs, with no name the two PCs share. Within ENEMY_MATCH_CM of the host's it was paired above; further
-        -- off, its own game's horse run after this player while the host fought, it never was: it ran by itself, or
-        -- was put out of the way as one the host hasn't got, and its rider's copy, dragged to the host's line, rode
-        -- nothing. Players on 1.7.4, 11-20. Who rides what is asked only while such an enemy of the host's has no
-        -- copy here, and then at most every MOUNTS_S: a call through UE4SS for each copy. 410.)
-        for _, id in ipairs(ids) do
-            local r = net.remoteEnemies[id]
-            if matched[id] == nil and r.Class and not r.Boss and game.mountOf and net.ownName(id) then
-                local asked = os.clock()
-                if asked - (net.mountsAt or -1e9) >= net.MOUNTS_S then
-                    net.mountsAt, net.mounts = asked, {}
-                    for _, a in pairs(matched) do
-                        local mount = game.mountOf(a)
-                        if mount then
-                            net.mounts[mount] = true
-                        end
-                    end
-                end
-                for _, e in pairs(locals) do
-                    if net.mounts[e.addr] and not used[e.addr] and not isDead(e.actor) and not ridden(e) then
-                        e.class = e.class or enemyClass(e.actor)
-                        if e.class == r.Class then
-                            take(id, e)
-                            break
-                        end
-                    end
                 end
             end
         end

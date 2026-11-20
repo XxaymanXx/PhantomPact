@@ -44,11 +44,21 @@ return function(api)
     local PASSIVE = { "Passive", "Locomotion", "SpaceState", "Stance", "Utilities", "HitMirror", "Subtitles" }
 
     local puppets = { attacks = 0, played = 0, failed = 0, noCopy = 0 }
+    puppets.ridden = {}           -- guest: address of what a copy rides -> that copy's name, as last looked at (steer):
+                                  -- coop.lua's matchRemoteEnemies pairs a mount by its rider
     local byAddr = {}             -- guest: actor address -> { actor, name, target, busyUntil }
     local hostSeen = {}           -- host: enemy name -> { addr, pos } of the montage last sent
     local hostMoves = {}          -- host: enemy address -> { name, path, ability, start, montage } of the move last sent,
                                   -- for an armoured boss to take it up again after a flinch (resumeHost)
     local failedOnce = {}         -- guest: moves already logged as not replayed
+
+    -- A copy no longer rides what it was last seen on (it got down, died, was let go, or is another's record now).
+    local function unseat(p)
+        if p.mount ~= nil and puppets.ridden[p.mount] == p.name then
+            puppets.ridden[p.mount] = nil
+        end
+        p.mount = nil
+    end
 
     local function passive(name)
         for _, word in ipairs(PASSIVE) do
@@ -151,6 +161,7 @@ return function(api)
         pcall(function() fname = actor:GetFName():ToString() end)
         if p and (p.name ~= name or p.fname ~= fname) then
             game.freeCopy(addr, true)
+            unseat(p)
             p = nil
         end
         if p == nil then
@@ -221,6 +232,10 @@ return function(api)
 
     -- It died: nothing steers it through its death.
     function puppets.drop(actor)
+        local p = byAddr[actor:GetAddress()]
+        if p then
+            unseat(p)
+        end
         byAddr[actor:GetAddress()] = nil
         game.freeCopy(actor:GetAddress(), true)     -- (its target picker too: kept, the next enemy at the address used it)
     end
@@ -229,6 +244,7 @@ return function(api)
         local p = byAddr[addr]
         if p then
             byAddr[addr] = nil
+            unseat(p)
             if not (valid(p.actor) and not game.isDead(p.actor)) then
                 game.freeCopy(addr, true)           -- (dead or gone: forgotten, its picker untouched)
             end
@@ -464,6 +480,13 @@ return function(api)
         -- the first frame.)
         if clock >= (p.rideLookAt or 0) then
             local mount = game.mountOf and game.mountOf(actor)
+            if mount ~= p.mount then
+                unseat(p)
+                p.mount = mount
+                if mount ~= nil then
+                    puppets.ridden[mount] = p.name      -- (for coop.lua to pair that mount by this rider: 412)
+                end
+            end
             local held = mount ~= nil and byAddr[mount] ~= nil
             p.rideLookAt = clock + ((mount ~= nil and not held) and RIDE_SOON_S or RIDE_LOOK_S)
             p.rides = held or (mount ~= nil and clock - p.since < RIDE_WAIT_S)
@@ -559,6 +582,7 @@ return function(api)
         local now = api.link.now()
         for addr, p in pairs(byAddr) do
             if not valid(p.actor) then
+                unseat(p)
                 byAddr[addr] = nil
                 game.freeCopy(addr, true)
             else
