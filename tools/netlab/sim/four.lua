@@ -7371,16 +7371,18 @@ local function pickupCardRecovery()
     check(restored.rearmed == 1 and restored.closed == 0, "the guest's restored button keeps the card open")
 
     local stuck = show(h, true, false)
-    local orphan = show(g, false, false)
+    local unfocused = show(g, false, false)
     Session.scene(h, true, "PickupScene")
     s:run(8)
     check(stuck.closed == 0 and stuck.rearmed == 0, "no card recovery during a scene")
-    check(orphan.closed == 1 and orphan.rearmed == 0, "the guest's orphaned card uses its own close handler")
+    check(unfocused.visible and unfocused.closed == 0 and unfocused.rearmed == 0,
+        "a visible card without reported focus or backpack ownership stays open for manual confirmation")
     Session.scene(h, false)
     s:run(2)
     check(stuck.closed == 0 and stuck.rearmed == 0, "the host's missing button gets time to appear after the scene")
     s:run(9)
-    check(stuck.rearmed == 1 and stuck.closed == 1, "the host's card closes if its button is still missing after the retry")
+    check(stuck.rearmed == 1 and stuck.visible and stuck.closed == 0,
+        "a retry that fails to restore the confirm button still leaves the card open")
 
     local inactive = show(g, false, false)
     inactive.attached = false

@@ -1494,9 +1494,8 @@ return function(api)
         return card ~= nil, card
     end
 
-    -- A pickup or a boss reward can leave a visible card with no confirm button. Let the pickup animation and
-    -- any scene finish, then give a card still owned by the backpack a chance to enable its normal confirmation.
-    -- If the button stays missing, ask the card to close through the game's own handler.
+    -- When a card's focus object is missing, give the backpack a chance to enable confirmation on a card it
+    -- still owns. A card can remain usable without that focus object, so only the player confirms it.
     function game.watchPickupCard(pawn)
         local state, now = game.pickupCard, os.clock()
         if not valid(pawn) then
@@ -1522,28 +1521,21 @@ return function(api)
         end
         local bp = game.backpackOf(pawn)
         local read, showing = pcall(function() return bp.bShowPickItemWidget end)
-        if not read or type(showing) ~= "boolean" then
+        if not read or showing ~= true then
             state.address = nil
             return
         end
-        if address ~= state.address or showing ~= state.showing then
-            state.address, state.showing, state.since = address, showing, now
-            state.rearmedAt, state.confirmed = nil, false
+        if address ~= state.address then
+            state.address, state.since, state.rearmed = address, now, false
             return
         end
-        if state.confirmed or now - state.since < 3
+        if state.rearmed or now - state.since < 3
             or (api.localcoop and (api.localcoop.screenUp() or api.localcoop.bellMenuUp())) then
             return
         end
-        if showing and not state.rearmedAt then
-            state.rearmedAt = now
-            local ready = pcall(function() bp:ReadyToPlayConfirmUI() end)
-            log("Pickup card had no confirm button; asked the backpack to enable it: " .. tostring(ready))
-        elseif not showing or now - state.rearmedAt >= 3 then
-            state.confirmed = true
-            local closed = pcall(function() w:ClickBackKey() end)
-            log("Pickup card still had no confirm button; called its own close handler: " .. tostring(closed))
-        end
+        state.rearmed = true
+        local ready = pcall(function() bp:ReadyToPlayConfirmUI() end)
+        log("Pickup card has no focus button; asked the backpack to enable confirmation: " .. tostring(ready))
     end
 
     function game.killPlayer(pawn)
