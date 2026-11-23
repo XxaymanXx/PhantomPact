@@ -663,6 +663,8 @@ PBZ = {
     status = api.status,
     loadout = api.loadout,
     playlog = api.playlog,
+    localcoop = api.localcoop,
+    puppets = api.puppets,
 }
 
 -- Command file: lets a developer drive tests from outside the game. Write one command per line

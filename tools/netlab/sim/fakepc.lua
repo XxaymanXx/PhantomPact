@@ -2581,6 +2581,12 @@ function Fake.new(id, scripts, ini, link)
         if found[path] then
             return found[path]
         end
+        -- The classes hitfx.lua checks what it hands the game against (413). Made the first time one is asked for, so a
+        -- session with PartnerHitSounds off has nothing more in it.
+        if path == "/Script/AkAudio.AkAudioEvent" or path == "/Script/Engine.SceneComponent" or path == "/Script/Engine.Actor" then
+            found[path] = object(pc, "Class")
+            return found[path]
+        end
         if pc.groundTraces and path == "/Script/Engine.Default__KismetSystemLibrary" then
             return kismet
         end

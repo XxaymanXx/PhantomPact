@@ -8558,6 +8558,156 @@ end
 -- sound and blood for it on their copy of that enemy. Never the hitter's own, a hit on a player, a partner's blow or hit played
 -- here, a killing blow told again, or a hit with no fresh effect asked; not in PvP, nor with it off; and a line that isn't one
 -- is refused.
+-- A copy's death to see (417). The players on 1.7.4: "enemies when they die they are like glitched for guest and finish combat
+-- with e also glitched". The bench, run253: the host's word ended a copy at once by the game's kill, which plays no fall
+-- (the host's own enemy 1.7 s in its death montage, the copy with its flinch stopped and none played), and a copy this
+-- player was executing was ended half a second into the paired move. Now the copy plays its kind's death, found by the
+-- flinch it is in or was last in, and an execution of this player's runs out, before the kill; with nothing to show it is
+-- ended at once, as before.
+local function aCopysDeath()
+    part("a copy's death to see")
+    local HIT = "/HuaShira/Characters/Monster/MaleThug/Anim/Throw/Hit/MaleThug_Throw_Hit_Light_F_R_Montage.MaleThug_Throw_Hit_Light_F_R_Montage"
+    local function as(how)
+        return (HIT:gsub("_Hit_Light_F_R_", how))
+    end
+    local DEAD, DOWN, AIR, AIRDEAD = as("_Dead_Normal_F_"), as("_Hit_Ground_F_"), as("_Hit_LaunchLoop_B_"), as("_Dead_Launch_B_")
+    local BACK, NOBACK, BROKEN = as("_Hit_Knockback_B_"), as("_Dead_Normal_B_"), as("_Hit_NBreak_F_")
+    local VICTIM = "/HuaShira/Characters/Monster/MaskAssassin/Anim/Execute/AM_MaskAssassin_BEd_Tang_M_01.AM_MaskAssassin_BEd_Tang_M_01"
+    -- (A kind that keeps its deaths one folder up from its flinches, as the game's FemaleThug_Hoe does.)
+    local HOE = "/HuaShira/Characters/Monster/FemaleThug/Anim/Hoe/Hit/Moontage/FemaleThug_Hoe_Hit_Light_B_L_Montage.FemaleThug_Hoe_Hit_Light_B_L_Montage"
+    local HOEDEAD = "/HuaShira/Characters/Monster/FemaleThug/Anim/Hoe/Hit/FemaleThug_Hoe_Dead_Normal_B_Montage.FemaleThug_Hoe_Dead_Normal_B_Montage"
+    -- The game's montages on one PC (not the death from behind: this kind has none).
+    local function montages(pc)
+        for _, x in ipairs({ { HIT, 1.0 }, { DEAD, 1.8 }, { DOWN, 1.0 }, { AIR, 1.0 }, { AIRDEAD, 1.6 }, { BACK, 1.0 }, { VICTIM, 4.0 },
+            { BROKEN, 1.2 }, { HOE, 1.0 }, { HOEDEAD, 1.5 } }) do
+            local m = Fake.object(pc, "AnimMontage")
+            rawset(m, "__path", x[1])
+            rawset(m, "__name", x[1]:match("([^.]+)$"))
+            Fake.put(m, "GetPlayLength", function() return x[2] end)
+            pc.found[x[1]] = m
+        end
+    end
+    local function both(a, b)
+        montages(a)
+        montages(b)
+    end
+    local function dead(e)
+        return field(e, "dead") == true
+    end
+    local function playing(e)
+        local m = field(field(e, "anim"), "montage")
+        return m and rawget(m, "__path") or nil
+    end
+    local function plays(e)
+        return field(field(e, "anim"), "played") or 0
+    end
+    local function said(pc, words)
+        return count(pc.logs, words)
+    end
+    -- The host's enemy flinches (its move told), and the host's own blow ends it t seconds on.
+    local function flinchThenDeath(s, h, g, id, flinch, t)
+        g.inbox[#g.inbox + 1] = "A sp:" .. id .. " - " .. flinch .. " 0.10 -"
+        s:run(t)
+        local was = playing(Session.enemyOn(g, id))
+        swing(h, Session.enemyOn(h, id), 0)
+        s:run(0.3)
+        return was
+    end
+
+    local s, h, g = pair(nil, both)
+    local copy = Session.enemyOn(g, "thug1")
+    local was = flinchThenDeath(s, h, g, "thug1", HIT, 0.1)
+    check(was == HIT and not dead(copy) and playing(copy) == DEAD and said(g, "Host says sp:thug1 died; its death is shown here first") == 1,
+        "the host's enemy dies as its copy flinches here: the copy plays its kind's death first, not ended yet (" .. tostring(playing(copy)) .. ")")
+    local n = plays(copy)
+    g.inbox[#g.inbox + 1] = "K sp:thug1"
+    s:run(0.2)
+    local floor = g.env.PBZ.game.healthFloor(copy)
+    local told = count(g.sent, "^[EQ] D sp:thug1")
+    Fake.setHealth(copy, 1)         -- (a blow of this player's on it meanwhile: down to its floor)
+    s:run(0.2)
+    check(not dead(copy) and playing(copy) == DEAD and plays(copy) == n, "told dead again meanwhile: the show goes on, not begun again")
+    -- (The game plays a flinch on it at that blow: taken off within a few frames, its fall on from where it was.)
+    field(copy, "anim"):Montage_Play(g.found[HIT], 1.0, 0, 0.0, true)
+    Fake.put(field(copy, "hit"), "state", "CharacterState.Hitreact.State.Normal")
+    s:run(0.1)
+    local back = field(field(copy, "anim"), "start")
+    check(not dead(copy) and playing(copy) == DEAD and field(field(copy, "hit"), "state") == "None" and back ~= nil and back > 0.5 and back < 1.0,
+        string.format("a flinch the game plays on it at that blow is taken off: its fall goes on from where it was (%.2f s in)", back or -1))
+    check(floor == 1 and g.env.PBZ.game.healthFloor(copy) == 1 and count(g.sent, "^[EQ] D sp:thug1") == told,
+        "its floor is kept through the show, and a blow of this player's on it meanwhile is told to nobody (floor " .. tostring(floor) .. ")")
+    s:run(0.4)
+    check(dead(copy) and field(copy, "realDeath") == true and said(g, "Host says sp:thug1 died; it dies here too") == 1,
+        "a second after the word, the fall over, the copy is ended by the game's own death, once")
+    -- One that never flinched: ended at once, as before.
+    copy = Session.enemyOn(g, "thug2")
+    swing(h, Session.enemyOn(h, "thug2"), 0)
+    s:run(0.3)
+    check(dead(copy) and said(g, "Host says sp:thug2 died; it dies here too") == 1 and said(g, "sp:thug2 died; its") == 0,
+        "one with no flinch to go by: ended at once, as before")
+    -- Its flinch over a moment ago, standing again: its kind is still known.
+    copy = Session.enemyOn(g, "near")
+    g.inbox[#g.inbox + 1] = "A sp:near - " .. HIT .. " 0.10 -"
+    s:run(0.5)
+    Fake.put(field(copy, "anim"), "montage", nil)
+    swing(h, Session.enemyOn(h, "near"), 0)
+    s:run(0.3)
+    check(not dead(copy) and playing(copy) == DEAD, "one whose flinch ended a moment ago: its kind's death all the same")
+    s:run(1.7)
+    check(dead(copy), "and ended after it")
+    allErrors(s)
+
+    -- A flinch on the ground has nothing to fall from; one in the air has its own death; a kind with no death from behind
+    -- has none shown.
+    s, h, g = pair(nil, both)
+    copy = Session.enemyOn(g, "thug1")
+    flinchThenDeath(s, h, g, "thug1", DOWN, 0.1)
+    check(dead(copy) and said(g, "sp:thug1 died; its") == 0, "a copy down on the ground already: ended at once")
+    copy = Session.enemyOn(g, "thug2")
+    flinchThenDeath(s, h, g, "thug2", AIR, 0.1)
+    check(not dead(copy) and playing(copy) == AIRDEAD, "one in the air: its kind's death in the air (" .. tostring(playing(copy)) .. ")")
+    copy = Session.enemyOn(g, "near")
+    flinchThenDeath(s, h, g, "near", BACK, 0.1)
+    check(not dead(copy) and playing(copy) == DEAD and g.found[NOBACK] == nil,
+        "hit from behind, a kind with no death from behind here: its death from the front, and nothing loaded for a guess")
+    s:run(2)
+    check(dead(Session.enemyOn(g, "thug2")) and dead(copy), "both ended after their falls")
+    allErrors(s)
+
+    -- An execution of this player's own on the copy runs out before the kill, its own montage left as it is.
+    s, h, g = pair(nil, both)
+    copy = Session.enemyOn(g, "thug1")
+    local anim = field(copy, "anim")
+    anim:Montage_Play(g.found[VICTIM], 1.0, 0, 0.5, true)
+    Fake.put(field(copy, "hit"), "state", "CharacterState.HitReact.State.Executing")
+    n = plays(copy)
+    swing(h, Session.enemyOn(h, "thug1"), 0)
+    s:run(0.3)
+    check(not dead(copy) and playing(copy) == VICTIM and plays(copy) == n
+        and said(g, "Host says sp:thug1 died; its execution is shown here first") == 1,
+        "a copy this player is executing as the host's word comes: left in the execution, nothing played over it")
+    s:run(1.7)
+    check(not dead(copy) and playing(copy) == VICTIM, "two seconds on: still in it")
+    -- (The game ends the execution before the victim's montage would: its state for it gone, the copy getting up.)
+    Fake.put(field(copy, "hit"), "state", "CharacterState.Hitreact.State.Getup")
+    s:run(0.15)
+    check(dead(copy) and said(g, "Host says sp:thug1 died; it dies here too") == 1,
+        "the game ends the execution, a second and a half before its montage would: the copy is ended then, not left to get up")
+    -- Its guard broken as the word comes (what this player's finishing strike starts from, the bench's run258): a
+    -- standing flinch like any other.
+    copy = Session.enemyOn(g, "thug2")
+    was = flinchThenDeath(s, h, g, "thug2", BROKEN, 0.1)
+    check(was == BROKEN and not dead(copy) and playing(copy) == DEAD, "a copy with its guard broken as the word comes: its kind's death first")
+    s:run(2)
+    check(dead(copy), "and ended after it")
+    copy = Session.enemyOn(g, "near")
+    was = flinchThenDeath(s, h, g, "near", HOE, 0.1)
+    check(was == HOE and not dead(copy) and playing(copy) == HOEDEAD, "a kind whose deaths lie one folder up from its flinches: found there (" .. tostring(playing(copy)) .. ")")
+    s:run(2)
+    check(dead(copy), "and ended after it")
+    allErrors(s)
+end
+
 local function partnerHitSounds()
     part("partner hit sounds")
     local CHOOSER_FN = "/PBZCombatAsset/Prototypes/Hitreact/BP_HitEffectPlayer_Chooser.BP_HitEffectPlayer_Chooser_C:GetEffectData"
@@ -8576,6 +8726,7 @@ local function partnerHitSounds()
     end
     local BASE = "/Script/PBZCombatAsset.HitreactEffectPlayer_PBZBase"       -- (the choosers' class: GetEffectData is its)
     local COMMON = "/PBZCombatAsset/Config/HitReact/HitEffect/PBZ_HitreactEffectPlayer_Chooser.PBZ_HitreactEffectPlayer_Chooser"
+    local HIT_EV = "/Game/Wwise/Events/Combat/SFX_Hit_Slash.SFX_Hit_Slash"
 
     -- A chooser of the game's: what it was asked (by: whose it is), and a sound and two blood systems for any hit. As UE4SS
     -- runs a Blueprint hook for the mod's own calls too, the hook on GetEffectData runs once it has answered, with what it got.
@@ -8614,6 +8765,29 @@ local function partnerHitSounds()
             return 1
         end)
         pc.found["/Script/AkAudio.Default__AkGameplayStatics"] = ak
+        -- (413) The sound as an asset of the game's, of the sound events' class and no other.
+        rawset(pc.hitSound, "__path", HIT_EV)
+        Fake.put(pc.hitSound, "IsA", function(_, cls) return cls == pc.env.StaticFindObject("/Script/AkAudio.AkAudioEvent") end)
+        -- (413) The sound engine's call for a sound at a place, as this PC's build of it takes it: the world's object after
+        -- the turn, or (akNamed) a name for the event before that. Called the other way it is refused, as UE4SS refuses
+        -- a value of the wrong kind.
+        pc.soundsAt = {}
+        Fake.put(ak, "PostEventAtLocation", function(_, event, where, turn, a4, a5)
+            local world = a4
+            if pc.akNamed then
+                if type(a4) ~= "string" then
+                    error("PostEventAtLocation: EventName takes a string")
+                end
+                world = a5
+            end
+            if type(world) ~= "table" then
+                error("PostEventAtLocation: WorldContextObject takes an object")
+            end
+            if event == pc.hitSound then
+                pc.soundsAt[#pc.soundsAt + 1] = { at = where, turn = turn, world = world }
+            end
+            return 1
+        end)
         pc.blood = {}
         for i, path in ipairs(BLOOD) do
             local system = Fake.object(pc, "NiagaraSystem")
@@ -9081,6 +9255,134 @@ local function partnerHitSounds()
         and none(a), "the host and the other two guests each play it on their copy, once; the one who hit, none")
     allErrors(s)
 
+    -- The guard (413): each kind of call into the game leaves a note in a file while its first few of a session run, and
+    -- a session that finds one left does that kind another way, or no more.
+    do
+        local FILE = "hitfx_guard.txt"
+        local function guardOf(pc)
+            return pc.env.PBZ.hitfx.guard or { way = {}, skip = {} }     -- (none in scripts before 413)
+        end
+        -- Two players, the host's guard file as a session before left it (nil: none), and its sound engine's build.
+        local function after(text, named)
+            local t = Session.new(SIM_SCRIPTS, { "Host", "Guest" }, false, ENEMIES, ON, nil, function(pc, i)
+                if i == 1 then
+                    pc.files[FILE], pc.akNamed = text, named
+                end
+            end)
+            hearingBoth(t.pcs[1], t.pcs[2])
+            t:run(4)
+            Session.moveTo(t.pcs[1], 0, 0)
+            Session.moveTo(t.pcs[2], 500, 0)
+            t:run(2)
+            return t, t.pcs[1], t.pcs[2]
+        end
+        -- A partner's hit on thug1 comes to the host: its chooser's asks, the sounds on the enemy, the sounds at a place,
+        -- the blood.
+        local function partnerHit(t, pc)
+            local e = Session.enemyOn(pc, "thug1")
+            mark(pc)
+            local before = #pc.soundsAt
+            pc.inbox[#pc.inbox + 1] = LINE
+            t:run(0.1)
+            local asks, sounds, blood = played(pc, e)
+            return asks, sounds, #pc.soundsAt - before, blood, e
+        end
+        local function said(pc, words)
+            return count(pc.logs, "Partner hit sounds: the last session ended inside " .. words)
+        end
+
+        local t, hh, gg = after(nil)
+        local asks, sounds, placed, blood = partnerHit(t, hh)
+        local file = hh.files[FILE] or ""
+        check(asks == 1 and sounds == 1 and placed == 0 and blood == #BLOOD and file:find("^epoch 1\n") ~= nil
+            and file:find("\nbusy ask Physical.Slash.TangBlade.Player Normal.Light Meat\n", 1, true) ~= nil
+            and file:find("\nbusy hit " .. HIT_EV .. "\n", 1, true) ~= nil
+            and file:find("\nbusy blood " .. BLOOD[1] .. "\n", 1, true) ~= nil
+            and file:find("\nbusy blood " .. BLOOD[2] .. "\n", 1, true) ~= nil,
+            "the guard: a partner's hit plays as before, and while its calls are new to the session each has its note in "
+            .. "the guard's file (" .. (file:gsub("\n", " | ")) .. ")")
+        t:run(2.5)
+        check(hh.files[FILE] == nil and gg.files[FILE] == nil,
+            "2 s on the notes are out: no file while nothing is held back, and none on the PC that played nothing")
+        for _ = 1, 7 do
+            partnerHit(t, hh)
+            t:run(2.4)
+        end
+        local opens = hh.opens[FILE]
+        asks, sounds, placed, blood = partnerHit(t, hh)
+        t:run(2.5)
+        check(asks == 1 and sounds == 1 and blood == #BLOOD and hh.opens[FILE] == opens and hh.files[FILE] == nil,
+            "after a kind's first six of a session its calls leave no more notes: the file isn't touched again ("
+            .. tostring(hh.opens[FILE]) .. " opens, " .. tostring(opens) .. " before)")
+        -- A sound that isn't one of the sound events' class is never handed to the sound engine; the blood still plays.
+        Fake.put(hh.hitSound, "IsA", function() return false end)
+        asks, sounds, placed, blood = partnerHit(t, hh)
+        check(asks == 1 and sounds == 0 and placed == 0 and blood == #BLOOD,
+            "what the chooser gives for a sound isn't of the sound events' class: not posted, the blood plays ("
+            .. sounds .. " sounds, " .. placed .. " at a place, " .. blood .. " blood)")
+        allErrors(t)
+
+        -- The last session ended inside a hit's sound on an enemy: at the enemy's place from now on.
+        t, hh, gg = after("epoch 1\nbusy hit " .. HIT_EV .. "\n")
+        local e
+        asks, sounds, placed, blood, e = partnerHit(t, hh)
+        local where = hh.soundsAt[#hh.soundsAt] or {}
+        check(guardOf(hh).way.hit == 2 and asks == 1 and sounds == 0 and placed == 1 and blood == #BLOOD
+            and where.world == e and where.at ~= nil and gap(where.at, at(e)) < 1 and guardOf(hh).placeArgs == 4,
+            "a session ended inside a partner's hit sound: the next posts it at the enemy's place, by the call that makes "
+            .. "nothing on the body, and the blood as before (" .. sounds .. " on it, " .. placed .. " at its place)")
+        file = hh.files[FILE] or ""
+        check(said(hh, "a partner's hit sound %(SFX_Hit_Slash%)%. A partner's hit sounds are played at their place") == 1
+            and file:find("\nhit 2\n", 1, true) ~= nil and guardOf(gg).way.hit == 1,
+            "it says so in the log once, keeps it in its file, and the other PC is as it was (" .. (file:gsub("\n", " | ")) .. ")")
+        t:run(2.5)
+        check(hh.files[FILE] == "epoch 1\nhit 2\n", "the note of the new way's first call goes like any other: the file "
+            .. "keeps the step alone (" .. tostring(hh.files[FILE]):gsub("\n", " | ") .. ")")
+        allErrors(t)
+        -- The same on a sound engine whose call for a place takes a name for the event first.
+        t, hh, gg = after("epoch 1\nbusy hit " .. HIT_EV .. "\n", true)
+        asks, sounds, placed, blood = partnerHit(t, hh)
+        check(sounds == 0 and placed == 1 and guardOf(hh).placeArgs == 5,
+            "a sound engine whose call for a place takes a name for the event too: found by trying, and posted (" .. placed .. ")")
+        allErrors(t)
+        -- Ended inside that call too: no hit sounds at all, the blood still.
+        t, hh, gg = after("epoch 1\nhit 2\nbusy hit " .. HIT_EV .. "\n")
+        asks, sounds, placed, blood = partnerHit(t, hh)
+        check(guardOf(hh).way.hit == 3 and asks == 1 and sounds == 0 and placed == 0 and blood == #BLOOD
+            and said(hh, "a partner's hit sound %(SFX_Hit_Slash%)%. A partner's hit sounds are off on this PC") == 1,
+            "a session ended inside the call at a place too: no hit sounds on this PC any more, the blood plays")
+        allErrors(t)
+        -- Ended inside the blood: the sound alone. Inside the chooser's ask: neither, and nothing is asked.
+        t, hh, gg = after("epoch 1\nbusy blood " .. BLOOD[1] .. "\n")
+        asks, sounds, placed, blood = partnerHit(t, hh)
+        check(asks == 1 and sounds == 1 and blood == 0 and said(hh, "the blood of a partner's hit %(NS_Blood_Hit_A%)") == 1,
+            "a session ended inside a hit's blood: the sound alone from then on (" .. sounds .. " sound, " .. blood .. " blood)")
+        allErrors(t)
+        t, hh, gg = after("epoch 1\nbusy ask Physical.Slash.TangBlade.Player Normal.Light Meat\n")
+        asks, sounds, placed, blood = partnerHit(t, hh)
+        check(asks == 0 and sounds == 0 and placed == 0 and blood == 0 and guardOf(hh).way.ask == 2,
+            "a session ended inside the game's choice of a hit's effects: nothing is asked or played there any more")
+        -- The host's own hits still go out for the others.
+        mark(hh, gg)
+        struck(hh)
+        hit(hh, Session.enemyOn(hh, "thug1"))
+        t:run(0.5)
+        check(#sent(hh) == 1 and once(gg, Session.enemyOn(gg, "thug1")), "its own hits still go, and the partner plays them")
+        allErrors(t)
+        -- A file of another epoch counts for nothing and goes; one with rubbish in it is read without an error.
+        t, hh, gg = after("epoch 0\nhit 3\nask 2\nbusy blood " .. BLOOD[1] .. "\n")
+        local gone = hh.files[FILE] == nil
+        asks, sounds, placed, blood = partnerHit(t, hh)
+        check(gone and asks == 1 and sounds == 1 and blood == #BLOOD and said(hh, "") == 0,
+            "a guard file of another epoch (these calls made another way since): nothing of it counts, and it is gone")
+        allErrors(t)
+        t, hh, gg = after("epoch 1\nhit 1e400\nswing x\n\nbusy\nbusy nothing here\nask 9\nlearn\n")
+        asks, sounds, placed, blood = partnerHit(t, hh)
+        check(asks == 1 and sounds == 1 and blood == #BLOOD and count(hh.logs, "the guard's file can't be read") == 0,
+            "a guard file with rubbish in it: read without an error, what it can't mean left out")
+        allErrors(t)
+    end
+
     check(Session.shippedIni():match("\nPartnerHitSounds = ([^\r\n]+)") == "On", "the ini as it ships has PartnerHitSounds = On")
 end
 
@@ -9135,6 +9437,24 @@ local function partnerSwingSounds()
             return 1
         end)
         f["/Script/AkAudio.Default__AkGameplayStatics"] = ak
+        -- (413) The sound engine's call for a sound at a place, as this PC's build of it takes it: the world's object after
+        -- the turn, or (akNamed) a name for the event before that. Called the other way it is refused, as UE4SS refuses
+        -- a value of the wrong kind.
+        pc.swingSoundsAt = {}
+        Fake.put(ak, "PostEventAtLocation", function(_, ev, where, turn, a4, a5)
+            local world = a4
+            if pc.akNamed then
+                if type(a4) ~= "string" then
+                    error("PostEventAtLocation: EventName takes a string")
+                end
+                world = a5
+            end
+            if type(world) ~= "table" then
+                error("PostEventAtLocation: WorldContextObject takes an object")
+            end
+            pc.swingSoundsAt[#pc.swingSoundsAt + 1] = { ev = ev and rawget(ev, "__path"), where = where, world = world, at = pc.now }
+            return 1
+        end)
         local function step(t, action)
             return { StartTime = t, duration = 0.1, Action = action }
         end
@@ -9486,6 +9806,111 @@ local function partnerSwingSounds()
         .. "another guest's swing on their figure of that guest, once; the swinger none (" .. show(heard[s.pcs[1]], t0) .. " | " .. show(heard[s.pcs[2]], t0) .. " | "
         .. show(heard[s.pcs[4]], t0) .. " | " .. show(heard[s.pcs[3]], t0) .. ")")
     allErrors(s)
+
+    -- The guard (413), for a partner's swings and the reading of their weapon.
+    do
+        local FILE = "hitfx_guard.txt"
+        local function guardOf(pc)
+            return pc.env.PBZ.hitfx.guard or { way = {}, skip = {} }     -- (none in scripts before 413)
+        end
+        local function said(pc, words)
+            return count(pc.logs, "Partner hit sounds: the last session ended inside " .. words)
+        end
+        local LEARNED = "Partner swing sounds: Sword learned"
+        -- Two players, the host's guard file as a session before left it; the guest takes up the sword.
+        local function after(text, named)
+            local t = Session.new(SIM_SCRIPTS, { "Host", "Guest" }, false, ENEMIES, ON, nil, function(pc, i)
+                if i == 1 then
+                    pc.files[FILE], pc.akNamed = text, named
+                end
+            end)
+            both(t.pcs[1], t.pcs[2])
+            t:run(4)
+            Session.moveTo(t.pcs[1], 0, 0)
+            Session.moveTo(t.pcs[2], 500, 0)
+            t:run(2)
+            Session.hold(t.pcs[2], SWORD, true)
+            return t, t.pcs[1], t.pcs[2]
+        end
+        -- The guest's swing: what the host posted on their figure, and at a place.
+        local function guestSwings(t, hh, gg, path)
+            local placed = #hh.swingSoundsAt
+            local heard, t0 = swingOn(t, gg, path, { hh })
+            local at = {}
+            for i = placed + 1, #hh.swingSoundsAt do
+                at[#at + 1] = hh.swingSoundsAt[i]
+            end
+            return heard[hh], at, t0
+        end
+
+        local t, hh, gg = after(nil)
+        t:run(2)
+        local file = hh.files[FILE] or ""
+        check(count(hh.logs, LEARNED) == 1 and file == "epoch 1\nbusy learn " .. SWORD .. "\n",
+            "the guard: while a partner's weapon is read, and 2 s on, its note is in the guard's file ("
+            .. (file:gsub("\n", " | ")) .. ")")
+        t:run(2.5)
+        check(hh.files[FILE] == nil, "then it is out: no file")
+        local on, placed = guestSwings(t, hh, gg, A1)
+        check(#on == 1 and #placed == 0 and (hh.files[FILE] or ""):find("\nbusy swing " .. LIGHT_EV .. "\n", 1, true) ~= nil,
+            "a partner's swing sound, new to the session, has its note as it is posted (" .. tostring(hh.files[FILE]):gsub("\n", " | ") .. ")")
+        t:run(2.5)
+        check(hh.files[FILE] == nil, "and 2 s on that is out too")
+        allErrors(t)
+
+        -- The last session ended inside a swing's sound on a figure: at the figure's place from now on.
+        t, hh, gg = after("epoch 1\nbusy swing " .. LIGHT_EV .. "\n")
+        t:run(2)
+        local t0
+        on, placed, t0 = guestSwings(t, hh, gg, A1)
+        local x = placed[1] or {}
+        check(guardOf(hh).way.swing == 2 and #on == 0 and #placed == 1 and x.ev == LIGHT_EV and x.world == net(hh).ghost
+            and x.where ~= nil and gap(x.where, at(net(hh).ghost)) < 1 and math.abs(x.at - t0 - 0.30) <= 0.06,
+            "a session ended inside a partner's swing sound: the next posts their swings at their figure's place, on "
+            .. "time, by the call that makes nothing on the body (" .. #on .. " on it, " .. #placed .. " at its place)")
+        check(said(hh, "a partner's swing sound %(SFX_Swing_Sword_Light%)%. A partner's swing sounds are played at their place") == 1
+            and count(hh.logs, "Partner hit sounds: on .* Held back on this PC .*%(swing 2%)") >= 1,
+            "it says so in the log, and in the setting's own line")
+        allErrors(t)
+        -- The same on a sound engine whose call for a place takes a name for the event first.
+        t, hh, gg = after("epoch 1\nbusy swing " .. LIGHT_EV .. "\n", true)
+        t:run(2)
+        on, placed = guestSwings(t, hh, gg, A1)
+        check(#on == 0 and #placed == 1 and guardOf(hh).placeArgs == 5,
+            "a sound engine whose call for a place takes a name for the event too: found by trying, and posted (" .. #placed .. ")")
+        allErrors(t)
+        -- Ended inside that call too: no swing sounds, and no weapon is read for them.
+        t, hh, gg = after("epoch 1\nswing 2\nbusy swing " .. LIGHT_EV .. "\n")
+        t:run(2)
+        on, placed = guestSwings(t, hh, gg, A1)
+        check(guardOf(hh).way.swing == 3 and #on == 0 and #placed == 0 and count(hh.logs, LEARNED) == 0,
+            "a session ended inside the call at a place too: no swing sounds on this PC any more, and no weapon read for them")
+        allErrors(t)
+        -- Ended inside the reading of a weapon: that weapon is passed over, another is read and heard.
+        t, hh, gg = after("epoch 1\nbusy learn " .. SWORD .. "\n")
+        t:run(3)
+        on, placed = guestSwings(t, hh, gg, A1)
+        local skipped = count(hh.logs, LEARNED) == 0 and #on == 0 and #placed == 0
+        Session.hold(gg, CANNON, true)
+        t:run(3)
+        on, placed = guestSwings(t, hh, gg, C1)
+        check(skipped and guardOf(hh).skip[SWORD] == true and count(hh.logs, "Partner swing sounds: Cannon learned") == 1
+            and #on == 1 and (on[1] or {}).ev == FIRE_EV and (hh.files[FILE] or ""):find("\nskip " .. SWORD .. "\n", 1, true) ~= nil
+            and said(hh, "the reading of a partner's weapon %(Sword%)%. That weapon's swing sounds are left out") == 1,
+            "a session ended inside the reading of a partner's weapon: that weapon is passed over from then on (kept in "
+            .. "the file, said in the log), another they take up is read and heard")
+        allErrors(t)
+        -- A second weapon's reading ended a session: none is read any more.
+        t, hh, gg = after("epoch 1\nskip " .. CANNON .. "\nbusy learn " .. SWORD .. "\n")
+        t:run(3)
+        Session.hold(gg, CANNON, true)
+        t:run(3)
+        on, placed = guestSwings(t, hh, gg, C1)
+        check(guardOf(hh).way.learn == 2 and #on == 0 and #placed == 0 and count(hh.logs, "Partner swing sounds: %a+ learned") == 0
+            and (hh.files[FILE] or ""):find("\nlearn 2\n", 1, true) ~= nil,
+            "two weapons whose reading ended a session: no weapon is read on this PC any more")
+        allErrors(t)
+    end
 end
 
 -- A boss beaten in co-op is beaten in both saves, and two saves that disagree are brought round to the host's.
@@ -12634,6 +13059,73 @@ local function localSticks()
     allErrors(s)
 end
 
+-- Player 2's stick let go and the game not told (416; a report on 1.7.4: "the game doesn't register when the joystick has
+-- returned to neutral resulting in the camera spinning or the character running endlessly"). main.dll says whether a pad's
+-- sticks are at rest; with player 2's at rest and the game still holding a push of theirs, their controller's input is let
+-- go, once.
+local function localLetGo()
+    part("player 2's stick let go, the game not told")
+    local s, pc, state = localGame()
+    s:run(1.5)
+    local function flushed(c) return field(c, "flushed") or 0 end
+    -- (What the game has for player 2's sticks: as GetInputAnalogKeyState answers. Let go of, it has nothing.)
+    local has, asked = {}, 0
+    Fake.put(state.p2Controller, "GetInputAnalogKeyState", function(_, key)
+        asked = asked + 1
+        return has[key.KeyName:ToString()] or 0.0
+    end)
+    local lib = pc.found["/Script/EnhancedInput.Default__EnhancedInputLibrary"]
+    Fake.put(lib, "FlushPlayerInput", function(_, c)
+        Fake.put(c, "flushed", flushed(c) + 1)
+        if c == state.p2Controller then
+            has = {}
+        end
+    end)
+    local function pads(two)       -- (player 1's pad in and at rest; player 2's as given)
+        pc.files["pads.txt"] = "1 0\n" .. two .. "\n0\n0\n"
+    end
+    pads("1 1")
+    has = { Gamepad_LeftY = 1.0 }
+    s:run(1.0)
+    local p1, p2 = flushed(pc.controller), flushed(state.p2Controller)
+    check(p2 == flushed(state.p2Controller) and asked == 0, "player 2's stick held, as the pad itself says: nothing is let go, nothing asked")
+    pads("1 0")
+    s:run(0.2)
+    check(flushed(state.p2Controller) == p2, "at rest for 0.2 s: not yet")
+    s:run(0.4)
+    check(flushed(state.p2Controller) == p2 + 1 and flushed(pc.controller) == p1
+        and count(pc.logs, "Player 2's stick is at rest and the game still had it pushed %(Gamepad_LeftY 1.00%)") == 1,
+        "at rest for half a second, and the game still has their push: player 2's input is let go, player 1's left alone, said")
+    local looks = asked
+    s:run(5)
+    check(flushed(state.p2Controller) == p2 + 1 and asked <= looks + 4,
+        "then nothing more while it rests: looked at once more a second in, not all the while (" .. (asked - looks) .. " more asks in 5 s)")
+    -- The camera's stick the same way, at the next rest.
+    pads("2 1")
+    s:run(0.5)
+    has = { Gamepad_RightX = -0.8 }
+    pads("2 0")
+    s:run(0.6)
+    check(flushed(state.p2Controller) == p2 + 2, "the camera's stick, a button held meanwhile: the same")
+    -- What a resting stick still shows (a little off the middle) is no push.
+    pads("1 1")
+    s:run(0.5)
+    has = { Gamepad_LeftX = 0.2 }
+    pads("1 0")
+    s:run(2)
+    check(flushed(state.p2Controller) == p2 + 2, "a stick a little off its middle at rest (0.2): not taken for a push")
+    -- An older main.dll says nothing of the sticks; a pad that isn't in says nothing either.
+    has = { Gamepad_LeftY = 1.0 }
+    pc.files["pads.txt"] = "1\n1\n0\n0\n"
+    s:run(2)
+    local old = flushed(state.p2Controller)
+    pc.files["pads.txt"] = "1 0\n0\n0\n0\n"
+    s:run(2)
+    check(old == p2 + 2 and flushed(state.p2Controller) >= p2 + 2 and count(pc.logs, "still had it pushed") == 2,
+        "an older main.dll's file (no word on the sticks), or their pad not in: nothing is let go for a stick")
+    allErrors(s)
+end
+
 -- The game's rise-up for a Soul back from down turns "cancel the player controller" on in player 1's input whichever Soul rises: player
 -- 1 stood frozen through all of player 2's (a player report on 1.7.3). It's put back while player 2 rises.
 local function localRise()
@@ -12700,6 +13192,252 @@ local function localGround()
         "a long fall still is: brought back where there's floor, its speed stopped")
     Fake.put(cmc, "MovementMode", 1)
     pc.noFloor = nil
+    allErrors(s)
+end
+
+-- Player 1 set down where there is no world (414). A report on 1.7.4, local co-op, with its play log: player 1 killed in a
+-- boss's fight, taken 3164 m off by the game within 1.5 s and up again there with no floor under them: down from the fall a
+-- second later, brought back to the same place by the mod's own respawns, and so on for the eight minutes of the log. After
+-- a far move at once, a player 1 falling with nothing under them is held still where the move left them: till the game
+-- moves them on, till there is floor, or for 20 s, then back to where they last stood. A fall in play isn't that.
+local function localVoid()
+    part("player 1 set down where there's no world")
+    local s, pc, state = localGame()
+    s:run(1.5)
+    Fake.traces(pc)
+    local p1 = pc.pawn
+    local function mode(body)
+        return field(field(body, "CharacterMovement"), "MovementMode")
+    end
+    local function setMode(body, m)
+        Fake.put(field(body, "CharacterMovement"), "MovementMode", m)
+    end
+    local function place(body)
+        local l = at(body)
+        return { X = l.X, Y = l.Y, Z = l.Z }
+    end
+    -- (The sim has no gravity: a falling body drops 18 m a second here, and lands where there is ground. pc.noFloor: no
+    -- floor for a line down to find; pc.noGround: one a line finds and a body falls through.)
+    local function gravity()
+        for _, body in ipairs({ p1, state.p2Pawn }) do
+            local l = body and at(body)
+            local floor = l and not (pc.noFloor and pc.noFloor({ X = l.X, Y = l.Y, Z = 10 }))
+                and not (pc.noGround and pc.noGround({ X = l.X, Y = l.Y, Z = 10 }))
+            if body and mode(body) == 1 and not floor then
+                setMode(body, 3)
+            end
+            if body and mode(body) == 3 then
+                if floor and l.Z > 100 and l.Z - 30 <= 100 then
+                    Fake.put(body, "loc", { X = l.X, Y = l.Y, Z = 100.0 })
+                    setMode(body, 1)
+                elseif not floor or l.Z > 100 then
+                    Fake.put(body, "loc", { X = l.X, Y = l.Y, Z = l.Z - 30 })
+                else
+                    setMode(body, 1)
+                end
+            end
+        end
+    end
+    -- The game's own move of player 1, far at once, to a place in the air: they fall from there.
+    local function taken(to)
+        Fake.put(p1, "loc", { X = to.X, Y = to.Y, Z = to.Z })
+        setMode(p1, 3)
+    end
+    local function said(words)
+        return count(pc.logs, words)
+    end
+    local home = place(p1)
+    s:run(1.0, gravity)
+    local hp = select(1, Fake.health(p1))
+
+    -- The report's: nothing under the place the game took player 1 to, nor for 500 m around, for good.
+    local A = { X = -333450.0, Y = 249935.0, Z = 5000.0 }
+    pc.noFloor = function(l) return gap(l, A) < 50000 end
+    taken(A)
+    s:run(0.8, gravity)
+    check(mode(p1) == 0 and gap(at(p1), A) < 1 and A.Z - at(p1).Z < 400 and said("Player 1 falls after a far move: held") == 1,
+        string.format("the game takes player 1 3 km off, to where there's no floor: held still where it left them, %.0f cm down, said once",
+            A.Z - at(p1).Z))
+    s:run(1.7, gravity)
+    local p2 = state.p2Pawn
+    check(mode(p2) == 5 and gap(at(p2), at(p1)) < 400, "player 2 is taken along, held in the air as on any far move")
+    s:run(10, gravity)
+    check(mode(p1) == 0 and mode(state.p2Pawn) == 5 and select(1, Fake.health(p1)) == hp and said("Both players are down") == 0
+        and said("Player 1 is back") == 0 and said("Player 2 is down") == 0,
+        "twelve seconds on: both held there still, unhurt, nobody down and nobody respawned")
+    s:run(10, gravity)
+    check(said("No ground under player 1 for 20 s: taken back to where they last stood") == 1 and mode(p1) == 1
+        and gap(at(p1), home) < 1 and math.abs(at(p1).Z - 105) < 1 and said("The ground is there under player 1") == 1,
+        string.format("no floor in 20 s and no move of the game's: taken back to where they last stood, and set down on its floor (%.0f cm from it, height %.0f)",
+            gap(at(p1), home), at(p1).Z))
+    s:run(1, gravity)
+    check(mode(state.p2Pawn) == 1 and gap(at(state.p2Pawn), at(p1)) < 300 and at(state.p2Pawn).Z < 300,
+        string.format("player 2 beside them there, on the floor (%.0f cm off)", gap(at(state.p2Pawn), at(p1))))
+
+    -- The world comes in under them while they are held: set down on it.
+    s:run(2, gravity)
+    local B = { X = 400000.0, Y = 0.0, Z = 600.0 }
+    pc.noFloor = function(l) return gap(l, B) < 50000 end
+    taken(B)
+    s:run(3, gravity)
+    local held = mode(p1) == 0
+    pc.noFloor = nil
+    s:run(1.6, gravity)
+    check(held and mode(p1) == 1 and gap(at(p1), B) < 1 and math.abs(at(p1).Z - 105) < 1 and said("The ground is there under player 1") == 2,
+        "held again at another place; its world comes in 3 s later: set on the floor under them, and standing on it a second, let be")
+    s:run(1, gravity)
+    check(mode(state.p2Pawn) == 1 and gap(at(state.p2Pawn), at(p1)) < 300 and at(state.p2Pawn).Z < 300, "player 2 beside them on it")
+
+    -- The game moves player 1 on while they are held (its own next step, to a place with floor): let go at once.
+    s:run(2, gravity)
+    local C, D = { X = 800000.0, Y = 0.0, Z = 3000.0 }, { X = 800000.0, Y = 300000.0, Z = 100.0 }
+    pc.noFloor = function(l) return gap(l, C) < 50000 end
+    taken(C)
+    s:run(2, gravity)
+    held = mode(p1) == 0
+    Fake.put(p1, "loc", { X = D.X, Y = D.Y, Z = D.Z })
+    s:run(0.5, gravity)
+    check(held and said("Player 1 was moved on by the game: let go") == 1 and mode(p1) == 1 and gap(at(p1), D) < 1,
+        "the game moves player 1 on while they are held: let go at once, standing where it put them")
+
+    -- A floor a line down finds and a body falls through (the land's far look, in before its ground: the bench, run255):
+    -- set on it they fall, are held again, and it is tried again each second till it holds.
+    s:run(3, gravity)
+    local F = { X = -600000.0, Y = 0.0, Z = 600.0 }
+    pc.noGround = function(l) return gap(l, F) < 50000 end
+    taken(F)
+    local lowest = F.Z
+    s:run(3.5, function()
+        gravity()
+        lowest = math.min(lowest, at(p1).Z)
+    end)
+    local tried = said("What is under player 1 doesn't hold them yet")
+    check(tried == 1 and lowest > 105 - 400 and select(1, Fake.health(p1)) == hp and said("The ground is there under player 1") == 2,
+        string.format("a floor that doesn't hold yet: set on it they fall, and are held again each time, never more than %.0f cm under it", 105 - lowest))
+    pc.noGround = nil
+    s:run(2.5, gravity)
+    check(mode(p1) == 1 and gap(at(p1), F) < 1 and math.abs(at(p1).Z - 105) < 1 and said("The ground is there under player 1") == 3,
+        "its ground comes in: the next try holds, and a second on they are let be")
+
+    -- The report's own, as the bench had it (run255): both players down far from their bell, the mod's "back to the bell"
+    -- (the game's Respawn, by hand) sets player 1 down where the ground isn't in yet.
+    s:run(3, gravity)
+    local R = { X = 0.0, Y = -700000.0, Z = 600.0 }
+    Fake.put(p1, "Respawn", function(self)
+        Fake.put(self, "respawned", (field(self, "respawned") or 0) + 1)
+        Fake.put(self, "dead", false)
+        Fake.put(self, "loc", { X = R.X, Y = R.Y, Z = R.Z })
+        setMode(self, 3)
+    end)
+    pc.noGround = function(l) return gap(l, R) < 50000 end
+    Fake.setHealth(state.p2Pawn, 1)
+    Session.die(pc)
+    local heldBefore = said("Player 1 falls after a far move: held")
+    s:run(6.4, gravity)
+    lowest = R.Z
+    s:run(4, function()
+        gravity()
+        if gap(at(p1), R) < 100 then
+            lowest = math.min(lowest, at(p1).Z)
+        end
+    end)
+    check(said("Both players are down: back to the bell") == 1 and field(p1, "respawned") == 1 and gap(at(p1), R) < 1
+        and lowest > 105 - 400 and said("Player 1 falls after a far move: held") == heldBefore + 1,
+        string.format("both down far from their bell, the game's respawn sets player 1 where the ground isn't in: held there, never more than %.0f cm under its floor (%d respawns)",
+            105 - lowest, field(p1, "respawned") or 0))
+    pc.noGround = nil
+    s:run(2.5, gravity)
+    check(mode(p1) == 1 and gap(at(p1), R) < 1 and math.abs(at(p1).Z - 105) < 1 and said("Both players are down") == 1
+        and field(p1, "respawned") == 1, "its ground comes in: they stand at their bell, respawned once")
+    s:run(8, gravity)
+    -- A scene of the game's: one held already is left as it is through it, not taken back by the clock, and set down
+    -- after it where the scene took them; a fall that begins in a scene is the scene's own (the game's respawn is one
+    -- to it, and goes its own way: the bench, run263 and 265).
+    local S, S2 = { X = 0.0, Y = 900000.0, Z = 600.0 }, { X = 2000.0, Y = 900000.0, Z = 600.0 }
+    pc.noGround = function(l) return gap(l, S) < 50000 end
+    heldBefore = said("Player 1 falls after a far move: held")
+    taken(S)
+    s:run(1.0, gravity)
+    local heldFirst = mode(p1) == 0 and said("Player 1 falls after a far move: held") == heldBefore + 1
+    local backs = said("taken back to where they last stood")
+    Session.scene(pc, true)
+    s:run(22, gravity)
+    check(heldFirst and mode(p1) == 0 and gap(at(p1), S) < 1 and said("taken back to where they last stood") == backs,
+        "a scene begins while they are held: left as they are through it, not taken back by the clock (22 s on)")
+    Fake.put(p1, "loc", { X = S2.X, Y = S2.Y, Z = S2.Z })       -- (the scene's own hand: 20 m on)
+    s:run(0.5, gravity)
+    Session.scene(pc, false)
+    pc.noGround = nil
+    s:run(3.0, gravity)
+    check(mode(p1) == 1 and gap(at(p1), S2) < 1 and math.abs(at(p1).Z - 105) < 1 and said("taken back to where they last stood") == backs,
+        string.format("the scene over: set down where it took them (%.0f cm from it), the 20 s counted from its end", gap(at(p1), S2)))
+    s:run(3, gravity)
+    local T = { X = 0.0, Y = 1200000.0, Z = 600.0 }
+    pc.noGround = function(l) return gap(l, T) < 50000 end
+    Session.scene(pc, true)
+    s:run(0.5, gravity)
+    heldBefore = said("Player 1 falls after a far move: held")
+    taken(T)
+    s:run(1.0, gravity)
+    check(mode(p1) == 3 and said("Player 1 falls after a far move: held") == heldBefore,
+        "a far move and a fall inside a scene (the game's own respawn is one): the scene's own, nobody is held")
+    pc.noGround = nil
+    Fake.put(p1, "loc", { X = T.X, Y = T.Y, Z = 100.0 })
+    setMode(p1, 1)
+    Session.scene(pc, false)
+    s:run(14, gravity)
+
+    -- A fall in play, no far move before it: the game's own.
+    s:run(5, gravity)
+    pc.noFloor = function() return true end
+    local holds = said("Player 1 falls after a far move")
+    setMode(p1, 3)
+    s:run(1.5, gravity)
+    check(mode(p1) == 3 and said("Player 1 falls after a far move") == holds, "a fall into a pit in play, no far move before it: nobody is held")
+    pc.noFloor = nil
+    Fake.put(p1, "loc", { X = D.X, Y = D.Y, Z = D.Z })
+    setMode(p1, 1)
+    s:run(1, gravity)
+    -- A far move onto ground, and a pit there later: not held either.
+    local E = { X = 0.0, Y = 600000.0, Z = 100.0 }
+    Fake.put(p1, "loc", { X = E.X, Y = E.Y, Z = E.Z })
+    s:run(3, gravity)
+    pc.noFloor = function() return true end
+    setMode(p1, 3)
+    s:run(1.5, gravity)
+    check(mode(p1) == 3 and said("Player 1 falls after a far move") == holds,
+        "a far move onto ground they stood on for a second, then a pit: nobody is held")
+    pc.noFloor = nil
+    allErrors(s)
+end
+
+-- A player 2 off alone wakes the spawners around them, as the game does around player 1 (lone-P2 enemies). Not the ones
+-- the story brings (415): a report on 1.7.4, local co-op, Mu Xiaokui "had all the phases at once", and an enemy of a scene
+-- stood in another boss's arena.
+local function localStorySpawners()
+    part("player 2 alone leaves the story's enemies to the game")
+    local s, pc, state = localGame()
+    s:run(1.5)
+    local far = { X = 500000.0, Y = 0.0, Z = 100.0 }
+    local function spawnerOf(id, dx)
+        Fake.enemy(pc, id, THUG, far.X + dx, far.Y + 500.0, 100.0, 600, 100)
+        local sp = pc.spawners[#pc.spawners]
+        rawset(sp, "__name", "BP_AISpawner_C_" .. id)       -- (each its own actor's name: a spawner is woken once by it)
+        Fake.put(sp, "SpawnedAI", nil)      -- (nothing out yet)
+        return sp
+    end
+    local camp, first, second, later = spawnerOf("camp9", 0), spawnerOf("MuXiaoKui_Seq045", 300), spawnerOf("MuXiaoKuiP2_Seq046new", 600),
+        spawnerOf("LeiDangP2", 900)
+    Fake.put(state.p2Pawn, "loc", { X = far.X, Y = far.Y, Z = far.Z })
+    s:run(5)
+    local function claimed(sp)
+        return field(sp, "claimed") or 0
+    end
+    check(claimed(camp) == 1 and count(pc.logs, "Woke 1 enemies around player 2") == 1,
+        "a camp's spawner by a player 2 off alone is woken, as before (" .. claimed(camp) .. ")")
+    check(claimed(first) == 0 and claimed(second) == 0 and claimed(later) == 0,
+        "a boss's phases and a scene's enemies, named for their sequence or their later phase, are left for the game to bring ("
+        .. claimed(first) .. ", " .. claimed(second) .. ", " .. claimed(later) .. ")")
     allErrors(s)
 end
 
@@ -18177,7 +18915,10 @@ return function(print_, scripts)
     localScreen()
     localSticks()
     localRise()
+    localLetGo()
     localGround()
+    localVoid()
+    localStorySpawners()
     localButtons()
     localFight()
     localOptions()
@@ -18244,5 +18985,6 @@ return function(print_, scripts)
     aRiderAndItsMount()
     twoRidersAndTheirMounts()
     anEnemysJump()
+    aCopysDeath()
     return failed == 0
 end

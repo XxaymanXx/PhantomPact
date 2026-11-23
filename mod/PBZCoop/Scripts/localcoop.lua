@@ -405,7 +405,9 @@ return function(api)
                 end
                 local mode = valid(p1) and p1.CharacterMovement.MovementMode or 0
                 local grounded = mode == 1 or mode == 2
-                if grounded or os.clock() - started >= V.FAR_MOVE_MAX_S then
+                -- (Not while player 1 is held over nothing or being tried on a floor, 414: there's no ground yet to
+                -- be let go on, by the clock or by player 1's own mode.)
+                if not V.voidHeld and (grounded or os.clock() - started >= V.FAR_MOVE_MAX_S) then
                     if grounded then
                         pawn:K2_SetActorLocation(besidePoint(p1, 60, pawn), false, {}, true)
                     end
@@ -433,6 +435,251 @@ return function(api)
             and not game.isDead(p2) and not p2DownSince then
             log(string.format("Player 1 moved %.0f m at once: player 2 goes along.", distance(last, q) / 100))
             moveBeside(p2, p1)
+        end
+    end
+
+    -- 414. Player 1 set down where there is no world. A report on 1.7.4, with its play log: both players in a boss's
+    -- fight (Mu Xiaokui), player 1 killed. The game itself took player 1 3164 m off within 1.5 s and had them up there,
+    -- "the white place": no floor under them, nor 190 m further on. They fell 29 m, were down from the fall a second
+    -- later, were brought back to the same place by the mod's own respawns, fell again, and so on for the eight
+    -- minutes the log runs, player 2 taken along each time ("the characters keep falling perpetually").
+    -- The bench, runs 255 to 264, both players down far from their bell: the game's Respawn, called by hand as "back to
+    -- the bell" does, sets player 1 down at once where its world isn't in yet, as a scene of its own (the game's cutscene
+    -- word is on from 0.3 s after), and 1.4 s on moves them 21 m to where they rise. They fell 98 m through it and died
+    -- of the fall; only the game's own respawn after that death stood them at the bell. What a line down finds there in
+    -- those seconds is no ground: the land's far look comes in first (a body set on it falls through), and under the
+    -- bell something lies 47 m down that never holds.
+    -- So for V.VOID_ARM_S after any far move at once, a player 1 who falls V.VOID_DROP_CM from where the move left them
+    -- is put back there and held still (MOVE_None, as an enemy parked in the air is), player 2 with them. Held, they
+    -- stay the game's to move: moved a little, they are held where it put them; set falling again, held again there;
+    -- stood up by it, that ground is tried. Each V.VOID_EVERY_S a floor is looked for close under them (V.VOID_DEEP_CM)
+    -- and they are set on it to try it: standing on it for V.VOID_STOOD_S it is the ground, and that's the end of it;
+    -- fallen through it, they are held again and it is tried again a second on. A far move of the game's lets them
+    -- go (and arms this anew). V.VOID_MAX_S of no ground takes them back, once, to where they last stood on the
+    -- ground, held and tried there the same way; nobody is let fall by the clock. Not in a scene: the game's own
+    -- respawn is one, with its own way through (see overNothing), and the report's fall has none on. A fall in play
+    -- isn't this: only a far move arms it. Looked at ten times a second (the bar's loop): the tick's once a second
+    -- was as long as the fall took to kill.
+    V.VOID_ARM_S = 12.0
+    V.VOID_DROP_CM = 150        -- fallen this far below where the move left them, and falling still
+    V.VOID_DEEP_CM = 1500       -- how far under them a floor is looked for: the game sets a body down on its ground
+    V.VOID_UP_CM = 150          -- taken back, they're held this far over where they stood
+    V.VOID_EVERY_S = 0.25       -- held, a floor is looked for this often
+    V.VOID_AGAIN_S = 1.0        -- after one that didn't hold them, this long till the next is tried
+    V.VOID_THROUGH_CM = 100     -- this far under a floor they were set on: it isn't one
+    V.VOID_TRY_S = 3.0          -- set on a floor and neither standing nor through it for this long: left to the game
+    V.VOID_MAX_S = 20.0
+    V.VOID_STOOD_S = 1.0        -- walking this long: the ground is there
+
+    -- The floor straight under a place, down to V.VOID_DEEP_CM below it: its height; nil for none; false if the game
+    -- wouldn't look.
+    function V.floorUnder(p1, at)
+        local ksl = StaticFindObject("/Script/Engine.Default__KismetSystemLibrary")
+        if not valid(ksl) then
+            return false
+        end
+        local hit, none, skip = {}, { R = 0, G = 0, B = 0, A = 0 }, {}
+        if valid(state.p2Pawn) then
+            skip[1] = state.p2Pawn
+        end
+        local ok, blocked = pcall(function()
+            return ksl:LineTraceSingle(p1, { X = at.X, Y = at.Y, Z = at.Z + 50 },
+                { X = at.X, Y = at.Y, Z = at.Z - V.VOID_DEEP_CM }, 0, false, skip, 0, hit, true, none, none, 0)
+        end)
+        if not ok then
+            return false
+        end
+        return blocked and hit.Location and tonumber(hit.Location.Z) or nil
+    end
+
+    function V.holdStill(pawn, at)
+        pawn:K2_SetActorLocation(at, false, {}, true)
+        local move = pawn.CharacterMovement
+        if valid(move) then
+            pcall(function() move:StopMovementImmediately() end)
+            pcall(function() move:SetMovementMode(0, 0) end)
+        end
+    end
+
+    -- A body held still is the game's again: falling, which the first floor under it ends.
+    function V.letGo(pawn)
+        local move = valid(pawn) and pawn.CharacterMovement or nil
+        if valid(move) and move.MovementMode == 0 then
+            pcall(function() move:SetMovementMode(MOVE_FALLING, 0) end)
+        end
+    end
+
+    -- Player 1 held at that place from now on (held: the hold's record).
+    function V.voidHoldAt(p1, held, at)
+        held.at = { X = at.X, Y = at.Y, Z = at.Z }
+        held.seen = { X = at.X, Y = at.Y, Z = at.Z }
+        V.holdStill(p1, held.at)
+        if V.voidLast then
+            V.voidLast.X, V.voidLast.Y, V.voidLast.Z = at.X, at.Y, at.Z
+        end
+    end
+
+    function V.overNothing(p1)
+        V.voidLooks = (V.voidLooks or 0) + 1
+        -- (Not in a scene: the game's own respawn is one to it, from 0.3 s after Respawn is called, and has its own way
+        -- through a world that isn't in: the fall, the death of it, and the game's own respawn 6 s on, whole, at the
+        -- bell (run263). Held through that scene instead they stood there 4.4 s on with the 76 health it gives before
+        -- its rest, player 2 still down (run265). One held already is left as it is till the scene is over.)
+        if game.isDead(p1) or inScene then
+            V.voidWhy = inScene and "scene" or "dead"
+            if inScene and V.voidHeld then
+                V.voidHeld.paused = true
+            end
+            return
+        end
+        V.voidWhy = nil
+        local q = p1:K2_GetActorLocation()
+        if not q.X then
+            return
+        end
+        local now = os.clock()
+        local last = V.voidLast
+        local jumped = last ~= nil and distance(last, q) > V.JUMP_CM
+        if jumped then
+            V.voidJumps = (V.voidJumps or 0) + 1
+        end
+        if last then
+            last.X, last.Y, last.Z = q.X, q.Y, q.Z
+        else
+            V.voidLast = { X = q.X, Y = q.Y, Z = q.Z }
+        end
+        local move = p1.CharacterMovement
+        local mode = valid(move) and move.MovementMode or nil
+        local p2 = state.p2Pawn
+        local held = V.voidHeld
+        if held then
+            if held.paused then
+                held.paused, held.since = nil, now      -- (a scene is over: the 20 s from here)
+            end
+            -- (By where the hold last saw or set them: its own set-down on a floor far below was taken for the game's
+            -- move, run264.)
+            if distance(held.seen, q) > V.JUMP_CM then
+                V.voidHeld = nil
+                V.letGo(p1)
+                if held.p2 then
+                    V.letGo(p2)
+                end
+                V.voidArmed = { at = { X = q.X, Y = q.Y, Z = q.Z }, till = now + V.VOID_ARM_S, back = held.back }
+                log("Player 1 was moved on by the game: let go.")
+                return
+            end
+            held.seen.X, held.seen.Y, held.seen.Z = q.X, q.Y, q.Z
+            local try = held.try
+            if try then
+                -- Set on a floor: is it one?
+                if mode == 1 then
+                    try.stoodAt = try.stoodAt or now
+                else
+                    try.stoodAt = nil
+                end
+                local stood = try.stoodAt and now - try.stoodAt >= V.VOID_STOOD_S
+                if stood or now - try.at >= V.VOID_TRY_S then
+                    V.voidHeld = nil
+                    if held.p2 and valid(p2) and p2.CharacterMovement.MovementMode == 0 then
+                        p2:K2_SetActorLocation(besidePoint(p1, 30, p2), false, {}, true)
+                        pcall(function() p2.CharacterMovement:SetMovementMode(1, 0) end)
+                    end
+                    log(string.format(stood and "The ground is there under player 1 after %.1f s: set down."
+                        or "Player 1 set on a floor after %.1f s: left to the game.", now - held.first))
+                elseif mode == MOVE_FALLING and try.z - q.Z > V.VOID_THROUGH_CM then
+                    held.try, held.next = nil, now + V.VOID_AGAIN_S
+                    held.through = (held.through or 0) + 1
+                    V.voidHoldAt(p1, held, held.at)
+                    if held.through == 1 then
+                        log("What is under player 1 doesn't hold them yet: held on, tried again each second.")
+                    end
+                end
+                return
+            end
+            -- Held, they are still the game's to move (its respawn takes them 21 m on to where they rise, run264).
+            if mode == 0 then
+                if distance(held.at, q) > 50 then
+                    held.at = { X = q.X, Y = q.Y, Z = q.Z }
+                end
+            elseif mode == MOVE_FALLING then
+                V.voidHoldAt(p1, held, { X = q.X, Y = q.Y, Z = math.max(q.Z, held.at.Z) })
+            elseif mode == 1 then
+                held.at = { X = q.X, Y = q.Y, Z = q.Z }
+                held.try = { z = q.Z, at = now }        -- (stood up by the game: is it ground?)
+                return
+            end
+            if now < held.next then
+                return
+            end
+            held.next = now + V.VOID_EVERY_S
+            -- (Player 2 with them: one who falls here, let go by their own hold or back from down, is held too.)
+            if valid(p2) and not p2DownSince and not game.isDead(p2) and valid(p2.CharacterMovement)
+                and p2.CharacterMovement.MovementMode == MOVE_FALLING then
+                V.holdStill(p2, V.rightOf(p1, 0))
+                held.p2 = true
+            end
+            -- (Once, and never let fall by the clock: taken back to their old bell out of the game's respawn, whose
+            -- eye, which brings a world in, was at the new one, nothing came in under them in 20 s: run264.)
+            if now - held.since >= V.VOID_MAX_S and not held.wentBack then
+                held.wentBack = true
+                if held.back then
+                    held.since = now
+                    V.voidHoldAt(p1, held, { X = held.back.X, Y = held.back.Y, Z = held.back.Z + V.VOID_UP_CM })
+                    log(string.format("No ground under player 1 for %d s: taken back to where they last stood.", V.VOID_MAX_S))
+                    return
+                end
+                log(string.format("No ground under player 1 for %d s: held on.", V.VOID_MAX_S))
+            end
+            local z = V.floorUnder(p1, held.at)
+            if z then
+                local capsule, half = p1.CapsuleComponent, nil
+                if valid(capsule) then
+                    local got, h = pcall(function() return capsule:GetScaledCapsuleHalfHeight() end)
+                    half = got and tonumber(h) or nil
+                end
+                local feet = z + (half or 90) + 5
+                held.try = { z = feet, at = now }
+                p1:K2_SetActorLocation({ X = held.at.X, Y = held.at.Y, Z = feet }, false, {}, true)
+                pcall(function() move:SetMovementMode(1, 0) end)
+                held.seen.X, held.seen.Y, held.seen.Z = held.at.X, held.at.Y, feet
+                V.voidLast.X, V.voidLast.Y, V.voidLast.Z = held.at.X, held.at.Y, feet
+            end
+            return
+        end
+        if jumped then
+            V.voidArmed = { at = { X = q.X, Y = q.Y, Z = q.Z }, till = now + V.VOID_ARM_S, back = V.p1Stood }
+            return
+        end
+        local armed = V.voidArmed
+        if armed then
+            V.voidNote = string.format("drop %.0f mode %s", armed.at.Z - q.Z, tostring(mode))
+            if mode == 1 then
+                armed.stoodAt = armed.stoodAt or now
+            else
+                armed.stoodAt = nil
+            end
+            if now > armed.till or (armed.stoodAt and now - armed.stoodAt >= V.VOID_STOOD_S) then
+                V.voidArmed = nil
+            elseif mode == MOVE_FALLING and armed.at.Z - q.Z > V.VOID_DROP_CM then
+                -- (Whatever a line down finds: what is there in a world's first seconds may not be ground, run255.)
+                V.voidArmed = nil
+                if V.floorUnder(p1, q) ~= false then
+                    held = { since = now, first = now, next = now, back = armed.back }
+                    V.voidHeld = held
+                    V.voidHoldAt(p1, held, armed.at)
+                    log("Player 1 falls after a far move: held where it left them till the ground under them is there.")
+                end
+            end
+            return
+        end
+        -- Where player 1 last stood on the ground, for the way back.
+        if mode == 1 then
+            local s = V.p1Stood
+            if not s then
+                V.p1Stood = { X = q.X, Y = q.Y, Z = q.Z }
+            elseif distance(s, q) > 100 then
+                s.X, s.Y, s.Z = q.X, q.Y, q.Z
+            end
         end
     end
 
@@ -762,7 +1009,15 @@ return function(api)
                 local name = s:GetFName():ToString()
                 if not woken[name] and distance(s:K2_GetActorLocation(), here) <= WAKE_CM then
                     woken[name] = true
-                    if s:IsShouldToSpawn() and not valid(s.SpawnedAI) then
+                    -- (415: not one the story brings, named for its sequence or its later phase: a boss's phases, a
+                    -- scene's enemy. A report on 1.7.4, local co-op: Mu Xiaokui "had all the phases at once", their
+                    -- names over the screen, and a scene's enemy stood in another boss's arena. Those come when the
+                    -- game brings them for player 1.)
+                    local sid = nil
+                    pcall(function() sid = s.SpawnerID:ToString() end)
+                    if sid and (sid:find("_Seq", 1, true) or (game.isLaterPhase and game.isLaterPhase(sid))) then
+                        V.storyLeft = (V.storyLeft or 0) + 1
+                    elseif s:IsShouldToSpawn() and not valid(s.SpawnedAI) then
                         s:ClaimSeqSpawn(false, true, false)
                         count = count + 1
                     end
@@ -1973,13 +2228,18 @@ return function(api)
         if not f then
             return nil
         end
-        local out, i = {}, 0
+        -- (416: and after it 1 with a stick out of its rest, 0 with both at rest; nothing from an older main.dll.)
+        local out, sticks, i = {}, {}, 0
         for line in f:lines() do
             i = i + 1
             out[i] = tonumber(line:match("%d")) or 0
+            sticks[i] = tonumber(line:match("^%d (%d)"))
         end
         f:close()
-        return i >= 4 and out or nil
+        if i < 4 then
+            return nil
+        end
+        return out, sticks
     end
 
     -- Story scenes play on player 1's camera: both players watch them full screen, and player 2 can't be hurt meanwhile.
@@ -2133,6 +2393,45 @@ return function(api)
         end
     end
 
+    -- 416. Player 2's stick let go, and the game not told. A player hears a stick only as it moves (see flushInput): the
+    -- one event that says "back in the middle" comes once, and whatever takes it on its way (a card or a prompt on the
+    -- screen that answers the pads for a moment, no menu to the mod) leaves player 2's controller with its last push for
+    -- good: "the game doesn't register when the joystick has returned to neutral resulting in the camera spinning or
+    -- the character running endlessly" (a report on 1.7.4). main.dll reads the pad itself: with both its sticks at rest
+    -- for V.REST_S while the game still has one of player 2's pushed past V.PUSHED, what their controller holds is let
+    -- go, as at a menu's close. Looked at once a rest (and once more a second in), not all the while: the letting go
+    -- is when it goes wrong. Not with an older main.dll (no word on the sticks), nor a player 2 on the keyboard.
+    V.REST_S = 0.3
+    V.REST_AGAIN_S = 1.0
+    V.PUSHED = 0.35
+    V.STICK_KEYS = { "Gamepad_LeftX", "Gamepad_LeftY", "Gamepad_RightX", "Gamepad_RightY" }
+    function V.sticksAtRest(sticks)
+        local pad = tonumber((config.p2 or ""):match("^joy(%d)$"))
+        local pc2 = state.p2Controller
+        if not (sticks and pad and sticks[pad] == 0 and valid(pc2)) or paused or menuOpen or inScene then
+            V.restSince, V.restLooks = nil, 0
+            return
+        end
+        local now = os.clock()
+        V.restSince = V.restSince or now
+        local looks = V.restLooks or 0
+        if looks >= 2 or now - V.restSince < (looks == 0 and V.REST_S or V.REST_AGAIN_S) then
+            return
+        end
+        V.restLooks = looks + 1
+        for _, name in ipairs(V.STICK_KEYS) do
+            local v = pc2:GetInputAnalogKeyState({ KeyName = FName(name) })
+            if type(v) == "number" and math.abs(v) >= V.PUSHED then
+                V.flushInput(false)
+                V.sticksFreed = (V.sticksFreed or 0) + 1
+                if V.sticksFreed <= 3 then
+                    log(string.format("Player 2's stick is at rest and the game still had it pushed (%s %.2f): let go.", name, v))
+                end
+                return
+            end
+        end
+    end
+
     -- A free joystick held down: it takes over a player waiting for theirs, else it joins as player 2.
     local function claim(card, p1)
         local n = waiting[1] and 1 or (waiting[2] and 2 or nil)
@@ -2218,10 +2517,11 @@ return function(api)
         else
             V.p2StuckSince = nil
         end
-        local pads = localcoop.readPads()
+        local pads, sticks = localcoop.readPads()
         if not pads then
             return
         end
+        pcall(V.sticksAtRest, sticks)       -- (416: a stick let go that the game still has pushed)
         for n = 1, 2 do
             local pad = tonumber((config["p" .. n] or ""):match("^joy(%d)$"))
             local pawn = pawnOf(n, p1)
@@ -3973,6 +4273,7 @@ return function(api)
                     V.looked = {}
                     promptTarget, promptKind, promptTargetKind, V.promptSince, V.ringWas = nil, nil, nil, nil, nil
                     V.sceneHeld, V.screenHeld, V.p1LastAt = nil, nil, nil
+                    V.voidLast, V.voidArmed, V.voidHeld, V.p1Stood = nil, nil, nil, nil
                     inScene, menuOpen = false, false
                     woken, usedSwitches = {}, {}
                     waiting, configApplied = {}, false
@@ -3996,6 +4297,15 @@ return function(api)
         LoopInGameThreadWithDelay(BAR_MS, function()
             local ok, err = pcall(function()
                 pcall(giveControlsBack)
+                -- (414: a player 1 the game set down where there's no world isn't let fall.)
+                local _, body1 = getPlayer1()
+                if valid(body1) then
+                    local okV, errV = pcall(V.overNothing, body1)
+                    if not okV and errV ~= V.lastVoidError then
+                        V.lastVoidError = errV
+                        log("Player 1 over nothing: " .. tostring(errV))
+                    end
+                end
                 -- Player 2's own gear back on them after the bag dressed everyone (loadout.lua). Held while their body is
                 -- out of play (a scene, a menu, the boat, down, single player).
                 local okG, errG = pcall(api.loadout.keep, 2, paused or inScene or menuOpen or V.sailing or p2DownSince ~= nil)
@@ -4050,6 +4360,14 @@ return function(api)
             end
             return false
         end)
+    end
+
+    -- What 414 is doing, for a look from outside (the bench): looks so far, far moves seen, and where it stands.
+    function localcoop.voidState()
+        local h = V.voidHeld
+        return string.format("looks %d jumps %d %s%s%s", V.voidLooks or 0, V.voidJumps or 0,
+            h and (h.try and "tried" or "held") or (V.voidArmed and "armed" or "idle"), V.voidWhy and (" (" .. V.voidWhy .. ")") or "",
+            V.voidNote and (", last armed: " .. V.voidNote) or "")
     end
 
     -- F5: bring player 2 back to player 1 by hand (stuck on a ledge, say).

@@ -37,7 +37,9 @@ void find_folders() {
 }
 
 // In local co-op (pads_watch.txt exists) the joysticks' state goes to pads.txt, one line per XInput slot: "0" unplugged,
-// "1" plugged in, "2" with a button held. While the panel is open (pads_want.txt exists) that's faster, and the cursor,
+// "1" plugged in, "2" with a button held; and after it, for a pad that's in, " 1" with a stick out of its rest or " 0"
+// with both at rest (localcoop.lua, 416: the game can miss a stick's letting go, and goes on with its last push).
+// While the panel is open (pads_want.txt exists) that's faster, and the cursor,
 // left button, Escape, F4 or F5 and whether this game has the focus go to mouse.txt: the panel lets go of the mouse, and then the
 // game itself sees no input.
 // XInput is loaded here, not linked, so a PC without it still runs.
@@ -67,6 +69,11 @@ bool free_cursor() {
     return true;
 }
 
+// A stick's axis out of its rest: past XInput's own dead zones (7849 and 8689 of 32767), with a little to spare.
+bool stick_out(SHORT v) {
+    return v > 9000 || v < -9000;
+}
+
 DWORD WINAPI pads_thread(void*) {
     struct State { DWORD packet; WORD buttons; BYTE left, right; SHORT lx, ly, rx, ry; };
     using GetState = DWORD(WINAPI*)(DWORD, State*);
@@ -87,7 +94,9 @@ DWORD WINAPI pads_thread(void*) {
                 State s{};
                 bool on = get(i, &s) == ERROR_SUCCESS;
                 pads += on ? 1 : 0;
-                text += !on ? "0\n" : ((s.buttons != 0 || s.left > 64 || s.right > 64) ? "2\n" : "1\n");
+                const bool out = on && (stick_out(s.lx) || stick_out(s.ly) || stick_out(s.rx) || stick_out(s.ry));
+                text += !on ? "0\n" : (std::string((s.buttons != 0 || s.left > 64 || s.right > 64) ? "2" : "1")
+                                        + (out ? " 1\n" : " 0\n"));
             }
             relay::write_atomic(path, text);
             route::xinput_pads = pads;

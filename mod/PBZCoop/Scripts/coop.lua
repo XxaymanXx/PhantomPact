@@ -1512,6 +1512,7 @@ return function(api)
             local was = net.aside[e.addr]
             local loc = was and was.hidden and was.name == name and was.home or e.loc
             local near = here and name:sub(1, 3) == "sp:" and inReach(loc.X, loc.Y, loc.Z, t) and not game.isDead(e.actor)
+                and not net.isDying(e.addr)     -- (417: its death is being shown: not asked after, nor put aside)
             if near and game.isBoss(e.actor, e.addr) then
                 local a = net.bossAsk[name] or { since = now, askedAt = -1e9 }
                 bosses[name] = a
@@ -1669,6 +1670,13 @@ return function(api)
     -- Client, one enemy's turn. nextSeen and held collect the round's results.
     local function syncEnemy(name, actor, nextSeen, held)
         local addr = actor:GetAddress()
+        -- (417: one whose death is being shown is nobody's to weigh, report or let go, and its floor stays: left out of
+        -- the round's held, releaseHeld lifted it, and this player's next blow ended the copy there and then, its
+        -- own pay with it: the bench, run259. net.dieLater ends it.)
+        if net.isDying(addr) then
+            held[addr] = actor
+            return
+        end
         if net.pendingDeaths[name] then
             -- The host announced this death while our copy wasn't loaded: kill it now that it is. (Unless the host has it
             -- alive: a refresh brought it back there.)
@@ -3106,6 +3114,88 @@ return function(api)
         return ran
     end
 
+    -- Guest: a copy's death by the host's word (handlers.K), the game's own.
+    function net.dieHere(name, actor, down, byGuest)
+        -- The game's own death, at level 0 so it pays nothing here: the quiet kill skipped what listens for
+        -- deaths, and a quest waiting for the monsters to be dealt with (Fierce Axe) never moved, not even after
+        -- a reload.
+        if net.killWatched(actor, down) then
+            log("Host says " .. name .. " died; it dies here too.")
+            -- (Nothing of it is owed: with the host down, or up within its quiet after, no share of it
+            -- comes, and its copy's own pay taken back left this player nothing for the kill. When the host
+            -- was last seen down goes with the copy's pay: pbz.lua's watchCurrency. The review of 11-16.)
+            -- (This kill's own roll alone: a boss's in the same pay is owed, its share comes once the host
+            -- is up. The third review.)
+            -- (The host at 0 now counts: seen down only after a second, a kill in that second was taken
+            -- back with no share to come.)
+            local downAt = net.zeroSince and os.clock() or net.downSeenAt
+            if game.copyPay and not byGuest and downAt
+                and os.clock() - downAt < game.dustWatch.AFTER_DOWN_S then
+                game.copyPay.hostDownAt = downAt
+                game.copyPay.keep = (game.copyPay.keep or 0) + (game.copyPay.last or 0)
+            end
+        else
+            log("Host says " .. name .. " died; its death was refused here: tried again, then dissolved.")
+        end
+    end
+
+    -- 417: its death to see first (puppets.lua's deathShow has started it, or left an execution of this player's own
+    -- to run): the kill comes when that is over, the copy found again by its address and its actor's name. Its bar
+    -- off and its floor kept meanwhile; told dead again meanwhile, nothing more is done. One not found any more is
+    -- ended when it is next met, as one the host called dead while it wasn't loaded.
+    net.dying = {}          -- a copy's address -> { name, till }: its death is being shown
+    net.DYING_STEP_S = 0.03
+    function net.isDying(addr)
+        local d = net.dying[addr]
+        return d ~= nil and os.clock() < d.till
+    end
+    function net.dieLater(name, actor, wait, what, down, byGuest, show)
+        local addr = actor:GetAddress()
+        local body = tostring(select(2, pcall(function() return actor:GetFName():ToString() end)))
+        local began = os.clock()
+        net.dying[addr] = { name = name, till = began + wait + 0.5 }
+        game.hideHealthBar(actor)
+        if game.setMinHealth then
+            game.setMinHealth(actor, HELD_HP)       -- (its floor through the show: a blow meanwhile doesn't end it)
+        end
+        log(string.format("Host says %s died; its %s is shown here first (%.1f s at most).", name, what or "death", wait))
+        -- (Every few frames till it is over: puppets.lua's showOn keeps the fall on it, and says when an execution
+        -- has ended. The copy by its address and its actor's name each time: nothing of the game's is kept.)
+        local function step()
+            local found = nil
+            local list, addrs = game.listEnemies()
+            for i, at in ipairs(addrs or {}) do
+                local a = list[i]
+                if at == addr and valid(a)
+                    and tostring(select(2, pcall(function() return a:GetFName():ToString() end))) == body then
+                    found = a
+                    break
+                end
+            end
+            if not found then
+                net.dying[addr] = nil
+                net.pendingDeaths[name] = true
+                return
+            end
+            if game.isDead and game.isDead(found) then
+                net.dying[addr] = nil
+                return
+            end
+            local over = os.clock() - began >= wait
+            if not over and show and api.puppets and api.puppets.showOn then
+                local ok, on = pcall(api.puppets.showOn, found, what, show, os.clock() - began)
+                over = not ok or on == false
+            end
+            if over then
+                net.dying[addr] = nil
+                net.dieHere(name, found, down, byGuest)
+            else
+                game.after(net.DYING_STEP_S, step)
+            end
+        end
+        game.after(net.DYING_STEP_S, step)
+    end
+
     -- quiet: a death from before (BEATEN), not the end of a fight going on.
     handlers.K = function(name, _, quiet)
         local actor = enemyByName[name]
@@ -3183,26 +3273,20 @@ return function(api)
                         bring.cardsLater()
                     end
                 elseif not wasBoss and not quiet and game.killForReal then
-                    -- The game's own death, at level 0 so it pays nothing here: the quiet kill skipped what listens for
-                    -- deaths, and a quest waiting for the monsters to be dealt with (Fierce Axe) never moved, not even after
-                    -- a reload.
-                    if net.killWatched(actor, down) then
-                        log("Host says " .. name .. " died; it dies here too.")
-                        -- (Nothing of it is owed: with the host down, or up within its quiet after, no share of it
-                        -- comes, and its copy's own pay taken back left this player nothing for the kill. When the host
-                        -- was last seen down goes with the copy's pay: pbz.lua's watchCurrency. The review of 11-16.)
-                        -- (This kill's own roll alone: a boss's in the same pay is owed, its share comes once the host
-                        -- is up. The third review.)
-                        -- (The host at 0 now counts: seen down only after a second, a kill in that second was taken
-                        -- back with no share to come.)
-                        local downAt = net.zeroSince and os.clock() or net.downSeenAt
-                        if game.copyPay and not byGuest and downAt
-                            and os.clock() - downAt < game.dustWatch.AFTER_DOWN_S then
-                            game.copyPay.hostDownAt = downAt
-                            game.copyPay.keep = (game.copyPay.keep or 0) + (game.copyPay.last or 0)
+                    -- (417: its death to see first, where there is one to show: net.dieLater.)
+                    if not net.isDying(actor:GetAddress()) then
+                        local wait, what, show = 0, nil, nil
+                        if api.puppets and api.puppets.deathShow then
+                            local ok, w, k, m = pcall(api.puppets.deathShow, name, actor)
+                            if ok and type(w) == "number" then
+                                wait, what, show = w, k, m
+                            end
                         end
-                    else
-                        log("Host says " .. name .. " died; its death was refused here: tried again, then dissolved.")
+                        if wait > 0 then
+                            net.dieLater(name, actor, wait, what, down, byGuest, show)
+                        else
+                            net.dieHere(name, actor, down, byGuest)
+                        end
                     end
                 elseif game.kill then
                     game.kill(actor)

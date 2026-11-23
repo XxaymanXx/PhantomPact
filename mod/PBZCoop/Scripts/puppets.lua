@@ -212,6 +212,7 @@ return function(api)
                 path, pos = api.moves.pathOf(m), ai:Montage_GetPosition(m) or 0
             end
         end)
+        puppets.learnDeaths(path)       -- (417: a flinch at this player's own blow says its kind's deaths too)
         return path, pos, tag
     end
 
@@ -228,6 +229,160 @@ return function(api)
         if tag ~= "-" and game.setHitState then
             game.setHitState(actor, tag, hold)
         end
+    end
+
+    -- 417. A copy's death to see. The host's word that an enemy died ended its copy here at once by the game's own
+    -- kill, which has no blow behind it: the game plays no fall for it, the body is down from one frame to the next
+    -- (the bench, 11-23, run253: the host's own enemy in MaleThug_Throw_Dead_Normal_F_Montage for 1.7 s, the guest's
+    -- copy of it with its flinch stopped and no montage at all). And a copy this player was executing was ended as the
+    -- execution's first blow took its last health, half a second into a paired move of four: its own half stopped, the
+    -- player finishing on a body with no part in it. The players' words on 1.7.4: "enemies when they die they are like
+    -- glitched for guest and finish combat with e also glitched".
+    -- So before the kill (coop.lua's handlers.K, net.dieLater): a copy in an execution of this player's own is left to
+    -- play it out; any other plays its kind's death montage, found by the name of the flinch it is in or was last in
+    -- ("<kind>_Hit_<how>_<F|B>..._Montage" has "<kind>_Dead_Normal_<F|B>_Montage" beside it, and "_Dead_Launch_" for
+    -- one in the air: the bench's list of 35, run254), only if this game has it loaded. Then the kill, as before. One
+    -- with nothing to show (never flinched, a kind with no such montage, down already) is ended at once, as before.
+    -- (A death's show: the fall itself. What is left of its montage is the body lying still, and till it is ended
+    -- the copy is one the game still lets this player lock on to.)
+    local DEATH_SHOW_S, EXEC_SHOW_S = 1.0, 7.0      -- a death's show and an execution's rest wait this long at most
+    local FLINCH_KEPT_S = 10.0                      -- a flinch this long ago still says what kind it is
+    local FLINCHED_MAX = 300
+    puppets.flinched, puppets.flinchedN = {}, 0     -- enemy name -> { path, at }: the host's enemy's last flinch told here
+    -- (Flinches a body stands through, by the word after "_Hit_": the bench's, run253-258. NBreak: its guard broken, what
+    -- a finishing strike of this player's starts from. Not the ones of a body down or getting up: Down, Ground,
+    -- LaunchLand.)
+    local STANDING = { Light = true, Middle = true, Heavy = true, VeryLight = true, Knockback = true, NBreak = true,
+        Break = true, Stun = true }
+
+    -- A kind's death montages this game has loaded, found beside the first flinch of that kind met here (in the same
+    -- folder, its name's "_Hit_<how>" turned to "_Dead_Normal_F" and the like): kind ("MaleThug_Throw") -> { Normal_F =
+    -- path... }. By the kind, not by each flinch's own folder: a broken guard's flinch lies elsewhere (run259).
+    local DEATHS = { "Normal_F", "Normal_B", "Launch_F", "Launch_B" }
+    local FLINCHES_MAX = 2000
+    puppets.deaths = {}
+    local flinchSeen, flinchSeenN = {}, 0
+    function puppets.learnDeaths(path)
+        if type(path) ~= "string" or flinchSeen[path] or flinchSeenN >= FLINCHES_MAX or not path:find("_Hit_", 1, true) then
+            return
+        end
+        flinchSeen[path], flinchSeenN = true, flinchSeenN + 1
+        local kind = path:match("([%w_]+)_Hit_[%w_]+_Montage$")
+        if not (kind and api.moves.allowedPath(path)) then
+            return
+        end
+        local has = puppets.deaths[kind]
+        -- (Beside the flinch, or one folder up: FemaleThug_Hoe's flinches lie in Hit/Moontage and Hit/HitMontage, its
+        -- deaths in Hit. The bench, run261.)
+        local up = path:gsub("/[^/]+/([^/]+)$", "/%1")
+        for _, sort in ipairs(DEATHS) do
+            for _, from in ipairs({ path, up }) do
+                if not (has and has[sort]) then
+                    local death = from:gsub("_Hit_[%w_]+_Montage", "_Dead_" .. sort .. "_Montage")
+                    -- (One this game has in memory already, as a kind that is here has: nothing is loaded for a guess.)
+                    if valid(StaticFindObject(death)) then
+                        has = has or {}
+                        has[sort] = death
+                    end
+                end
+            end
+        end
+        puppets.deaths[kind] = has
+    end
+
+    -- The death to show for a body in that flinch: its kind's, from the side it was hit (the other side's if this game
+    -- has only that), in the air for one in the air; nil for a path that is no flinch, one of a body down already, or a
+    -- kind with none.
+    function puppets.deathFor(path)
+        if type(path) ~= "string" then
+            return nil
+        end
+        local kind, how = path:match("([%w_]+)_Hit_([%w_]+)_Montage$")
+        local first = how and how:match("^(%a+)")
+        local sort = first and ((first == "Launch" or first == "LaunchLoop") and "Launch" or (STANDING[first] and "Normal")) or nil
+        if not sort then
+            return nil
+        end
+        puppets.learnDeaths(path)
+        local has = puppets.deaths[kind]
+        if not has then
+            return nil
+        end
+        local dir = how:match("_([FB])_") or how:match("_([FB])$") or "F"
+        return has[sort .. "_" .. dir] or has[sort .. "_" .. (dir == "F" and "B" or "F")]
+    end
+
+    -- Seconds the kill waits at most for what this copy shows of its death, which ("execution", "death"), and the
+    -- montage that is its show; 0 for nothing.
+    function puppets.deathShow(name, actor)
+        local ai = api.moves.animOf(actor)
+        if not ai then
+            return 0
+        end
+        local path, pos, len = nil, 0, 0
+        pcall(function()
+            local m = ai:GetCurrentActiveMontage()
+            if m and valid(m) then
+                path, pos, len = api.moves.pathOf(m), ai:Montage_GetPosition(m) or 0, m:GetPlayLength() or 0
+            end
+        end)
+        local tag = game.hitStateOf and game.hitStateOf(actor)
+        if path and type(tag) == "string" and tag:find("Executing", 1, true) then
+            local left = math.min(EXEC_SHOW_S, len - pos - 0.1)
+            if left > 0.2 then
+                return left, "execution", path
+            end
+            return 0
+        end
+        local last = puppets.flinched[name]
+        local from = (path and path:find("_Hit_", 1, true) and path)
+            or (last and os.clock() - last.at < FLINCH_KEPT_S and last.path) or nil
+        local death = puppets.deathFor(from)
+        if not (death and api.moves.allowedPath(death) and valid(StaticFindObject(death))) then
+            return 0
+        end
+        local m = api.moves.montage(death)
+        if not m or not pcall(function() ai:Montage_Play(m, 1.0, 0, 0.0, true) end) then
+            return 0
+        end
+        local length = 1.5
+        pcall(function() length = m:GetPlayLength() end)
+        return math.max(0.3, math.min(DEATH_SHOW_S, (tonumber(length) or 1.5) - 0.15)), "death", death
+    end
+
+    -- A copy through its show, looked at every few frames (net.dieLater). False: the show is over, the kill is due.
+    -- An execution: over when the game no longer has the copy in it (its own state for it gone, or another montage
+    -- on it): left alive past that, the copy got up again (the bench, run261: at 3.4 s of a montage of 7). A death:
+    -- a flinch the game played on it at a blow of this player's meanwhile is taken off, and its fall goes on from
+    -- where it would be (run260 and 261: the copy stood up out of its fall, flinching).
+    function puppets.showOn(actor, what, path, elapsed)
+        local ai = api.moves.animOf(actor)
+        if not ai then
+            return false
+        end
+        local now = nil
+        pcall(function()
+            local m = ai:GetCurrentActiveMontage()
+            if m and valid(m) then
+                now = api.moves.pathOf(m)
+            end
+        end)
+        if what == "execution" then
+            local tag = game.hitStateOf and game.hitStateOf(actor)
+            return now == path and type(tag) == "string" and tag:find("Executing", 1, true) ~= nil
+        end
+        if now ~= path then
+            local m = api.moves.montage(path)
+            if not m then
+                return false
+            end
+            if game.clearHitState then
+                game.clearHitState(actor)
+            end
+            pcall(function() ai:Montage_Play(m, 1.0, 0, elapsed, true) end)
+            puppets.fallsKept = (puppets.fallsKept or 0) + 1
+        end
+        return true
     end
 
     -- It died: nothing steers it through its death.
@@ -281,6 +436,7 @@ return function(api)
         for addr in pairs(byAddr) do
             puppets.release(addr)
         end
+        puppets.flinched, puppets.flinchedN = {}, 0
     end
 
     coop.handlers.A = function(rest, from)
@@ -292,6 +448,19 @@ return function(api)
         pos = tonumber(pos)
         if not (name and pos and pos == pos and pos >= 0 and pos < 600) then
             return
+        end
+        -- (417: the last flinch the host's enemy was in, for its kind's death to show: deathShow.)
+        if path:find("_Hit_", 1, true) then
+            puppets.learnDeaths(path)
+            if puppets.flinchedN >= FLINCHED_MAX then
+                puppets.flinched, puppets.flinchedN = {}, 0
+            end
+            local f = puppets.flinched[name]
+            if f then
+                f.path, f.at = path, os.clock()
+            else
+                puppets.flinched[name], puppets.flinchedN = { path = path, at = os.clock() }, puppets.flinchedN + 1
+            end
         end
         local actor = coop.enemyActor(name)
         local p = valid(actor) and byAddr[actor:GetAddress()]
