@@ -16,14 +16,6 @@
 -- deflects through another effect system, not this chooser (asked for a deflect, it gave nothing on the bench). Not in PvP
 -- (hits are real there), nor local co-op (player 2's are real too). Older versions drop HX (unknown events are), so with
 -- one of those it stays as it was. PartnerHitSounds = On (the ini ships it On; left out, nothing changes).
---
--- The guard (413). A call into the game that goes wrong ends the game then and there: no error for the mod to catch,
--- no line in the log. Players say just that of this file on 1.7.3 and 1.7.4 ("when PartnerHitSounds is enabled, every
--- time a player swings/attacks, the other player crashes"; "only attack/weapon swing trigger crash"), and the bench
--- has never seen it (eight weapons, hundreds of swings, the same game and UE4SS builds). So what is handed to the game
--- here is checked for its class first, and each kind of call leaves a note in a file before its first few of a
--- session and takes it out a moment after. A session that finds a note left was ended inside that call: that one
--- thing is done another way from then on, or no more, and the log says so (see "the guard" below).
 
 return function(api)
     local log, valid, game = api.log, api.valid, api.game
@@ -36,10 +28,6 @@ return function(api)
     local HITREACT = "/Script/SGameCombatSystem.HitreactComponent"
     local AK = "/Script/AkAudio.Default__AkGameplayStatics"
     local NIAGARA = "/Script/Niagara.Default__NiagaraFunctionLibrary"
-    local AK_EVENT = "/Script/AkAudio.AkAudioEvent"
-    local NIAGARA_SYSTEM = "/Script/Niagara.NiagaraSystem"
-    local SCENE = "/Script/Engine.SceneComponent"
-    local ACTOR = "/Script/Engine.Actor"
 
     -- The game's own tags, sent without these heads. (Its attack types are spelled HitReact, the rest Hitreact.)
     local TYPE = "HitReact.AttackType."
@@ -64,275 +52,6 @@ return function(api)
     local second, inSecond = 0, 0
     local hooked, triedAt = false, -math.huge
     local playing = false       -- this PC asking its chooser for a partner's hit: the hook isn't this player's then
-
-    ------------------------------------------------------------------ the guard
-
-    -- Each kind of call this file makes into the game says so in a file (hitfx_guard.txt, by the mod's own) before its
-    -- first few of a session, and its note is taken out GUARD_HOLD_S later. A session that finds a note left was ended
-    -- inside that call, or by what it set off, and takes that kind a step on, for good:
-    --   swing (a partner's swing sound on their figure), hit (a hit's sound on an enemy): 1 posted on the actor, 2 at
-    --   the actor's place (a call that makes no component of the sound engine's on the body and takes no callback),
-    --   3 not at all.
-    --   blood, ask (the hit-effect chooser), learn (the reading of a partner's weapon): 1, or 2 not at all. A weapon
-    --   whose reading ended a session is passed over; GUARD_WEAPONS of those, and none is read.
-    -- (The game ending for another reason inside those seconds counts the same. So only a kind's first GUARD_FIRST
-    -- calls of a session leave a note: seconds of a session, not all of it.)
-    local GUARD_FILE = "hitfx_guard.txt"
-    local GUARD_EPOCH = "epoch 1"   -- (its number goes up when these calls are made another way: every PC starts over)
-    local GUARD_KINDS = { "swing", "hit", "blood", "ask", "learn" }
-    local GUARD_LAST = { swing = 3, hit = 3, blood = 2, ask = 2, learn = 2 }
-    local GUARD_INSIDE = { swing = "a partner's swing sound", hit = "a partner's hit sound",
-        blood = "the blood of a partner's hit", ask = "the game's choice of a hit's sound and blood",
-        learn = "the reading of a partner's weapon" }
-    local GUARD_FIRST = 6
-    local GUARD_HOLD_S = 2.0
-    local GUARD_WEAPONS = 2
-    local guard = { way = {}, skip = {}, busy = {}, order = {}, count = {}, noClass = {}, clearAt = 0 }
-    for _, kind in ipairs(GUARD_KINDS) do
-        guard.way[kind] = 1
-    end
-    hitfx.guard = guard
-
-    local function guardSkipped()
-        local list = {}
-        for path in pairs(guard.skip) do
-            list[#list + 1] = path
-        end
-        table.sort(list)
-        return list
-    end
-
-    -- The file as things stand: each kind past its first way, the weapons passed over, the notes. Nothing to say: no
-    -- file.
-    local function guardWrite()
-        local lines = {}
-        for _, kind in ipairs(GUARD_KINDS) do
-            if guard.way[kind] > 1 then
-                lines[#lines + 1] = kind .. " " .. guard.way[kind]
-            end
-        end
-        for _, path in ipairs(guardSkipped()) do
-            lines[#lines + 1] = "skip " .. path
-        end
-        for _, key in ipairs(guard.order) do
-            lines[#lines + 1] = "busy " .. key
-        end
-        local path = api.modDir() .. GUARD_FILE
-        if #lines == 0 then
-            if guard.onDisk then
-                pcall(os.remove, path)
-                guard.onDisk = false
-            end
-            return
-        end
-        local f = io.open(path, "w")
-        if f then
-            f:write(GUARD_EPOCH .. "\n" .. table.concat(lines, "\n") .. "\n")
-            f:close()
-            guard.onDisk = true
-        end
-    end
-
-    local function guardSettle()
-        local left = guard.clearAt - os.clock()
-        if left > 0 then
-            game.after(left + 0.05, guardSettle)
-            return
-        end
-        guard.settling, guard.busy, guard.order = false, {}, {}
-        guardWrite()
-    end
-
-    -- Before a call of that kind: its note. what: the sound or weapon it is about, for the log of the session after
-    -- (words, or a function that gives them, asked only if a note is written). always: however many of its kind were
-    -- noted (a weapon's reading: every weapon, its note held for as long as it is read).
-    local function guardEnter(kind, what, always)
-        if not always and (guard.count[kind] or 0) >= GUARD_FIRST then
-            return
-        end
-        if type(what) == "function" then
-            what = what()
-        end
-        local words = tostring(what):gsub("[\r\n]", " ")
-        local key = kind .. " " .. words
-        if guard.busy[key] then
-            if always then
-                guard.clearAt = os.clock() + GUARD_HOLD_S
-            end
-            return
-        end
-        guard.count[kind] = (guard.count[kind] or 0) + 1
-        guard.busy[key], guard.order[#guard.order + 1] = true, key
-        guard.clearAt = os.clock() + GUARD_HOLD_S
-        guardWrite()
-        if not guard.settling then
-            guard.settling = true
-            game.after(GUARD_HOLD_S + 0.05, guardSettle)
-        end
-    end
-
-    local function guardNow(kind)
-        if kind == "swing" or kind == "hit" then
-            local whose = kind == "swing" and "A partner's swing sounds" or "A partner's hit sounds"
-            return guard.way[kind] == 2 and (whose .. " are played at their place from now on, by another call of the game's.")
-                or (whose .. " are off on this PC from now on.")
-        elseif kind == "blood" then
-            return "The blood of a partner's hits is off on this PC from now on."
-        elseif kind == "ask" then
-            return "A partner's hit sounds and blood are off on this PC from now on."
-        end
-        return guard.way.learn > 1 and "A partner's swing sounds are off on this PC from now on."
-            or "That weapon's swing sounds are left out on this PC from now on."
-    end
-
-    -- The file as the last session left it, read once as the mod starts.
-    local function guardLoad()
-        local f = io.open(api.modDir() .. GUARD_FILE, "r")
-        if not f then
-            return
-        end
-        local text = f:read("a") or ""
-        f:close()
-        guard.onDisk = true
-        local lines, ended = {}, {}
-        for line in text:gmatch("[^\r\n]+") do
-            lines[#lines + 1] = line
-        end
-        if lines[1] == GUARD_EPOCH then
-            for i = 2, #lines do
-                local word, rest = lines[i]:match("^(%a+) (.+)$")
-                if word == "skip" then
-                    guard.skip[rest] = true
-                elseif word == "busy" then
-                    local kind, what = rest:match("^(%a+) (.+)$")
-                    if kind and GUARD_LAST[kind] then
-                        ended[kind] = what      -- (a kind's last note: the call nearest the end)
-                    end
-                elseif word and GUARD_LAST[word] and rest:match("^%d$") and tonumber(rest) <= GUARD_LAST[word] then
-                    guard.way[word] = math.max(1, tonumber(rest))
-                end
-            end
-        end
-        for _, kind in ipairs(GUARD_KINDS) do
-            if ended[kind] and kind == "learn" then
-                guard.skip[ended[kind]] = true
-            elseif ended[kind] then
-                guard.way[kind] = math.min(guard.way[kind] + 1, GUARD_LAST[kind])
-            end
-        end
-        if #guardSkipped() >= GUARD_WEAPONS then
-            guard.way.learn = 2
-        end
-        for _, kind in ipairs(GUARD_KINDS) do
-            local what = ended[kind]
-            if what then
-                log(string.format("Partner hit sounds: the last session ended inside %s (%s). %s To start over, delete %s in the mod's folder.",
-                    GUARD_INSIDE[kind], what:sub(1, 1) == "/" and what:match("([^./]+)$") or what, guardNow(kind), GUARD_FILE))
-            end
-        end
-        guardWrite()        -- (without the notes; a file of another epoch, or with nothing left to say, goes)
-    end
-    do
-        local ok, err = pcall(guardLoad)
-        if not ok then
-            log("Partner hit sounds: the guard's file can't be read (" .. tostring(err) .. ").")
-        end
-    end
-
-    -- What the guard holds back on this PC, for the setting's line in the log: nothing said while nothing is.
-    local function guardSays()
-        local parts = {}
-        for _, kind in ipairs(GUARD_KINDS) do
-            if guard.way[kind] > 1 then
-                parts[#parts + 1] = kind .. " " .. guard.way[kind]
-            end
-        end
-        local skipped = #guardSkipped()
-        if skipped > 0 then
-            parts[#parts + 1] = skipped .. " weapon" .. (skipped > 1 and "s" or "") .. " left out"
-        end
-        if #parts == 0 then
-            return ""
-        end
-        return " Held back on this PC after a session that ended inside one of its calls (" .. table.concat(parts, ", ")
-            .. "): delete " .. GUARD_FILE .. " in the mod's folder to start over."
-    end
-
-    local function pathOf(o)
-        local s
-        pcall(function() s = o:GetFullName():gsub("^%S+ ", "") end)
-        return s
-    end
-
-    -- An object of that class of the game's (by the class's path), and of no other kind: a call into the game handed
-    -- the wrong kind of object is one it doesn't come back from. (A class this game hasn't got at all checks nothing,
-    -- as it was before there was a check: said once.)
-    local function isA(o, classPath)
-        if not valid(o) then
-            return false
-        end
-        local c = StaticFindObject(classPath)
-        if not valid(c) then
-            if not guard.noClass[classPath] then
-                guard.noClass[classPath] = true
-                log("Partner hit sounds: the game has no class " .. classPath .. " here: nothing is checked against it.")
-            end
-            return true
-        end
-        local ok, yes = pcall(function() return o:IsA(c) end)
-        return ok and yes == true
-    end
-
-    -- One sound of the game's on an actor, of that kind (swing, hit), the way its guard stands at: on the actor (the
-    -- sound engine makes a component of its own on the body for it, the first time), or at the actor's place (a call
-    -- that makes none, and takes no callback). The playing's id; nil if nothing was posted. name: the event's path if
-    -- it is known, for the note.
-    local function post(kind, ev, actor, name)
-        local way = guard.way[kind]
-        if way >= 3 or not (isA(ev, AK_EVENT) and isA(actor, ACTOR)) then
-            return nil
-        end
-        local ak = StaticFindObject(AK)
-        if not valid(ak) then
-            return nil
-        end
-        local id
-        local function what()
-            return name or pathOf(ev) or "?"
-        end
-        if way == 1 then
-            guardEnter(kind, what)
-            pcall(function() id = ak:PostEvent(ev, actor, 0, {}, false) end)
-            return id
-        end
-        if guard.placeArgs == false then
-            return nil
-        end
-        local at, turn
-        if not pcall(function()
-            local l, r = actor:K2_GetActorLocation(), actor:K2_GetActorRotation()
-            at, turn = { X = l.X, Y = l.Y, Z = l.Z }, { Pitch = 0.0, Yaw = r.Yaw, Roll = 0.0 }
-        end) then
-            return nil
-        end
-        guardEnter(kind, what)
-        -- (The sound engine's call for a place takes the world's object last, and by its build a name for the event
-        -- before that or not. The one that fits this game is found by trying: the other is refused as its values are
-        -- set, before any call is made.)
-        if guard.placeArgs ~= 5 and pcall(function() id = ak:PostEventAtLocation(ev, at, turn, actor) end) then
-            guard.placeArgs = 4
-            return id
-        end
-        if guard.placeArgs ~= 4 and pcall(function() id = ak:PostEventAtLocation(ev, at, turn, "", actor) end) then
-            guard.placeArgs = 5
-            return id
-        end
-        if guard.placeArgs == nil then
-            guard.placeArgs = false
-            log("Partner hit sounds: this game's sound engine has no call for a sound at a place that fits: those stay silent.")
-        end
-        return nil
-    end
 
     local function tagOf(param)
         local s
@@ -488,11 +207,7 @@ return function(api)
         if not valid(actor) then
             return false
         end
-        local class = StaticFindObject(HITREACT)
-        if guard.way.ask > 1 or not valid(class) then
-            return false
-        end
-        local comp = actor:GetComponentByClass(class)
+        local comp = actor:GetComponentByClass(StaticFindObject(HITREACT))
         if not valid(comp) then
             return false
         end
@@ -501,7 +216,6 @@ return function(api)
             return false
         end
         local particles, slomo, shake, sound = {}, {}, {}, {}
-        guardEnter("ask", kind .. " " .. strength .. " " .. material)
         playing = true
         local asked = pcall(function()
             chooser:GetEffectData({ TagName = FName(TYPE .. kind) }, { TagName = FName(STRENGTH .. strength) },
@@ -511,11 +225,15 @@ return function(api)
         if not asked then
             return false
         end
-        local played = post("hit", sound.HitSound, actor) ~= nil
+        local played = false
+        local ev, ak = sound.HitSound, StaticFindObject(AK)
+        if valid(ev) and valid(ak) then
+            played = pcall(function() ak:PostEvent(ev, actor, 0, {}, false) end)
+        end
         local list, n = particles.Particles, 0
         pcall(function() n = #list end)
         local mesh, niagara = actor.Mesh, StaticFindObject(NIAGARA)
-        if guard.way.blood == 1 and n > 0 and isA(mesh, SCENE) and valid(niagara) then
+        if n > 0 and valid(mesh) and valid(niagara) then
             local body = {}
             pcall(function() comp:GetMainBodyData(body) end)
             local bone = body.bone
@@ -528,8 +246,7 @@ return function(api)
                     local e = list[i]
                     e = (type(e) == "userdata" and e.get) and e:get() or e
                     local system = e.Particle
-                    if isA(system, NIAGARA_SYSTEM) then
-                        guardEnter("blood", function() return pathOf(system) or "?" end)
+                    if valid(system) then
                         niagara:SpawnSystemAttached(system, mesh, bone, where, turn, 1, true, true, 0, true)
                         played = true
                     end
@@ -623,6 +340,12 @@ return function(api)
     local MAX_SWINGS_PER_S = 30 -- one partner's swing sounds played per second, at most
     local weapons = {}          -- weapon config path -> what's learned of it (strings and numbers only), see learn
 
+    local function pathOf(o)
+        local s
+        pcall(function() s = o:GetFullName():gsub("^%S+ ", "") end)
+        return s
+    end
+
     local function size(t)
         local n = 0
         for _ in pairs(t) do
@@ -636,7 +359,7 @@ return function(api)
         local kind, stops, ev, atPlayer, fixed
         pcall(function() kind, stops, ev = a.PlaySoundType, a.StopOnEnd, a.AkEvent end)
         pcall(function() atPlayer, fixed = a.PostAtPlayerLocation, a.PostAtFixedLocation end)
-        if not KINDS[kind] or stops ~= false or atPlayer == true or fixed == true or not isA(ev, AK_EVENT) then
+        if not KINDS[kind] or stops ~= false or atPlayer == true or fixed == true or not valid(ev) then
             return nil
         end
         local path = pathOf(ev)
@@ -733,14 +456,13 @@ return function(api)
         if not (valid(cfg) and valid(playMontage)) then
             return nil
         end
-        guardEnter("learn", path, true)     -- (the note that this weapon is being read: there till 2 s after its last step)
         if not w then
             w = { sounds = {}, montages = {}, abilities = {}, next = 1, part = 1 }
             weapons[path] = w
             pcall(function()
                 cfg.Sounds:ForEach(function(k, v)
                     local ev = v:get()[SOUND_FIELD]
-                    if isA(ev, AK_EVENT) then
+                    if valid(ev) then
                         w.sounds[k:get().TagName:ToString()] = pathOf(ev)
                     end
                 end)
@@ -818,7 +540,7 @@ return function(api)
     local learning = false
     local function learnStep()
         learning = false
-        if not hitfx.on or net.pvp or net.arena or not net.enabled or guard.way.learn > 1 or guard.way.swing >= 3 then
+        if not hitfx.on or net.pvp or net.arena or not net.enabled then
             return
         end
         local waiting = os.clock() < (net.quietUntil or 0)
@@ -826,7 +548,7 @@ return function(api)
             for _, p in ipairs(coop.partners()) do
                 for _, path in ipairs(heldBy(p)) do
                     local w = weapons[path]
-                    if not (w and w.done) and not guard.skip[path] then
+                    if not (w and w.done) then
                         local began = os.clock()
                         if not tooNew(p, path) and learn(path) then
                             hitfx.learnMaxMs = math.max(hitfx.learnMaxMs, (os.clock() - began) * 1000)
@@ -892,8 +614,8 @@ return function(api)
             hitfx.swingsDropped = hitfx.swingsDropped + 1
             return
         end
-        local id = post("swing", StaticFindObject(evPath), figure, evPath)
-        if id ~= nil and id ~= 0 then
+        local ev, ak, id = StaticFindObject(evPath), StaticFindObject(AK), nil
+        if valid(ev) and valid(ak) and pcall(function() id = ak:PostEvent(ev, figure, 0, {}, false) end) and id ~= 0 then
             p.swingsInSecond = p.swingsInSecond + 1
             hitfx.swings = hitfx.swings + 1
         end
@@ -903,7 +625,7 @@ return function(api)
     -- told: as far in as they said it was): its sound steps from there on are set to sound as the montage gets to each,
     -- and one just passed at once.
     function hitfx.swung(p, m, path, start, told)
-        if not hitfx.on or net.pvp or net.arena or guard.way.swing >= 3 then
+        if not hitfx.on or net.pvp or net.arena then
             return
         end
         -- (A montage they're still in, told again from further in, is the same play: told again after someone joined, or a
@@ -961,9 +683,9 @@ return function(api)
             hitfx.on = v == "on"
             learnSoon()
         end
-        log(string.format("Partner hit sounds: %s%s", hitfx.on
+        log(string.format("Partner hit sounds: %s", hitfx.on
             and "on (a partner's swings play their sounds here, and their hits on enemies the game's hit sound and blood)."
-            or "off.", guardSays()))
+            or "off."))
     end
 
     return hitfx

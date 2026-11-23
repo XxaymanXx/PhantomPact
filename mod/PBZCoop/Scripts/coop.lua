@@ -114,9 +114,6 @@ return function(api)
         remoteEnemies = {},       -- client: name -> latest host record
         hostLethal = {},          -- host: enemy id -> true: the host's killing blow on one the guest's game runs
         deadBodies = {},          -- host: actor address -> true: its death was told (see shareEnemy)
-        livedAt = {}, livedAs = {},         -- host: actor address -> when, and under which id, it was last seen alive
-        metDeadAt = {}, metDeadAs = {},     -- host: actor address -> when, and under which id, it was first met dead
-                                            -- with no such sight of it (net.metDead)
         enemyNames = {},          -- client: number -> { name, class }
         enemyNumbers = {},        -- host: name -> number
         announced = {},           -- host: number -> true once the client was told what it means
@@ -235,7 +232,7 @@ return function(api)
     -- (NQ: an enemy's number again, as N, on this lane too. Its lines count only once its name is known, and with the sure
     -- N held up by one lost packet the copy waited about 1.5 round trips without following. HX: a hit's sound and blood,
     -- hitfx.lua: late, it's a sound after the blow.)
-    local QUICK = { U = true, M = true, A = true, H = true, Z = true, SHOT = true, NQ = true, HEAL = true, HX = true }
+    local QUICK = { U = true, M = true, A = true, H = true, Z = true, SHOT = true, BSHOT = true, PSUMP = true, DYN = true, NQ = true, HEAL = true, HX = true }
 
     local hostWorld = os.time()   -- host: stands for the world as loaded, new with each start and load from the title (see handlers.Y)
 
@@ -503,6 +500,8 @@ return function(api)
             end
             if isHost() then
                 game.ghostInFight(p.ghost, not hide, (game.enemiesSoFar()))
+            elseif net.guestOwnFight then
+                net.guestOwnFight(p.ghost, hide)
             end
             if hide then
                 log("Ghost hidden: the other player is " .. (gone and "gone" or dead and "down"
@@ -527,7 +526,17 @@ return function(api)
         if not p.ghostGliding then
             -- The partner stands on ground this PC hasn't loaded (it isn't, this far from us): left to fall, the ghost sank
             -- metres into the distant scenery, out of sight, and came back, again every few seconds.
-            local noFloor = t.Grounded and t.Z - cur.Z > GHOST_NO_FLOOR_CM and p.ghostCmc.MovementMode == MOVE_FALLING
+            -- (And falling for 0.3 s, not one frame. A step down or a landing a little off from the
+            -- partner's spot set it gliding at 15 cm, floating instead of walking and back: the partner "walking
+            -- glitchy" on the host's screen, 11-23.)
+            local falling = p.ghostCmc.MovementMode == MOVE_FALLING
+            if falling then
+                p.ghostFallSince = p.ghostFallSince or os.clock()
+            else
+                p.ghostFallSince = nil
+            end
+            local noFloor = t.Grounded and t.Z - cur.Z > GHOST_NO_FLOOR_CM and falling
+                and os.clock() - p.ghostFallSince >= 0.3
             if gap < GHOST_CLIMB_CM and not t.Climbing and not noFloor then
                 return false
             end
@@ -548,10 +557,16 @@ return function(api)
             return false
         end
         -- (The played path is already smooth, and a climb must stay on it: its hands are on the rungs.)
-        local a = (t.Climbing or distance(cur, t) > GHOST_SNAP_CM) and 1.0 or GHOST_GLIDE_SMOOTHING
+        local gnow = os.clock()
+        local gdt = math.min(0.05, math.max(0.001, gnow - (p.steerAt or (gnow - 0.016))))
+        p.steerAt = gnow
+        local a = (t.Climbing or distance(cur, t) > GHOST_SNAP_CM) and 1.0 or (1 - math.exp(-16.0 * gdt))
+        local okR, rot = pcall(function() return p.ghost:K2_GetActorRotation() end)
+        local curYaw = (okR and rot and rot.Yaw) or t.Yaw or 0
+        local yaw = curYaw + (((t.Yaw or curYaw) - curYaw + 180) % 360 - 180) * a
         p.ghost:K2_SetActorLocationAndRotation(
             { X = cur.X + (t.X - cur.X) * a, Y = cur.Y + (t.Y - cur.Y) * a, Z = cur.Z + (t.Z - cur.Z) * a },
-            { Pitch = 0.0, Yaw = t.Yaw, Roll = 0.0 }, false, {}, true)
+            { Pitch = 0.0, Yaw = yaw, Roll = 0.0 }, false, {}, true)
         return true
     end
 
@@ -587,16 +602,23 @@ return function(api)
         if p.ghostWalks and t.Falling and t.VZ > GHOST_JUMP_SPEED and p.ghostCmc.MovementMode == MOVE_WALKING then
             p.ghost:LaunchCharacter({ X = t.VX, Y = t.VY, Z = t.VZ }, true, true)
         end
+        local gnow = os.clock()
+        local gdt = math.min(0.05, math.max(0.001, gnow - (p.steerAt or (gnow - 0.016))))
+        p.steerAt = gnow
+        local yawA = 1 - math.exp(-18.0 * gdt)
+        local okR, rot = pcall(function() return p.ghost:K2_GetActorRotation() end)
+        local curYaw = (okR and rot and rot.Yaw) or t.Yaw or 0
+        local smYaw = curYaw + (((t.Yaw or curYaw) - curYaw + 180) % 360 - 180) * yawA
         local dx, dy = t.X - cur.X, t.Y - cur.Y
         local dist = math.sqrt(dx * dx + dy * dy)
         if game.ghostBusy and game.ghostBusy(p.ghost) and dist < GHOST_CORRECT_CM then
-            -- Mid attack/dodge the move's own motion plays out, with a soft pull so a knockback or a turn doesn't leave
-            -- it metres off by the time the move ends.
+            -- Mid attack/dodge the move's own motion plays out, with a smooth dt-scaled pull.
             if dist > GHOST_BUSY_CM then
-                p.ghost:K2_SetActorLocation({ X = cur.X + dx * GHOST_BUSY_PULL, Y = cur.Y + dy * GHOST_BUSY_PULL, Z = cur.Z },
-                    false, {}, true)
+                local bp = 1 - math.exp(-6.0 * gdt)
+                p.ghost:K2_SetActorLocation({ X = cur.X + dx * bp, Y = cur.Y + dy * bp, Z = cur.Z },
+                    false, {}, false)
             end
-            p.ghost:K2_SetActorRotation({ Pitch = 0.0, Yaw = t.Yaw, Roll = 0.0 }, false)
+            p.ghost:K2_SetActorRotation({ Pitch = 0.0, Yaw = smYaw, Roll = 0.0 }, false)
             return
         end
         if p.ghostWalks then
@@ -613,13 +635,13 @@ return function(api)
                 p.ghostCmc.MaxWalkSpeed = math.min(GHOST_MAX_SPEED, speed)
                 p.ghost:AddMovementInput({ X = vx / speed, Y = vy / speed, Z = 0.0 }, 1.0, false)
             end
-            p.ghost:K2_SetActorRotation({ Pitch = 0.0, Yaw = t.Yaw, Roll = 0.0 }, false)
+            p.ghost:K2_SetActorRotation({ Pitch = 0.0, Yaw = smYaw, Roll = 0.0 }, false)
             return
         end
-        local a = GHOST_SMOOTHING
+        local a = 1 - math.exp(-16.0 * gdt)
         p.ghost:K2_SetActorLocationAndRotation(
             { X = cur.X + (t.X - cur.X) * a, Y = cur.Y + (t.Y - cur.Y) * a, Z = cur.Z + (t.Z - cur.Z) * a },
-            { Pitch = 0.0, Yaw = t.Yaw, Roll = 0.0 }, false, {}, true)
+            { Pitch = 0.0, Yaw = smYaw, Roll = 0.0 }, false, {}, true)
     end
 
     local function steerGhosts()
@@ -731,7 +753,17 @@ return function(api)
     end
 
     local function enemyClass(actor)
-        return actor:GetClass():GetFName():ToString()
+        local now = os.clock()
+        if not net.classCache or now - (net.classCacheAt or 0) >= 30.0 then
+            net.classCache, net.classCacheAt = {}, now
+        end
+        local addr = actor:GetAddress()
+        local c = net.classCache[addr]
+        if c == nil then
+            c = actor:GetClass():GetFName():ToString()
+            net.classCache[addr] = c
+        end
+        return c
     end
 
     -- A health/posture drop right after the ghost replayed a move, while the local player started none, is the
@@ -916,23 +948,21 @@ return function(api)
         return dust, items
     end
 
-    -- On the PC running the enemy, every ghost here goes on its hatred list, and who it goes for is steered among the
+    -- The host, an enemy's aggro turn: every ghost here goes on its hatred list, and who it goes for is steered among the
     -- players near it (game.steerTarget). Their ghosts' places are what the relay last said: no calls into the game for each
     -- of them. With two players the partner is net, in slot 2. In PvP the partner is the one to fight: hated, never steered.
     local function aggroParty(actor, addr, x, y, z, hp, name)
         local here = {}
-        local localSlot = net.slot or (isClient() and 2 or 1)
         for _, p in ipairs(partners()) do
             -- (Same map only: in the 3 s before a ghost hides, a partner's spot on another map turned enemies to nothing.)
             if valid(p.ghost) and not p.ghostHidden and not p.silent and p.target and sameMap(p.target) then
                 game.hateGhost(actor, p.ghost, addr, x, y, z, p.number, p.target)
-                here[#here + 1] = { body = p.ghost, addr = p.ghostAddr, at = p.target,
-                    slot = p.number or (localSlot == 1 and 2 or 1) }
+                here[#here + 1] = { body = p.ghost, addr = p.ghostAddr, at = p.target, slot = p.number or 2 }
             end
         end
         local _, pawn = getPlayer1()
         if valid(pawn) and not game.isDead(pawn) and net.localLoc then
-            here[#here + 1] = { body = pawn, addr = pawn:GetAddress(), at = net.localLoc, slot = localSlot, mine = true }
+            here[#here + 1] = { body = pawn, addr = pawn:GetAddress(), at = net.localLoc, slot = net.slot or 1, mine = true }
         end
         -- (Also with one player near, or none: an enemy steered till now gets its own picker back.)
         if #here > 0 and not net.pvp and game.steerTarget then
@@ -962,8 +992,6 @@ return function(api)
         since = {},             -- host: id -> net.frameNow when it was handed over
         retryAt = {},           -- host: id -> os.clock() before which it isn't handed over again
         asleep = {},            -- a party's host: id -> true while it sleeps here with a guest by it (asleepHere)
-        mountAt = {},           -- guest: id of one this game runs -> os.clock() when what it rides is next asked
-        mineMounts = {},        -- guest: address of what such a one rides -> os.clock() when it was last seen to (410)
     }
 
     -- An enemy's line goes the moment it says something new, and one that says the same as the last only every ENEMY_SAME_S,
@@ -999,23 +1027,6 @@ return function(api)
         link.enemy(text)
     end
 
-    -- Whether an enemy read as dead is one only met so: not seen alive here, at this address and under this id, a
-    -- moment ago. True while it has yet to lie MET_DEAD_S: then it's a body, and told as ever. (By address and id
-    -- both: a new actor at an address another had isn't the one seen alive there. And a rest or a death of this
-    -- player's, which makes every enemy anew, forgets who was seen: onLocalRest.)
-    net.MET_DEAD_S, net.LIVED_S = 3.0, 5.0
-    function net.metDead(name, addr)
-        local now = net.frameNow or link.now()
-        if net.livedAs[addr] == name and now - (net.livedAt[addr] or -1e9) < net.LIVED_S then
-            return false
-        end
-        if net.metDeadAt[addr] == nil or net.metDeadAs[addr] ~= name then
-            net.metDeadAt[addr], net.metDeadAs[addr] = now, name
-            return true
-        end
-        return now - net.metDeadAt[addr] < net.MET_DEAD_S
-    end
-
     -- Host, one enemy's turn: announce its death (reliably), or send where it is.
     local function shareEnemy(actor, addr, aggro)
         local name = enemyName(actor, addr)
@@ -1044,18 +1055,6 @@ return function(api)
         -- (One already announced is asked every turn: dead by the game's word at full health, it mustn't flip back.)
         if not dead and game.isDead and (round.number % 3 == 0 or net.deadSent[name]) then
             dead = game.isDead(actor)
-        end
-        -- (A death is of one seen alive. An actor whose numbers aren't set yet reads no health: a boss its opening
-        -- scene has only just made. Met so, it was told as dead that turn: "Enemy died here", by its actor's own
-        -- name, a tenth of a second before "a scene begins" at each such boss of the user's play logs of 11-19. By
-        -- that name it means nothing to a guest; but it counted as a boss's fall, and a scene within FELL_S of one
-        -- isn't told (story.lua's fellLately): the opening scene, of all scenes, wasn't shared with a partner
-        -- standing by, and the phase after it was called a fight a whole scene early. One met dead that this world
-        -- hasn't seen alive a moment ago is a body only once it has lain MET_DEAD_S, and nothing is said of it till
-        -- then. (The enemies a rest or a death makes anew aren't such: each comes with its health on its first
-        -- frame, the bench's run247.) 408.)
-        if dead and not net.deadSent[name] and net.metDead(name, addr) then
-            return
         end
         local paidThere = false
         -- (Not one the guest's game ran: the floor on its copy here is the handover's own, and its death ran its whole
@@ -1186,8 +1185,6 @@ return function(api)
             -- Alive (again, after a bell respawn): its next death must be announced too.
             net.deadSent[name] = nil
             net.deadBodies[addr] = nil
-            -- (And it's one seen alive, here and now: net.metDead.)
-            net.livedAt[addr], net.livedAs[addr], net.metDeadAt[addr] = net.frameNow or link.now(), name, nil
             if net.bossPaid then
                 net.bossPaid[addr] = nil
             end
@@ -1237,6 +1234,20 @@ return function(api)
                         end
                     end
                 end
+                if name:sub(1, 3) ~= "sp:" and not name:match("^tw%d+:") and game.classPathOf then
+                    net.dynSent = net.dynSent or {}
+                    local dnow = os.clock()
+                    if dnow - (net.dynSent[name] or 0) >= 4.0 then
+                        local cpath = game.classPathOf(actor)
+                        local cls = cpath and cpath:match("%.([^%.]+)$") or ""
+                        -- Whitelist DYN strictly to true dynamic boss splits/summons (StuntDouble & For<Boss>*),
+                        -- NEVER real bosses or _Stand_C stand-ins (prevents duplicate bosses & fake heal spam!)
+                        if cpath and cpath:find("^/") and net.dynClassOK and net.dynClassOK(cls) then
+                            net.dynSent[name] = dnow
+                            sendEvent("DYN", name, cpath, string.format("%.0f %.0f %.0f %.0f", x, y, z, yaw))
+                        end
+                    end
+                end
                 net.sendEnemyLine(number, string.format("%d %.0f %.0f %.0f %.0f %.0f %.0f %.1f %.1f %d %s", number,
                     x, y, z, yaw, vx == vx and vx or 0, vy == vy and vy or 0, hp * f, maxhp * f, boss,
                     posture ~= nil and string.format("%.1f", posture) or "-"))
@@ -1261,8 +1272,8 @@ return function(api)
             sendEvent("D", id, string.format("%.1f", hpDamage), string.format("%.1f", postureDamage or 0),
                 lethal and (finisher and "X" or "L") or "-", path or "-", string.format("%.2f", pos or 0), tag or "-")
             net.stats.hitsReported = (net.stats.hitsReported or 0) + 1
-            if api.hitfx and not (lethal and hpDamage == 0 and (postureDamage or 0) == 0) then
-                api.hitfx.ownHit(id, enemy)     -- (its sound and blood for everyone else: hitfx.lua; not a killing blow told again)
+            if api.hitfx and hpDamage > 0.5 then
+                api.hitfx.ownHit(id, enemy)
             end
             if isClient() and hpDamage > 0 then
                 net.hitHere[id] = true      -- (see GK in syncEnemy)
@@ -1279,19 +1290,6 @@ return function(api)
                 net.struckAt[id] = os.clock()   -- (the blow itself, for handover.byHere)
             end
         end
-    end
-
-    -- A name that is one PC's alone: an actor's own (an enemy no spawner with an id made), or an older build's name
-    -- for a spawner the game made as it ran (game.runtimeName, 410). Never a ghost twin's.
-    net.MOUNTS_S = 0.5            -- client: what one this game runs rides is asked at most this often (handover.rides)
-    net.MOUNT_NEAR_CM = 500       -- client: the host's line of a mount is within this of its line of the rider
-    net.NO_RIDERS = {}
-    net.MINE_MOUNT_S = 1.5        -- client: what a rider this game runs rode this lately is still its mount
-    function net.ownName(id)
-        if id:match("^tw%d+:") then
-            return false
-        end
-        return id:sub(1, 3) ~= "sp:" or (game.runtimeName ~= nil and game.runtimeName(id))
     end
 
     -- Client: which local enemy is each of the host's? Same id first; then the actor this id was matched to
@@ -1320,26 +1318,22 @@ return function(api)
             matched[id] = e.actor
             used[e.addr] = true
         end
-        -- (What a rider this game runs rides is this game's own too, no copy of any line of the host's: a boss the
-        -- guest fights and the host doesn't is the guest's game's to run, 263, and in a party one asleep on the host
-        -- is each guest's by it, 277; its horse, paired with the host's own, asleep there, was held and steered to
-        -- where that one stood, the rider on it. handover.rides notes what each such rider rides. 410.)
-        local roundClock = os.clock()
-        local function ridden(e)
-            local at = handover.mineMounts[e.addr]
-            return at ~= nil and roundClock - at < net.MINE_MOUNT_S
-        end
         -- (The host's boss only ever paired with one of its own kind here: a late joiner's world with no copy of it had
         -- another enemy paired by the id, which played the boss's moves under its bar (player report 11-09: Tie Gui as a mob
         -- with Jing Ye's name), and hits on it reached nothing. By class, not by the codex's boss mark: some story bosses
         -- are of an ordinary enemy's class.)
         local function fits(id, e)
             local r = net.remoteEnemies[id]
-            if not (r and r.Boss and r.Class) then
+            if not (r and r.Class) then
                 return true
             end
             e.class = e.class or enemyClass(e.actor)
-            return e.class == r.Class
+            if r.Boss then
+                return e.class == r.Class
+            end
+            local rStand = r.Class:find("_Stand_C$") ~= nil
+            local eStand = type(e.class) == "string" and e.class:find("_Stand_C$") ~= nil
+            return rStand == eStand
         end
         for _, id in ipairs(ids) do
             local e = byId[id]
@@ -1351,50 +1345,12 @@ return function(api)
         end
         for _, id in ipairs(ids) do
             local e = byAddr[net.matchSticky[id]]
-            if matched[id] == nil and e and not used[e.addr] and not (game.isDead and game.isDead(e.actor)) and not ridden(e) then
+            if matched[id] == nil and e and not used[e.addr] and not (game.isDead and game.isDead(e.actor)) then
                 -- (Still the same kind: another enemy can be at a gone one's address, and was steered as the host's.)
                 local want = net.remoteEnemies[id] and net.remoteEnemies[id].Class
                 e.class = e.class or (want and enemyClass(e.actor))
                 if (not want or e.class == want) and fits(id, e) then
                     take(id, e)
-                end
-            end
-        end
-        -- A mount is its rider's. What a copy of the host's rides here (puppets.ridden: each copy is asked twice a
-        -- second) is the host's enemy of that kind, with no id of both PCs, that stands where the host's line has the
-        -- rider: a rider is attached to its mount, so their two lines say one place. However far off this world's
-        -- own stands, and whatever it or that line was paired with before. (Jing Ye's horse is an enemy of its own,
-        -- from a spawner the game makes as it runs, with no name the two PCs share. By kind and nearness it was
-        -- paired only within ENEMY_MATCH_CM of the host's; further off, its own game's horse run after this player
-        -- while the host fought, it never was: it ran by itself, or was put out of the way as one the host hasn't
-        -- got, and its rider's copy, dragged to the host's line, rode nothing. Players on 1.7.4, 11-20: 410. And by
-        -- kind and nearness two riders' horses can be paired crosswise: each rider's copy is left on its mount now,
-        -- puppets.lua, and would stand where the other's is. 412.)
-        for mountAddr, riderId in pairs(api.puppets and api.puppets.ridden or net.NO_RIDERS) do
-            local e, rider = byAddr[mountAddr], net.remoteEnemies[riderId]
-            if e and rider and rider.X and matched[riderId] ~= nil and not isDead(e.actor) and not ridden(e) then
-                e.class = e.class or enemyClass(e.actor)
-                local best, bestD = nil, net.MOUNT_NEAR_CM
-                for _, id in ipairs(ids) do
-                    local r = net.remoteEnemies[id]
-                    if r.Class == e.class and not r.Boss and r.X and net.ownName(id) then
-                        local d = math.sqrt((r.X - rider.X) ^ 2 + (r.Y - rider.Y) ^ 2)
-                        if d < bestD then
-                            best, bestD = id, d
-                        end
-                    end
-                end
-                if best and matched[best] ~= e.actor then
-                    local had = matched[best]
-                    if had ~= nil then
-                        used[had:GetAddress()] = nil        -- (what held that line: free for another again)
-                    end
-                    for id, actor in pairs(matched) do
-                        if actor == e.actor then
-                            matched[id] = nil               -- (and the line this mount was paired with before)
-                        end
-                    end
-                    take(best, e)
                 end
             end
         end
@@ -1407,7 +1363,7 @@ return function(api)
                 for _, e in pairs(locals) do
                     -- (Not a body either: one lying where the host's live enemy stood was paired as it, and as one
                     -- found it was never brought back, so the host's enemy had no body here to hit.)
-                    if not used[e.addr] and not isDead(e.actor) and not ridden(e) then
+                    if not used[e.addr] and not isDead(e.actor) then
                         e.class = e.class or enemyClass(e.actor)    -- three calls through UE4SS, for each pair, each round
                         if e.class == r.Class then
                             local d = distance(e.loc, r)
@@ -1514,7 +1470,6 @@ return function(api)
             local was = net.aside[e.addr]
             local loc = was and was.hidden and was.name == name and was.home or e.loc
             local near = here and name:sub(1, 3) == "sp:" and inReach(loc.X, loc.Y, loc.Z, t) and not game.isDead(e.actor)
-                and not net.isDying(e.addr)     -- (417: its death is being shown: not asked after, nor put aside)
             if near and game.isBoss(e.actor, e.addr) then
                 local a = net.bossAsk[name] or { since = now, askedAt = -1e9 }
                 bosses[name] = a
@@ -1672,13 +1627,6 @@ return function(api)
     -- Client, one enemy's turn. nextSeen and held collect the round's results.
     local function syncEnemy(name, actor, nextSeen, held)
         local addr = actor:GetAddress()
-        -- (417: one whose death is being shown is nobody's to weigh, report or let go, and its floor stays: left out of
-        -- the round's held, releaseHeld lifted it, and this player's next blow ended the copy there and then, its
-        -- own pay with it: the bench, run259. net.dieLater ends it.)
-        if net.isDying(addr) then
-            held[addr] = actor
-            return
-        end
         if net.pendingDeaths[name] then
             -- The host announced this death while our copy wasn't loaded: kill it now that it is. (Unless the host has it
             -- alive: a refresh brought it back there.)
@@ -1752,7 +1700,10 @@ return function(api)
                     hp, maxhp = prev.hp, prev.maxhp
                     posture = dPosture > 0.5 and prev.posture or posture
                 elseif (dHp > 0.5 or dPosture > 0.5 or onFloor) and not written then
-                    if ghostsHit() and (net.pvp or dHp <= 0.5) then
+                    if net.partnerExec and net.partnerExec[name] and not (game.isBoss and game.isBoss(actor, addr)) then
+                        undoHit(actor, prev.hp, prev.posture)
+                        hp, posture = prev.hp, prev.posture
+                    elseif ghostsHit() and (net.pvp or dHp <= 0.5) then
                         -- The host's swing, replayed here: the host's own world already took it.
                         undoHit(actor, prev.hp, prev.posture)
                         hp, posture = prev.hp, prev.posture
@@ -1762,7 +1713,8 @@ return function(api)
                         undoHit(actor, prev.hp, prev.posture)
                         hp, posture = prev.hp, prev.posture
                     else
-                        local lethal = net.heldAlive[addr] ~= nil and (dHp > 0.5 or onFloor) and hp <= HELD_HP + 0.01
+                        local isBossHit = (game.isBoss and game.isBoss(actor, addr)) or (game.bossTwin and game.bossTwin(actor, addr))
+                        local lethal = isBossHit and net.heldAlive[addr] ~= nil and (dHp > 0.5 or onFloor) and hp <= HELD_HP + 0.01
                         -- (A boss's copy weighs this player's blow as the host's boss does, game.partnerRefuses: no posture in
                         -- the host's break and fill, as it recovers, or while it turns blows aside. Its bar here keeps with the
                         -- host's, and it doesn't break here alone. One this very blow broke is left as its game has it, and the
@@ -1837,12 +1789,12 @@ return function(api)
                     -- (Its death here is told, GK, with no blow before it too: a sneak kill, an execution. Told only
                     -- for one this player had hurt, it died here, was told to nobody, and came back. The review of 11-16.)
                     net.hitHere[name] = true
-                    handover.rides(name, actor)     -- (what it rides is this game's to run with it: 410)
                 end
+                local isBossCopy = r.Boss or (game.isBoss and game.isBoss(actor, addr)) or (game.bossTwin and game.bossTwin(actor, addr))
                 if game.setMinHealth and not asleep then
-                    game.setMinHealth(actor, HELD_HP)
+                    game.setMinHealth(actor, isBossCopy and HELD_HP or 0)
                 end
-                if not asleep then
+                if not asleep and isBossCopy then
                     held[addr] = actor
                 end
                 -- (A boss's copy low: marked by this game for an execution at low health? Looked at a second apart,
@@ -1857,7 +1809,7 @@ return function(api)
                 -- (On its floor with no killing blow told: every blow after read as nothing, and it died only to the host's
                 -- hits, "sometimes it can never be killed" (report 1 on 1.6.3). Lifted a point: the bar still reads empty,
                 -- and the next blow is a fall onto the floor again, told as the killing blow.)
-                if hp and hp <= HELD_HP + 0.01 and net.heldAlive[addr] ~= nil and not net.lethalPending[name]
+                if isBossCopy and hp and hp <= HELD_HP + 0.01 and net.heldAlive[addr] ~= nil and not net.lethalPending[name]
                     and game.setHealth and not game.isDead(actor) then
                     game.setHealth(actor, HELD_HP + 1)
                     hp = HELD_HP + 1
@@ -1901,7 +1853,9 @@ return function(api)
                 -- (Or full there and not here, by less than that: a lost fight started over, 305, with a blow or two of
                 -- this player's on its copy, which stood 3% down for good while the host's was whole. The bench of 11-16.
                 -- Not while a killing blow of theirs waits for its answer.)
-                if game.setHealth and not own and rHp ~= nil and hp ~= nil and rMax
+                local guestFightingAlone = not isBossCopy and (net.struckAt[name] or -1e9) > os.clock() - 4.0
+                    and net.target and net.localLoc and gap3d(net.localLoc, net.target) > 3500
+                if game.setHealth and not own and not guestFightingAlone and rHp ~= nil and hp ~= nil and rMax
                     and (rHp > hp + math.max(1, rMax * 0.05)
                         or (rHp >= rMax - 0.5 and rHp > hp + 1 and not net.lethalPending[name])) then
                     net.healTicks[name] = net.healTicks[name] or os.clock()
@@ -1958,7 +1912,10 @@ return function(api)
                 handover.share(name, actor, addr)
             end
             nextSeen[name] = { hp = hp, posture = posture, addr = addr, maxhp = maxhp }
-        elseif (net.hitHere[name] or net.mine[name]) and not net.hostKilled[name] and not net.guestKillSent[name] then
+        -- (The old "or (prev and not boss)" here read an undefined global, always nil, so it never did
+        -- anything; taken out so it can't start killing copies everywhere that only read dead here.)
+        elseif (net.hitHere[name] or net.mine[name])
+            and not net.hostKilled[name] and not net.guestKillSent[name] then
             -- It died here before the host had it loaded (we were far apart): the host's copy follows. In a party so does
             -- that of any guest near it. An enemy past the host's reach has no owner: it sleeps on the host, so each guest
             -- by it fights a copy of its own, as a guest alone does, and the first to kill it kills it for everyone.
@@ -1971,6 +1928,23 @@ return function(api)
 
     -- Host, each round: are the two apart, so that the guest's game may run what's clearly nearer the guest?
     function handover.update()
+        local now = os.clock()
+        if isHost() and now >= (handover.pruneAt or 0) then
+            handover.pruneAt = now + 1.0
+            for addr, actor in pairs(net.heldAlive) do
+                if not valid(actor) or (game.isDead and game.isDead(actor)) then
+                    net.heldAlive[addr] = nil
+                else
+                    local n = enemyName(actor, addr)
+                    if not (n and net.guestRuns[n]) then
+                        net.heldAlive[addr] = nil
+                        if game.setMinHealth and (not game.healthFloor or game.healthFloor(actor) == HELD_HP) then
+                            game.setMinHealth(actor, 0)
+                        end
+                    end
+                end
+            end
+        end
         local t = net.target
         if net.party or net.pvp or t == nil or net.ghostHidden or net.partnerGone or not sameMap(t) or net.localLoc == nil then
             handover.on = false
@@ -1981,10 +1955,6 @@ return function(api)
 
     function handover.dist(x, y, z, o)
         return math.sqrt((x - o.X) ^ 2 + (y - o.Y) ^ 2 + (z - o.Z) ^ 2)
-    end
-
-    function handover.dragonPillarFight(name)
-        return name == "sp:MoTianOld_Seq018-Mask"
     end
 
     -- Host: a boss the guest is fighting (its B) and this player isn't is the guest's game's to run, wherever the two stand.
@@ -2006,10 +1976,7 @@ return function(api)
     -- Host: this player is in that boss's fight: walked into the guest's (E at the wall, F3), the game's own bar up on it
     -- here (its fight began in this game too), or a blow of theirs landed from near it. dh: how far it is from them.
     function handover.hostIn(name, addr, dh)
-        -- This Dragon Pillar arena can be entered before the host's own sequence starts its boss. Until its own bar
-        -- arrives, joining or hitting the mirrored body doesn't give the host a running encounter to take over.
-        if (net.party or not handover.dragonPillarFight(name))
-            and (net.joinedBoss == name or (net.struck[name] and dh <= handover.FIGHT_CM)) then
+        if net.joinedBoss == name or (net.struck[name] and dh <= handover.FIGHT_CM) then
             return true
         end
         -- (No bar marked at this address, a table's look: nothing to walk. A party's guest asks this of each copy asleep
@@ -2092,6 +2059,23 @@ return function(api)
     end
 
     -- Host, an enemy's turn: true while the guest's game runs it. It's handed over, or taken back, as where it is says.
+    -- (The host down in a boss fight, the guest still up and by that boss: the boss is the guest's game's
+    -- to run till the host is up again. Left with the host, it went after the guest's ghost there, which no blow can
+    -- touch, and the guest's copy only replayed that: the boss stood by the guest swinging at nothing, or not at all,
+    -- and never hurt them (the gold-masked man, 11-23). In the guest's game it fights the guest itself.
+    -- handover.HOST_DOWN_GIVES = false turns this off.)
+    handover.HOST_DOWN_GIVES = true
+    function handover.hostDownFor(x, y, z)
+        if handover.HOST_DOWN_GIVES == false or not isHost() or net.deadSince == nil or net.party or net.pvp then
+            return false
+        end
+        local t = net.target
+        if t == nil or net.ghostHidden or net.partnerGone or not sameMap(t) then
+            return false
+        end
+        return handover.dist(x, y, z, t) <= handover.FIGHT_CM
+    end
+
     function handover.guestRuns(name, actor, addr, x, y, z)
         local runs = net.guestRuns[name] == true
         if x == nil or x ~= x or y ~= y or z ~= z then
@@ -2105,7 +2089,9 @@ return function(api)
         -- held, asleep here, till that fight was over. And one held up by a floor of the game's own stays, its fight this
         -- world's to finish (193): not handed over yet, a floor on it here is the game's; handed over it lost it, and a
         -- guest's kill was then its death outside its script here. The review of 11-16.)
-        if boss and (handover.hostIn(name, addr, dh) or (not runs and ((net.toldFighting and dh <= ENEMY_RADIUS_CM)
+        if boss and handover.hostDownFor(x, y, z) and not (game.isDead and game.isDead(actor)) then
+            want = true
+        elseif boss and (handover.hostIn(name, addr, dh) or (not runs and ((net.toldFighting and dh <= ENEMY_RADIUS_CM)
             or (game.healthFloor and game.healthFloor(actor) >= 1)))) then
             want = false
         elseif boss and handover.bossGoes(name, actor, runs) then
@@ -2462,21 +2448,7 @@ return function(api)
 
     -- Guest, the turn of one this game runs for the host: where it is and what it does go to the host's game, as the host's
     -- enemies come here.
-    -- Guest: one this game runs (handed over, or asleep on a party's host with this player by it): what it rides is
-    -- this game's to run with it. Its mount's address is noted every MOUNTS_S, and matchRemoteEnemies leaves that one
-    -- unpaired while the note is fresh. 410.
-    function handover.rides(name, actor)
-        if game.mountOf and os.clock() >= (handover.mountAt[name] or 0) then
-            handover.mountAt[name] = os.clock() + net.MOUNTS_S
-            local mount = game.mountOf(actor)
-            if mount then
-                handover.mineMounts[mount] = os.clock()
-            end
-        end
-    end
-
     function handover.share(name, actor, addr)
-        handover.rides(name, actor)
         local x, y, z, yaw, vx, vy, _, _, hp, maxhp, posture = game.read(actor, addr)
         if hp and maxhp and maxhp > 0 and x == x and y == y and z == z and yaw == yaw then
             local number = enemyNumber(actor, name)
@@ -2489,11 +2461,6 @@ return function(api)
         end
         if api.puppets then
             api.puppets.watchHost(name, actor, addr)
-        end
-        if handover.dragonPillarFight(name) and game.hateGhost and x and os.clock() >= (handover.dragonAggroAt or 0)
-            and not game.isDead(actor) and not game.inCutscene() then
-            handover.dragonAggroAt = os.clock() + AGGRO_S
-            aggroParty(actor, addr, x, y, z, hp, name)
         end
     end
 
@@ -2514,8 +2481,6 @@ return function(api)
         net.guestRuns, net.guestLines, net.mine = {}, {}, {}
         handover.seen, handover.since, handover.retryAt, handover.on, handover.woken = {}, {}, {}, false, {}
         handover.asleep, handover.live, handover.calm = {}, {}, {}
-        handover.mountAt, handover.mineMounts = {}, {}
-        handover.dragonAggroAt = nil
     end
 
     local function startHostRound(now)
@@ -2569,10 +2534,10 @@ return function(api)
     -- there could hit the guest. Their spawners here bring them back (game.bringBack), a few a round. Bosses come with their
     -- fight (spawnBoss).
     local bring = {
-        AFTER_S = 2.0,              -- unpaired this long first: a copy may just be loading in
-        AGAIN_S = 10.0,             -- and asked again at most this often, twice as long each time
-        AGAIN_MOST = 30,            -- up to this many times as long (5 minutes)
-        PER_ROUND = 2,              -- spawns cost a frame each
+        AFTER_S = 0.6,
+        AGAIN_S = 6.0,
+        AGAIN_MOST = 30,
+        PER_ROUND = 6,
     }
     function bring.missing(now)
         for name in pairs(net.bringing) do
@@ -2659,10 +2624,8 @@ return function(api)
         -- seconds on and paid that player its dust, shared on: 330 to everyone every 20 s, for ten minutes. And asked again
         -- less and less often: whatever takes a copy away, it's no way to dust.)
         for name, r in pairs(net.remoteEnemies) do
-            -- (Not one named by a spawner its game made as it ran, an older host's word for a mount: no spawner here goes
-            -- by that name, and each ask was a search of them all. 410.)
             if enemyByName[name] == nil and not r.Boss and (r.Hp or 0) > 0 and name:sub(1, 3) == "sp:" and not net.hostKilled[name]
-                and not net.ownName(name) and r.X ~= nil and inReach(r.X, r.Y, r.Z, net.localLoc) then
+                and r.X ~= nil and inReach(r.X, r.Y, r.Z, net.localLoc) then
                 local b = net.bringing[name] or { since = now, askedAt = -1e9, tries = 0 }
                 net.bringing[name] = b
                 local again = bring.AGAIN_S * math.min(2 ^ (b.tries or 0), bring.AGAIN_MOST)
@@ -2708,10 +2671,21 @@ return function(api)
                 if boss then
                     -- (Its fight may have begun here: bar down and walls open, or the guest stood walled in.)
                     endBossFight(name, own)
+                    bring.cardsLater()
                 end
                 if game.markBeaten then
                     game.markBeaten(name)
                 end
+            end
+        end
+    end
+
+    -- Client: a boss ended here for a death in the host's world, maybe as its fight began: its reward's card can come up
+    -- without its buttons (game.closeStuckCards). Looked at twice, a while after.
+    function bring.cardsLater()
+        if game.closeStuckCards then
+            for _, s in ipairs({ 3, 6 }) do
+                game.after(s, function() pcall(game.closeStuckCards, select(2, getPlayer1())) end)
             end
         end
     end
@@ -2826,7 +2800,8 @@ return function(api)
                 end
                 return
             end
-            updateReach(origin, nil, dt)
+            local specTarget = game.isSpectating and game.isSpectating() and t or nil
+            updateReach(origin, specTarget, dt)
             if round.at > #round.queue and now - round.startedAt >= (net.enemyRoundS or ENEMY_ROUND_S) then
                 startGuestRound(now)
             end
@@ -2849,17 +2824,6 @@ return function(api)
         end
     end
 
-    -- A step of the other side's enemy that nothing runs: over JUMP_CM between two of its lines, and either faster
-    -- than JUMP_CMS or from standing still to standing still. A teleport, or a dash that is one in all but name: on
-    -- the bench, 11-20 (run251, A-Hua, her place every frame on both copies), her teleport move goes 5 to 6 m at 75
-    -- to 90 m a second, 150 to 390 cm between two lines, where her fastest plain attack goes 90 and a charging
-    -- horse 140; her blinks go 14 and 17 m at once. A copy further than SNAP_CM from its line is set there, and
-    -- that covered the blinks. Nearer, it was walked there at a copy's 14 m a second and nudged: after each such
-    -- move the guest's copy was 4 to 7 m behind the host's boss and took 0.5 to 0.7 s to come, her blow struck
-    -- meanwhile from where the host had her ("boss teleport doesn't sync up for guest ... near impossible for guest
-    -- to fight", players on 1.7.4). The line's record says when, and which way: puppets.lua's steer sets the copy
-    -- there. (Fields of net: this function is at Lua's 200 locals.) 411.
-    net.JUMP_CM, net.JUMP_CMS, net.JUMP_STILL = 150, 4500, 150
     local function readEnemies(now)
         local text = link.enemies()
         if text == nil or net.partnerGone then
@@ -2891,19 +2855,8 @@ return function(api)
                         net.notOnHost[who.name] = nil
                     end
                     local r = into[who.name] or { Class = who.class }
-                    local VX, VY = num(vx) or 0, num(vy) or 0
-                    if r.X ~= nil and r.at ~= nil then
-                        local sx, sy = X - r.X, Y - r.Y
-                        local step2 = sx * sx + sy * sy + (Z - r.Z) ^ 2
-                        if step2 > net.JUMP_CM ^ 2 and (step2 > (net.JUMP_CMS * (now - r.at)) ^ 2
-                            or (r.VX ^ 2 + r.VY ^ 2 < net.JUMP_STILL ^ 2 and VX ^ 2 + VY ^ 2 < net.JUMP_STILL ^ 2)) then
-                            local flat = math.sqrt(sx * sx + sy * sy)
-                            r.jumpAt = now
-                            r.jumpDX, r.jumpDY = flat > 1 and sx / flat or 0, flat > 1 and sy / flat or 0
-                        end
-                    end
                     r.X, r.Y, r.Z, r.Yaw, r.Hp, r.MaxHp = X, Y, Z, Yaw, Hp, MaxHp
-                    r.VX, r.VY = VX, VY
+                    r.VX, r.VY = num(vx) or 0, num(vy) or 0
                     -- (2, and 3 for a boss: asleep in the host's world with a guest by it. handover.asleepHere.)
                     r.Boss, r.Asleep = boss == "1" or boss == "3", boss == "2" or boss == "3"
                     r.Posture, r.at = num(posture), now
@@ -2926,7 +2879,14 @@ return function(api)
     function net.dropHostLines()
         link.enemies()
         net.remoteEnemies = {}
-        net.lethalPending = {}
+        net.lethalPending, net.ownExec, net.partnerExec, net.deferredK, net.parrySharedAt = {}, {}, {}, {}, {}
+        if net.clearDynSpawned then net.clearDynSpawned() end
+        net.dynSent, net.dynTried, net.dynPending, net.shieldSent, net.classCache, net.ownSummons = {}, {}, {}, {}, {}, {}
+        for _, s in pairs(net.remoteSummons or {}) do
+            if s.addr and game.visualSummons then game.visualSummons[s.addr] = nil end
+            if valid(s.actor) then pcall(function() s.actor:K2_DestroyActor() end) end
+        end
+        net.remoteSummons = {}
         net.linesFrom = link.now() + net.LINES_AFTER_S
     end
 
@@ -2956,10 +2916,6 @@ return function(api)
             -- to send it, and the enemy lived on on the host.)
             if net.mine[name] then
                 net.hitHere[name] = true
-                local actor = handover.dragonPillarFight(name) and enemyByName[name]
-                if valid(actor) then
-                    game.unfocus(actor:GetAddress(), actor)
-                end
             end
             net.mine[name] = nil            -- (the host's lines take it from here, and pair it up again)
             return
@@ -2990,7 +2946,52 @@ return function(api)
                 api.puppets.release(addr)   -- (its own AI back now, not when the host's lines run out)
             end
             handover.wake(name, addr)
+            -- (Handed over with the host's figure hidden (down, gone, in a scene): the host's figure off
+            -- its list, and its AI started now if it stands stopped. It kept the hidden figure as its target and stood
+            -- by the guest ~7 s before it fought them (the gold-masked man, 11-23 18:20).)
+            for _, p in ipairs(partners()) do
+                if p.ghostHidden and valid(p.ghost) then
+                    net.dropGhostFrom(p.ghost, { actor })
+                end
+            end
+            game.after(0.3, function()
+                if valid(actor) and net.mine[name] and not (game.isDead and game.isDead(actor))
+                    and game.aiStopped and game.aiStopped(actor) and not handover.moving(actor)
+                    and not (game.inCutscene and game.inCutscene()) then
+                    game.startAI(actor)
+                    log(name .. " handed over with its AI stopped: started at once.")
+                end
+            end)
         end
+    end
+
+    -- Guest: the host's figure hidden or shown again. Only the host's game took a hidden figure off the
+    -- enemies' lists; the enemies this game runs (net.mine) kept going for it, standing by this player swinging at nothing.
+    function net.guestOwnFight(ghost, hide)
+        if isHost() or net.party or not valid(ghost) or not game.ghostInFight then
+            return
+        end
+        if not hide then
+            -- (One an enemy can go for again, as on the host; aggroParty puts the shown figure back on their lists.)
+            pcall(function() ghost.BP_PBZHatredManagerComponent.CanBeHatredNow = true end)
+            return
+        end
+        local list = {}
+        for name in pairs(net.mine) do
+            local a = enemyByName[name]
+            if valid(a) then
+                list[#list + 1] = a
+            end
+        end
+        net.dropGhostFrom(ghost, list)
+    end
+    -- (Off those enemies' lists, each that went for it looking again and this player put on first: game.ghostInFight.
+    -- Nobody can go for it while it's hidden; shown again, net.guestOwnFight lets them.)
+    function net.dropGhostFrom(ghost, list)
+        if #list == 0 or not (valid(ghost) and game.ghostInFight) then
+            return
+        end
+        pcall(game.ghostInFight, ghost, false, list)
     end
 
     handlers.N = function(rest)
@@ -3122,88 +3123,6 @@ return function(api)
         return ran
     end
 
-    -- Guest: a copy's death by the host's word (handlers.K), the game's own.
-    function net.dieHere(name, actor, down, byGuest)
-        -- The game's own death, at level 0 so it pays nothing here: the quiet kill skipped what listens for
-        -- deaths, and a quest waiting for the monsters to be dealt with (Fierce Axe) never moved, not even after
-        -- a reload.
-        if net.killWatched(actor, down) then
-            log("Host says " .. name .. " died; it dies here too.")
-            -- (Nothing of it is owed: with the host down, or up within its quiet after, no share of it
-            -- comes, and its copy's own pay taken back left this player nothing for the kill. When the host
-            -- was last seen down goes with the copy's pay: pbz.lua's watchCurrency. The review of 11-16.)
-            -- (This kill's own roll alone: a boss's in the same pay is owed, its share comes once the host
-            -- is up. The third review.)
-            -- (The host at 0 now counts: seen down only after a second, a kill in that second was taken
-            -- back with no share to come.)
-            local downAt = net.zeroSince and os.clock() or net.downSeenAt
-            if game.copyPay and not byGuest and downAt
-                and os.clock() - downAt < game.dustWatch.AFTER_DOWN_S then
-                game.copyPay.hostDownAt = downAt
-                game.copyPay.keep = (game.copyPay.keep or 0) + (game.copyPay.last or 0)
-            end
-        else
-            log("Host says " .. name .. " died; its death was refused here: tried again, then dissolved.")
-        end
-    end
-
-    -- 417: its death to see first (puppets.lua's deathShow has started it, or left an execution of this player's own
-    -- to run): the kill comes when that is over, the copy found again by its address and its actor's name. Its bar
-    -- off and its floor kept meanwhile; told dead again meanwhile, nothing more is done. One not found any more is
-    -- ended when it is next met, as one the host called dead while it wasn't loaded.
-    net.dying = {}          -- a copy's address -> { name, till }: its death is being shown
-    net.DYING_STEP_S = 0.03
-    function net.isDying(addr)
-        local d = net.dying[addr]
-        return d ~= nil and os.clock() < d.till
-    end
-    function net.dieLater(name, actor, wait, what, down, byGuest, show)
-        local addr = actor:GetAddress()
-        local body = tostring(select(2, pcall(function() return actor:GetFName():ToString() end)))
-        local began = os.clock()
-        net.dying[addr] = { name = name, till = began + wait + 0.5 }
-        game.hideHealthBar(actor)
-        if game.setMinHealth then
-            game.setMinHealth(actor, HELD_HP)       -- (its floor through the show: a blow meanwhile doesn't end it)
-        end
-        log(string.format("Host says %s died; its %s is shown here first (%.1f s at most).", name, what or "death", wait))
-        -- (Every few frames till it is over: puppets.lua's showOn keeps the fall on it, and says when an execution
-        -- has ended. The copy by its address and its actor's name each time: nothing of the game's is kept.)
-        local function step()
-            local found = nil
-            local list, addrs = game.listEnemies()
-            for i, at in ipairs(addrs or {}) do
-                local a = list[i]
-                if at == addr and valid(a)
-                    and tostring(select(2, pcall(function() return a:GetFName():ToString() end))) == body then
-                    found = a
-                    break
-                end
-            end
-            if not found then
-                net.dying[addr] = nil
-                net.pendingDeaths[name] = true
-                return
-            end
-            if game.isDead and game.isDead(found) then
-                net.dying[addr] = nil
-                return
-            end
-            local over = os.clock() - began >= wait
-            if not over and show and api.puppets and api.puppets.showOn then
-                local ok, on = pcall(api.puppets.showOn, found, what, show, os.clock() - began)
-                over = not ok or on == false
-            end
-            if over then
-                net.dying[addr] = nil
-                net.dieHere(name, found, down, byGuest)
-            else
-                game.after(net.DYING_STEP_S, step)
-            end
-        end
-        game.after(net.DYING_STEP_S, step)
-    end
-
     -- quiet: a death from before (BEATEN), not the end of a fight going on.
     handlers.K = function(name, _, quiet)
         local actor = enemyByName[name]
@@ -3254,7 +3173,22 @@ return function(api)
                 net.endedInFight[name] = os.clock()
             end
             local down = net.downWatch(name, wasBoss, quiet, actor)
+            if not wasBoss and not quiet
+                and ((net.partnerExec and net.partnerExec[name]) or (net.ownExec and net.ownExec[name]))
+                and valid(actor) and not (game.isDead and game.isDead(actor)) then
+                net.deferredK = net.deferredK or {}
+                if not net.deferredK[name] then
+                    net.deferredK[name] = os.clock() + 1.8
+                    return
+                end
+            end
+            if net.deferredK then net.deferredK[name] = nil end
+            if net.ownExec then net.ownExec[name] = nil end
+            if net.partnerExec then net.partnerExec[name] = nil end
             if valid(actor) then
+                if game.execLock then
+                    game.execLock(actor, false)
+                end
                 if api.puppets then
                     api.puppets.drop(actor)
                 end
@@ -3278,26 +3212,36 @@ return function(api)
                         -- (Refused here (a phase or floor of this world's own): the host's word stands, the quiet death.)
                         game.kill(actor)
                         log("Host says " .. name .. " died; its death was refused here, killed it quietly.")
+                        bring.cardsLater()
                     end
                 elseif not wasBoss and not quiet and game.killForReal then
-                    -- (417: its death to see first, where there is one to show: net.dieLater.)
-                    if not net.isDying(actor:GetAddress()) then
-                        local wait, what, show = 0, nil, nil
-                        if api.puppets and api.puppets.deathShow then
-                            local ok, w, k, m = pcall(api.puppets.deathShow, name, actor)
-                            if ok and type(w) == "number" then
-                                wait, what, show = w, k, m
-                            end
+                    -- The game's own death, at level 0 so it pays nothing here: the quiet kill skipped what listens for
+                    -- deaths, and a quest waiting for the monsters to be dealt with (Fierce Axe) never moved, not even after
+                    -- a reload.
+                    if net.killWatched(actor, down) then
+                        log("Host says " .. name .. " died; it dies here too.")
+                        -- (Nothing of it is owed: with the host down, or up within its quiet after, no share of it
+                        -- comes, and its copy's own pay taken back left this player nothing for the kill. When the host
+                        -- was last seen down goes with the copy's pay: pbz.lua's watchCurrency. The review of 11-16.)
+                        -- (This kill's own roll alone: a boss's in the same pay is owed, its share comes once the host
+                        -- is up. The third review.)
+                        -- (The host at 0 now counts: seen down only after a second, a kill in that second was taken
+                        -- back with no share to come.)
+                        local downAt = net.zeroSince and os.clock() or net.downSeenAt
+                        if game.copyPay and not byGuest and downAt
+                            and os.clock() - downAt < game.dustWatch.AFTER_DOWN_S then
+                            game.copyPay.hostDownAt = downAt
+                            game.copyPay.keep = (game.copyPay.keep or 0) + (game.copyPay.last or 0)
                         end
-                        if wait > 0 then
-                            net.dieLater(name, actor, wait, what, down, byGuest, show)
-                        else
-                            net.dieHere(name, actor, down, byGuest)
-                        end
+                    else
+                        log("Host says " .. name .. " died; its death was refused here: tried again, then dissolved.")
                     end
                 elseif game.kill then
                     game.kill(actor)
                     log("Host says " .. name .. " died; killed it here.")
+                    if wasBoss then
+                        bring.cardsLater()
+                    end
                 end
             else
                 -- Not loaded (or not matched) here right now: kill it when it shows up (applyRemoteEnemies).
@@ -3370,6 +3314,13 @@ return function(api)
     -- host's party is only its first guest here.
     handlers.D = function(rest, from)
         local name, amount, posture, lethal = rest:match("^(%S+) (%S+)%s*(%S*)%s*(%S*)")
+        if name and net.ownExec and net.ownExec[name] then
+            local a = enemyByName[name]
+            local isBoss = valid(a) and ((game.isBoss and game.isBoss(a)) or (game.bossTwin and game.bossTwin(a)))
+            if not isBoss then
+                return
+            end
+        end
         -- Checked before anything else: a real number in range (the lethal flag below can't smuggle in more).
         amount = num(amount)
         if amount == nil or amount < 0 or amount > MAX_EVENT_DAMAGE then
@@ -3423,14 +3374,10 @@ return function(api)
             -- whole death here, paying this player, and that dust reaches the host as any of this player's does.
             local actor = enemyByName[name]
             if valid(actor) and game.applyDamage and net.target and gap3d(actor:K2_GetActorLocation(), net.target) <= OWN_HIT_CM then
-                local before = handover.dragonPillarFight(name) and game.getHealth(actor)
                 game.applyDamage(actor, amount, posture, true)
                 react(actor)
                 local left = { hp = game.getHealth(actor), posture = game.getPosture and game.getPosture(actor),
                     addr = actor:GetAddress() }
-                if before and left.hp then
-                    game.partnerHit(left.addr, 1, before - left.hp)
-                end
                 seen[name] = left           -- (a reported hit: its turn mustn't weigh it again, nor undo it)
                 if round.seen and round.seen[name] then
                     round.seen[name] = left
@@ -3442,7 +3389,7 @@ return function(api)
             local actor = enemyByName[name]
             -- (A killing blow is looked for further: one on an enemy just past this round's list, or a little further off than
             -- a hit, was dropped without a word, and the guest's copy stood at 1 health for good, still taking hits.)
-            if not valid(actor) and lethal == "L" and game.listEnemies then
+            if not valid(actor) and game.listEnemies then
                 for _, a in pairs(game.listEnemies() or {}) do
                     if valid(a) and enemyName(a, a:GetAddress()) == name then
                         actor = a
@@ -3462,7 +3409,7 @@ return function(api)
                 end
             end
             if valid(actor) and game.applyDamage and hitter
-                and gap3d(actor:K2_GetActorLocation(), hitter) <= (lethal == "L" and OWN_HIT_CM * 2 or OWN_HIT_CM) then
+                and gap3d(actor:K2_GetActorLocation(), hitter) <= OWN_HIT_CM * 2 then
                 local wasAlive = not (game.isDead and game.isDead(actor))
                 local boss = net.partnerBosses[name] or (game.isBoss and game.isBoss(actor))
                 local before, most = game.getHealth(actor)
@@ -3515,6 +3462,12 @@ return function(api)
                             floor0 = floor
                             game.setMinHealth(actor, 0)
                         end
+                    end
+                end
+                if lethal == "L" and net.partnerExec and net.partnerExec[name] then
+                    net.partnerExec[name] = nil
+                    if game.execLock then
+                        game.execLock(actor, false)
                     end
                 end
                 local real = game.applyDamage(actor, amount, posture, true)
@@ -3889,7 +3842,7 @@ return function(api)
         x, y, z, pitch, yaw, roll = num(x), num(y), num(z), num(pitch), num(yaw), num(roll)
         -- (In the world: "1e30" is a number, and a boulder put there.)
         if name and #name <= MAX_CHEST_NAME and x and y and z and pitch and yaw and roll and game.stoneKicked
-            and math.abs(x) < 1e7 and math.abs(y) < 1e7 and math.abs(z) < 1e7 then
+            and math.abs(x) < 1e8 and math.abs(y) < 1e8 and math.abs(z) < 1e8 then
             game.stoneKicked(name, { X = x, Y = y, Z = z }, { Pitch = pitch, Yaw = yaw, Roll = roll })
             log("The other player kicked " .. name .. " away: here too.")
         end
@@ -3977,6 +3930,282 @@ return function(api)
         end
     end
 
+    -- Shared boss parry/vulnerability window
+    net.parrySharedAt = {}
+    handlers.PARRY = function(rest, from)
+        local name, tag = (rest or ""):match("^(%S+)%s*(%S*)$")
+        if not name then
+            return
+        end
+        local actor = enemyByName[name]
+        if valid(actor) and not (game.isDead and game.isDead(actor)) and game.shareParryWindow then
+            net.parrySharedAt[name] = os.clock()
+            game.shareParryWindow(actor, tag)
+        end
+    end
+
+    -- Dynamic boss summons (e.g. DangHui puppets, BiHai adds, any future boss's dynamic minions):
+    -- Queued for 1.5 s so if the guest's own boss spawns its native copy we NEVER double it (no 3rd boss / 2x adds).
+    net.dynSpawned, net.dynTried, net.dynPending = {}, {}, {}
+    function net.clearDynSpawned(sweepNative)
+        for name, rec in pairs(net.dynSpawned or {}) do
+            if rec.addr and game.forgetTwin then
+                game.forgetTwin(rec.addr)
+            end
+            if valid(rec.actor) then
+                if game.hideBossBar then pcall(game.hideBossBar, rec.actor) end
+                pcall(function() rec.actor:K2_DestroyActor() end)
+            end
+        end
+        net.dynSpawned, net.dynPending, net.dynTried, net.excessSeen = {}, {}, {}, {}
+        if sweepNative and not isHost() then
+            for _, ch in ipairs(FindAllOf("PBZCharacter_NPC") or {}) do
+                if valid(ch) then
+                    local okC, cn = pcall(function() return ch:GetClass():GetFName():ToString() end)
+                    if okC and type(cn) == "string" and cn:find("^BP_Monster_") and net.dynClassOK(cn) then
+                        local eid = game.enemyId and game.enemyId(ch, ch:GetAddress()) or ""
+                        if eid:sub(1, 3) ~= "sp:" then
+                            if game.hideBossBar then pcall(game.hideBossBar, ch) end
+                            pcall(function() ch:K2_DestroyActor() end)
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- (Checked against the game's full file list: 84 of 84 player finisher animations -- ExE, SimpleExE,
+    -- EXE, SpecialExE, Execution, GEx, BDEx, BEx -- and none of the combo attacks named "..._Ex_Montage".)
+    function net.isExecName(n)
+        if type(n) ~= "string" then
+            return false
+        end
+        local l = n:lower()
+        return l:find("exe_", 1, true) ~= nil or l:sub(-3) == "exe" or l:find("execut", 1, true) ~= nil
+            or l:find("_gex_", 1, true) ~= nil or l:find("bdex", 1, true) ~= nil or l:find("_bex_", 1, true) ~= nil
+            or l:find("finish", 1, true) ~= nil or l:find("chujue", 1, true) ~= nil
+    end
+
+    -- (Which runtime-spawned enemy classes get a copy in the guest's world. The game's summons are mostly
+    -- named "..._Summon" (GuiChai_Black_TwinBlade_Summon, Dog_Summon, HuaShan_*_Summon, FemaleDoll_*_Summon...), which
+    -- the old list missed; its cutscene and tutorial versions (ForSeq, ForTeach) and the summon helpers are left out.
+    -- net.SYNC_SUMMONS = false goes back to StuntDouble/For<Boss> only.)
+    -- (Off. "..._Summon" classes include the players' own Ctrl summons, so copying and pruning
+    -- them as enemies made a player's summoned puppets vanish. Back to the StuntDouble/For<Boss> list.)
+    net.SYNC_SUMMONS = false
+    function net.dynClassOK(cls)
+        if type(cls) ~= "string" or cls == "" then
+            return false
+        end
+        if cls:find("_Stand_C$") or cls:find("ForPlayer", 1, true) or cls:find("ForSeq", 1, true)
+            or cls:find("ForTeach", 1, true) or cls:find("SummonBase", 1, true) or cls:find("SummonPoint", 1, true) then
+            return false
+        end
+        if cls:find("StuntDouble", 1, true) or cls:find("For%u") then
+            return true
+        end
+        return net.SYNC_SUMMONS ~= false and cls:find("_Summon", 1, true) ~= nil
+    end
+
+    handlers.DYN = function(rest, from)
+        if isHost() then
+            return
+        end
+        local name, cpath, sx, sy, sz, syaw = (rest or ""):match("^(%S+) (%S+) (%S+) (%S+) (%S+) (%S+)$")
+        local x, y, z, yaw = num(sx), num(sy), num(sz), num(syaw)
+        if not (name and cpath and x and y and z and yaw and game.spawnByClass) then
+            return
+        end
+        if enemyByName[name] ~= nil or net.hostKilled[name] or net.dynTried[name] or net.dynPending[name] then
+            return
+        end
+        if net.localLoc and gap3d(net.localLoc, { X = x, Y = y, Z = z }) > PARTNER_REACH_CM then
+            return
+        end
+        local cls = cpath:match("%.([^%.]+)$") or ""
+        if not net.dynClassOK(cls) then
+            return
+        end
+        local delay = cls:find("StuntDouble", 1, true) and 1.0 or (cls:find("Summon", 1, true) and 2.2 or 1.2)
+        net.dynPending[name] = { cpath = cpath, class = cls, x = x, y = y, z = z, yaw = yaw, at = os.clock() + delay }
+    end
+
+    -- Enemy shield-break sync (generic across all shielded mobs)
+    net.shieldSent = {}
+    handlers.SHLD = function(rest, from)
+        local name = (rest or ""):match("^(%S+)$")
+        if not name then
+            return
+        end
+        local actor = enemyByName[name]
+        if valid(actor) and not (game.isDead and game.isDead(actor)) and game.breakEnemyShield then
+            net.shieldSent[name] = os.clock()
+            game.breakEnemyShield(actor)
+        end
+    end
+
+    -- Player Ctrl summons (e.g. Weapon_KuYeSiZhuChuan bronze fist allies & any future boss-power summons):
+    -- Visually spawned on partner's PC so both players see each other's allies fighting!
+    net.ownSummons, net.remoteSummons, net.sumTickAt = {}, {}, 0
+    handlers.PSUM = function(rest, from)
+        local uid, cpath, sx, sy, sz, syaw = (rest or ""):match("^(%S+) (%S+) (%S+) (%S+) (%S+) (%S+)$")
+        local x, y, z, yaw = num(sx), num(sy), num(sz), num(syaw)
+        if not (uid and cpath and x and y and z and yaw and game.spawnByClass) then
+            return
+        end
+        local key = (from or 1) .. ":" .. uid
+        if net.remoteSummons[key] and valid(net.remoteSummons[key].actor) then
+            return
+        end
+        if net.localLoc and gap3d(net.localLoc, { X = x, Y = y, Z = z }) > PARTNER_REACH_CM then
+            return
+        end
+        local actor = game.spawnByClass(cpath, x, y, z, yaw)
+        if valid(actor) then
+            local saddr = actor:GetAddress()
+            if game.setupVisualSummon then
+                game.setupVisualSummon(actor)
+            elseif game.visualSummons then
+                game.visualSummons[saddr] = true
+            end
+            local brain = game.stopAI and game.stopAI(actor) or nil
+            local tnow = os.clock()
+            net.remoteSummons[key] = {
+                actor = actor, addr = saddr, brain = brain, at = tnow, steerAt = tnow,
+                x = x, y = y, z = z, yaw = yaw, cx = x, cy = y, cz = z, cyaw = yaw
+            }
+        end
+    end
+
+    handlers.PSUMP = function(rest, from)
+        local uid, sx, sy, sz, syaw, mpath, mpos = (rest or ""):match("^(%S+) (%S+) (%S+) (%S+) (%S+)%s*(%S*)%s*(%S*)$")
+        local x, y, z, yaw = num(sx), num(sy), num(sz), num(syaw)
+        if not (uid and x and y and z and yaw) then
+            return
+        end
+        local key = (from or 1) .. ":" .. uid
+        local s = net.remoteSummons[key]
+        if s and valid(s.actor) then
+            s.x, s.y, s.z, s.yaw, s.at = x, y, z, yaw, os.clock()
+            local pos = num(mpos)
+            if mpath and mpath ~= "" and mpath ~= "-" and pos and pos >= 0 and pos < 600
+                and api.moves and api.moves.allowedPath(mpath) then
+                if s.mpath ~= mpath or pos < (s.mpos or 0) - 0.1 then
+                    local m = api.moves.montage(mpath)
+                    local ai = m and api.moves.animOf(s.actor)
+                    if ai then
+                        pcall(function() ai:Montage_Play(m, 1.0, 0, pos + net.moveAge(), true) end)
+                        s.mpath, s.mpos = mpath, pos
+                    end
+                else
+                    s.mpos = pos
+                end
+            end
+        end
+    end
+
+    handlers.PSUMEND = function(rest, from)
+        local uid = (rest or ""):match("^(%S+)$")
+        if not uid then
+            return
+        end
+        local key = (from or 1) .. ":" .. uid
+        local s = net.remoteSummons[key]
+        net.remoteSummons[key] = nil
+        if s then
+            if s.addr and game.visualSummons then game.visualSummons[s.addr] = nil end
+            if valid(s.actor) then pcall(function() s.actor:K2_DestroyActor() end) end
+        end
+    end
+
+    frameTicks.remoteSummons = function()
+        if not net.enabled or next(net.remoteSummons) == nil then
+            return
+        end
+        local now = os.clock()
+        for key, s in pairs(net.remoteSummons) do
+            if not valid(s.actor) then
+                if s.addr and game.visualSummons then game.visualSummons[s.addr] = nil end
+                net.remoteSummons[key] = nil
+            else
+                local dt = math.min(0.05, math.max(0.001, now - (s.steerAt or (now - 0.016))))
+                s.steerAt = now
+                local dx, dy, dz = s.x - (s.cx or s.x), s.y - (s.cy or s.y), s.z - (s.cz or s.z)
+                local distSq = dx * dx + dy * dy + dz * dz
+                local a = distSq > 640000 and 1.0 or (1 - math.exp(-16.0 * dt))
+                s.cx = (s.cx or s.x) + dx * a
+                s.cy = (s.cy or s.y) + dy * a
+                s.cz = (s.cz or s.z) + dz * a
+                local dyaw = (s.yaw - (s.cyaw or s.yaw) + 180) % 360 - 180
+                s.cyaw = (s.cyaw or s.yaw) + dyaw * a
+                pcall(function()
+                    local cmc = s.actor.CharacterMovement
+                    if valid(cmc) and cmc.MovementMode ~= MOVE_NONE then
+                        cmc:SetMovementMode(MOVE_NONE, 0)
+                    end
+                    s.actor:K2_SetActorLocationAndRotation({ X = s.cx, Y = s.cy, Z = s.cz },
+                        { Pitch = 0.0, Yaw = s.cyaw, Roll = 0.0 }, false, {}, true)
+                end)
+            end
+        end
+    end
+
+    -- Small-enemy & boss E execution lock + visual sync (blocks double-E via execLock posture+GE removal!)
+    net.ownExec, net.partnerExec, net.deferredK, net.EXEC_LOCK_S, net.exLockNextAt = {}, {}, {}, 4.0, 0
+    handlers.EX = function(rest, from)
+        local name, on, sx, sy, sz, syaw, mpath, mpos = (rest or ""):match("^(%S+) (%S+)%s*(%S*)%s*(%S*)%s*(%S*)%s*(%S*)%s*(%S*)%s*(%S*)$")
+        if not name then
+            return
+        end
+        local actor = enemyByName[name]
+        if on == "1" then
+            if net.ownExec[name] then
+                -- (Both pressed E within the ping: the host's finisher wins, the guest's yields.)
+                if isHost() then
+                    return
+                end
+                net.ownExec[name] = nil
+            end
+            if valid(actor) and game.isDead and game.isDead(actor) then
+                return
+            end
+            net.partnerExec[name] = os.clock() + net.EXEC_LOCK_S
+            if valid(actor) then
+                if game.execLock then
+                    game.execLock(actor, true)
+                end
+                local x, y, z, yaw = num(sx), num(sy), num(sz), num(syaw)
+                if x and y and z and yaw then
+                    pcall(function()
+                        actor:K2_SetActorLocationAndRotation({ X = x, Y = y, Z = z },
+                            { Pitch = 0.0, Yaw = yaw, Roll = 0.0 }, false, {}, true)
+                    end)
+                end
+                local pos = num(mpos)
+                if mpath and mpath ~= "" and mpath ~= "-" and pos and pos >= 0 and pos < 600
+                    and api.moves and api.moves.allowedPath(mpath) then
+                    local m = api.moves.montage(mpath)
+                    local ai = m and api.moves.animOf(actor)
+                    if ai then
+                        local cur = ai:GetCurrentActiveMontage()
+                        if not (valid(cur) and cur:GetAddress() == m:GetAddress()) then
+                            pcall(function() ai:Montage_Play(m, 1.0, 0, pos + net.moveAge(), true) end)
+                        end
+                    end
+                end
+            end
+        else
+            net.partnerExec[name] = nil
+            if valid(actor) and game.execLock then
+                game.execLock(actor, false)
+            end
+            if net.deferredK and net.deferredK[name] then
+                net.deferredK[name] = nil
+                handlers.K(name, nil, false)
+            end
+        end
+    end
+
     -- A world refreshed: every boss fight can happen again. After a death the dead mostly stay dead, so a guest goes on by what
     -- the host killed, or what it never saw die there comes alive here alone. Only a new world ("bell": the host loaded its
     -- world again, or a mod's respawns) starts from nothing.
@@ -4051,11 +4280,10 @@ return function(api)
         net.unsettle()
         -- (A guest's own death refreshes only its own world: the host's enemies, and their twins, go on.)
         net.restRefreshes = isHost()
-        -- (Every enemy of this world is made anew: none is one seen alive, whatever stood at its address. net.metDead.)
-        net.livedAt, net.livedAs = {}, {}
         restEvent(kind)
         if kind == "death" and net.role == "client" then
             log("You died and respawned: your world refreshed, the host's goes on. Enemies the host already killed stay dead.")
+            if net.clearDynSpawned then net.clearDynSpawned(true); if game.after then game.after(1.2, function() if net.clearDynSpawned and next(net.partnerBosses) == nil then net.clearDynSpawned(true) end end) end end
             handover.live = {}      -- (every enemy here is a new one: none is this game's own to run yet, handover.byHere)
             local again = 0
             for name in pairs(net.hostKilled) do
@@ -4329,8 +4557,10 @@ return function(api)
         restEvent(kind)
         if kind == "death" then
             log("The host died and respawned: enemies respawn here too.")
+            if net.clearDynSpawned then net.clearDynSpawned(true); if game.after then game.after(1.2, function() if net.clearDynSpawned and next(net.partnerBosses) == nil then net.clearDynSpawned(true) end end) end end
         else
             log("The other player rested at a bell: respawning enemies here too.")
+            if net.clearDynSpawned then net.clearDynSpawned(true); if game.after then game.after(1.2, function() if net.clearDynSpawned and next(net.partnerBosses) == nil then net.clearDynSpawned(true) end end) end end
         end
         if ownFight then
             log("A boss fight of your own is on: it goes on, and enemies here come back at the next rest.")
@@ -4469,6 +4699,9 @@ return function(api)
             game.resetBosses()
         end
         net.fightHereAt = nil
+        if game.cleanBossBars and not (game.bossFightActive and game.bossFightActive()) and next(net.partnerBosses) == nil then
+            game.cleanBossBars(true)
+        end
         log("Sat at a bell: telling the other player.")
         sendEvent("SIT")
     end
@@ -4549,11 +4782,6 @@ return function(api)
         -- known by their spawner, and a "no" hid an enemy it had on the guest's screen: invisible enemies after a teleport or a
         -- bell. The guest asks again.)
         if os.clock() < (net.unsettledUntil or 0) then
-            return
-        end
-        -- (Nor of a name that is the asker's own alone, an older guest's for a spawner its game made as it ran, a
-        -- mount's: this world's has another name, and a "no" hid the guest's horse under its rider. Nothing said. 410.)
-        if net.ownName(name) then
             return
         end
         -- (A fresh read at most once a second: a round of asks came together, and each one's full search hitched the host.)
@@ -4726,6 +4954,10 @@ return function(api)
             return false
         end
         net.farFight = nil
+        local curLoc = pawn:K2_GetActorLocation()
+        if (far.at and gap3d(curLoc, far.at) <= 6000) or (net.target and gap3d(curLoc, net.target) <= 6000) then
+            return false
+        end
         log("Joining the other player's boss fight, in an arena apart from the map.")
         net.joinedBoss, net.joinedWith, net.joinedFar = far.name, far.p, true
         net.endWatch(pawn)
@@ -4846,7 +5078,7 @@ return function(api)
         if os.clock() < (net.travelUntil or 0) then
             return nil              -- (on the way already: a second press in the loading screen began the trip again)
         end
-        if not (math.abs(t.X) < 1e7 and math.abs(t.Y) < 1e7 and math.abs(t.Z) < 1e7) then
+        if not (math.abs(t.X) < 1e8 and math.abs(t.Y) < 1e8 and math.abs(t.Z) < 1e8) then
             return "your partner's position looks wrong."
         end
         if t.Map == net.localMap then
@@ -4950,6 +5182,247 @@ return function(api)
     end
 
     -- Never paused with a partner linked: their game goes on, so a menu here is a menu in a live world, as in any co-op.
+    extraTicksEarly.playerSummons = function()
+        if not (net.enabled and game.isPlayerSummon and game.classPathOf) then
+            return
+        end
+        local now = os.clock()
+        -- Fast ~16 Hz pose + montage stream ONLY for already-discovered active own Ctrl summons (no FindAllOf!)
+        if next(net.ownSummons) ~= nil and now >= (net.sumSendAt or 0) then
+            net.sumSendAt = now + 0.06
+            for uid, ch in pairs(net.ownSummons) do
+                if ch ~= true and valid(ch) and not (game.isDead and game.isDead(ch)) then
+                    local okL, l = pcall(function() return ch:K2_GetActorLocation() end)
+                    local okR, r = pcall(function() return ch:K2_GetActorRotation() end)
+                    if okL and l then
+                        local yaw = (okR and r and r.Yaw) or 0
+                        local mpath, mpos = "-", 0
+                        if api.moves then
+                            pcall(function()
+                                local ai = api.moves.animOf(ch)
+                                local m = valid(ai) and ai:GetCurrentActiveMontage()
+                                if valid(m) then
+                                    local p = api.moves.pathOf(m)
+                                    if api.moves.allowedPath(p) then
+                                        mpath, mpos = p, ai:Montage_GetPosition(m) or 0
+                                    end
+                                end
+                            end)
+                        end
+                        sendEvent("PSUMP", uid, string.format("%.0f %.0f %.0f %.0f %s %.2f", l.X, l.Y, l.Z, yaw, mpath, mpos))
+                    end
+                elseif ch ~= true then
+                    net.ownSummons[uid] = nil
+                    sendEvent("PSUMEND", uid)
+                end
+            end
+            if next(net.ownSummons) ~= nil and game.noteLocalMove then
+                game.noteLocalMove()
+            end
+        end
+        if now < (net.sumTickAt or 0) then
+            return
+        end
+        local active = next(net.ownSummons) ~= nil or next(net.remoteSummons) ~= nil
+            or next(net.dynPending or {}) ~= nil or next(net.dynSpawned or {}) ~= nil
+        net.sumTickAt = now + (active and 0.30 or 0.55)
+        local _, pawn = getPlayer1()
+        local dead = not valid(pawn) or (game.isDead and game.isDead(pawn))
+        local spectating = dead and net.holdWanted and game.isSpectating and game.isSpectating()
+        -- 1. Guest: process queued dynamic boss summons (only spawn if local class count < host class count!)
+        local refLoc = (spectating and net.target and net.target.X) and net.target or net.localLoc
+        if not isHost() and (not dead or spectating) and refLoc then
+            local spawnedByClass = {}
+            for name, q in pairs(net.dynPending or {}) do
+                if enemyByName[name] ~= nil or net.hostKilled[name] then
+                    net.dynPending[name] = nil
+                elseif now >= q.at then
+                    net.dynPending[name] = nil
+                    local rSelf = net.remoteEnemies[name]
+                    if rSelf ~= nil and (rSelf.Hp or 0) > 0 then
+                        local sx, sy, sz = rSelf.X or q.x, rSelf.Y or q.y, rSelf.Z or q.z
+                        local syaw = rSelf.Yaw or q.yaw
+                        if gap3d(refLoc, { X = sx, Y = sy, Z = sz }) <= 5500 then
+                            net.dynTried[name] = now
+                            local locCnt, remCnt = 0, 0
+                            for _, r in pairs(net.remoteEnemies) do
+                                if r.Class == q.class and (r.Hp or 0) > 0 and r.X and gap3d(refLoc, r) <= 5500 then
+                                    remCnt = remCnt + 1
+                                end
+                            end
+                            for _, e in pairs(reach.near) do
+                                if valid(e.actor) and not (game.isDead and game.isDead(e.actor)) then
+                                    local ec = enemyClass(e.actor)
+                                    if ec == q.class and e.loc and gap3d(refLoc, e.loc) <= 5500 then
+                                        locCnt = locCnt + 1
+                                    end
+                                end
+                            end
+                            if locCnt + (spawnedByClass[q.class] or 0) < remCnt then
+                            local actor = game.spawnByClass(q.cpath, sx, sy, sz, syaw)
+                            if valid(actor) then
+                                spawnedByClass[q.class] = (spawnedByClass[q.class] or 0) + 1
+                                local addr = actor:GetAddress()
+                                local fname = select(2, pcall(function() return actor:GetFName():ToString() end))
+                                if game.markTwin then
+                                    game.markTwin(addr, name, fname)
+                                end
+                                reach.near[addr] = { actor = actor, loc = { X = sx, Y = sy, Z = sz }, addr = addr }
+                                net.dynSpawned[name] = { actor = actor, addr = addr, fname = fname, seenAt = now }
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            -- Prune orphaned or far-away DYN copies (prevents sky-arena puppets from dropping onto the grass bell!)
+            for name, rec in pairs(net.dynSpawned or {}) do
+                if not valid(rec.actor) or (game.isDead and game.isDead(rec.actor)) then
+                    if rec.addr and game.forgetTwin then game.forgetTwin(rec.addr) end
+                    net.dynSpawned[name] = nil
+                else
+                    if net.remoteEnemies[name] ~= nil then
+                        rec.seenAt = now
+                    end
+                    local okL, l = pcall(function() return rec.actor:K2_GetActorLocation() end)
+                    local far = okL and l and gap3d(refLoc, l) > 5500
+                    if far or now - (rec.seenAt or now) > 4.0 then
+                        if rec.addr and game.forgetTwin then game.forgetTwin(rec.addr) end
+                        pcall(function() rec.actor:K2_DestroyActor() end)
+                        net.dynSpawned[name] = nil
+                    end
+                end
+            end
+            -- Auto-prune excess unmatched For<Boss>* puppets so Guest always matches Host's exact enemy count
+            if now >= (net.excessPruneAt or 0) and linked() and next(net.remoteEnemies) ~= nil
+                and os.clock() - (net.lastRemoteAt or 0) <= 2.0 then
+                net.excessPruneAt = now + 1.0
+                net.excessSeen = net.excessSeen or {}
+                local matchedAddrs = {}
+                for id, a in pairs(enemyByName) do
+                    if net.remoteEnemies[id] ~= nil and valid(a) then
+                        matchedAddrs[a:GetAddress()] = true
+                    end
+                end
+                local remByCls = {}
+                for _, r in pairs(net.remoteEnemies) do
+                    if r.Class and (r.Hp or 0) > 0 and r.X and gap3d(net.localLoc, r) <= 5500 then
+                        remByCls[r.Class] = (remByCls[r.Class] or 0) + 1
+                    end
+                end
+                local locTotal, unmatchedByCls, seenNow = {}, {}, {}
+                for addr, e in pairs(reach.near) do
+                    if valid(e.actor) and not (game.isDead and game.isDead(e.actor)) and e.loc
+                        and gap3d(net.localLoc, e.loc) <= 5500 then
+                        local ec = enemyClass(e.actor)
+                        if type(ec) == "string" and ec:find("^BP_Monster_") and net.dynClassOK(ec)
+                            and not ec:find("StuntDouble", 1, true) then
+                            local eid = game.enemyId and game.enemyId(e.actor, addr) or ""
+                            if eid:sub(1, 3) ~= "sp:" then
+                                locTotal[ec] = (locTotal[ec] or 0) + 1
+                                if not matchedAddrs[addr] then
+                                    seenNow[addr] = true
+                                    net.excessSeen[addr] = net.excessSeen[addr] or now
+                                    local list = unmatchedByCls[ec]
+                                    if not list then
+                                        list = {}
+                                        unmatchedByCls[ec] = list
+                                    end
+                                    list[#list + 1] = { addr = addr, actor = e.actor, since = net.excessSeen[addr] }
+                                end
+                            end
+                        end
+                    end
+                end
+                for addr in pairs(net.excessSeen) do
+                    if not seenNow[addr] then
+                        net.excessSeen[addr] = nil
+                    end
+                end
+                for ec, total in pairs(locTotal) do
+                    local want = remByCls[ec] or 0
+                    local over = total - want
+                    if over > 0 and unmatchedByCls[ec] then
+                        for _, u in ipairs(unmatchedByCls[ec]) do
+                            if over <= 0 then
+                                break
+                            end
+                            if now - u.since >= 2.0 then
+                                if game.forgetTwin then game.forgetTwin(u.addr) end
+                                reach.near[u.addr] = nil
+                                net.excessSeen[u.addr] = nil
+                                for dn, rec in pairs(net.dynSpawned or {}) do
+                                    if rec.addr == u.addr then
+                                        net.dynSpawned[dn] = nil
+                                        break
+                                    end
+                                end
+                                pcall(function() u.actor:K2_DestroyActor() end)
+                                over = over - 1
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        -- 2. Prune timed-out remote visual Ctrl summons
+        for key, s in pairs(net.remoteSummons) do
+            if not valid(s.actor) or now - s.at > 4.0 then
+                if s.addr and game.visualSummons then game.visualSummons[s.addr] = nil end
+                if valid(s.actor) then
+                    pcall(function() s.actor:K2_DestroyActor() end)
+                end
+                net.remoteSummons[key] = nil
+            else
+                if game.stopAI then
+                    s.brain = game.stopAI(s.actor, s.brain)
+                end
+                if game.setupVisualSummon and not s.rechecked then
+                    s.rechecked = true
+                    game.setupVisualSummon(s.actor)
+                end
+            end
+        end
+        if dead then
+            return
+        end
+        local remoteAddrs = {}
+        for _, s in pairs(net.remoteSummons) do
+            if s.addr then remoteAddrs[s.addr] = true end
+        end
+        local live = {}
+        for _, ch in ipairs(FindAllOf("PBZCharacter_NPC") or {}) do
+            if valid(ch) then
+                local addr = ch:GetAddress()
+                if not remoteAddrs[addr] and game.isPlayerSummon(ch) and not (game.isDead and game.isDead(ch)) then
+                    local uid = tostring(addr)
+                    live[uid] = ch
+                    if not net.ownSummons[uid] then
+                        local okL, l = pcall(function() return ch:K2_GetActorLocation() end)
+                        local okR, r = pcall(function() return ch:K2_GetActorRotation() end)
+                        local cpath = okL and l and game.classPathOf(ch)
+                        if cpath and cpath:find("^/") then
+                            local yaw = (okR and r and r.Yaw) or 0
+                            net.ownSummons[uid] = ch
+                            sendEvent("PSUM", uid, cpath, string.format("%.0f %.0f %.0f %.0f", l.X, l.Y, l.Z, yaw))
+                        end
+                    else
+                        net.ownSummons[uid] = ch
+                    end
+                end
+            end
+        end
+        for uid in pairs(net.ownSummons) do
+            if not live[uid] then
+                net.ownSummons[uid] = nil
+                sendEvent("PSUMEND", uid)
+            end
+        end
+        if next(net.ownSummons) ~= nil and game.noteLocalMove then
+            game.noteLocalMove()
+        end
+    end
+
     extraTicksEarly.noPause = function()
         if linked() then
             local controller, pawn = getPlayer1()
@@ -5210,6 +5683,191 @@ return function(api)
         end
     end
 
+    frameTicks.execLock = function(force)
+        if not (net.enabled and game.hitStateOf and game.execLock) then
+            return
+        end
+        local now = os.clock()
+        if not force and now < (net.exLockNextAt or 0) then
+            return
+        end
+        net.exLockNextAt = now + 0.12
+        for name, exp in pairs(net.deferredK) do
+            if now >= exp then
+                net.deferredK[name] = nil
+                net.partnerExec[name] = nil
+                net.ownExec[name] = nil
+                handlers.K(name, nil, false)
+            end
+        end
+        for name, exp in pairs(net.partnerExec) do
+            local actor = enemyByName[name]
+            if now >= exp or not valid(actor) or (game.isDead and game.isDead(actor)) then
+                net.partnerExec[name] = nil
+                if valid(actor) then
+                    game.execLock(actor, false)
+                end
+                if net.deferredK[name] then
+                    net.deferredK[name] = nil
+                    handlers.K(name, nil, false)
+                end
+            end
+        end
+        for name, rec in pairs(net.ownExec) do
+            local actor = enemyByName[name]
+            if not valid(actor) or (game.isDead and game.isDead(actor)) or now - rec.at >= net.EXEC_LOCK_S then
+                net.ownExec[name] = nil
+                sendEvent("EX", name, "0")
+                if net.deferredK[name] then
+                    net.deferredK[name] = nil
+                    handlers.K(name, nil, false)
+                end
+            end
+        end
+        local pawn = localPawn()
+        if not valid(pawn) or (game.isDead and game.isDead(pawn)) then
+            return
+        end
+        local pl = pawn:K2_GetActorLocation()
+        local playerExecTarget = nil
+        if api.moves then
+            local pai = api.moves.animOf(pawn)
+            local pm = pai and pai:GetCurrentActiveMontage()
+            if valid(pm) then
+                local pn = (pm:GetFName():ToString() or ""):lower()
+                if net.isExecName(pn) then
+                    local bestD = 450
+                    for name, actor in pairs(enemyByName) do
+                        if valid(actor) and not (game.isDead and game.isDead(actor)) and not net.partnerExec[name] then
+                            local okL, el = pcall(function() return actor:K2_GetActorLocation() end)
+                            if okL and el then
+                                local d = gap3d(pl, el)
+                                if d < bestD then
+                                    bestD, playerExecTarget = d, name
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        for name, actor in pairs(enemyByName) do
+            if valid(actor) and not (game.isDead and game.isDead(actor)) then
+                local okL, el = pcall(function() return actor:K2_GetActorLocation() end)
+                if okL and el and gap3d(pl, el) <= 800 then
+                    local addr = actor:GetAddress()
+                    local isBoss = (game.isBoss and game.isBoss(actor, addr)) or (game.bossTwin and game.bossTwin(actor, addr))
+                    local st = game.hitStateOf(actor)
+                    if isBoss and st and st ~= "None" and now - (net.parrySharedAt[name] or 0) > 1.5 then
+                        local sl = st:lower()
+                        -- (Not "guard", "weak", "stagger" or any "break": a boss merely guarding was sent
+                        -- as a parry and frozen in the partner's world.)
+                        if sl:find("parried", 1, true) or sl:find("beparry", 1, true) or sl:find("deflected", 1, true)
+                            or sl:find("poisebreak", 1, true) or sl:find("posturebreak", 1, true) then
+                            net.parrySharedAt[name] = now
+                            sendEvent("PARRY", name, st)
+                        end
+                    end
+                    if now - (tonumber(net.shieldSent[name]) or -1e9) > 8.0 and game.isShieldBroken and game.isShieldBroken(actor) then
+                        net.shieldSent[name] = now      -- (Bosses too, and again once the shield is back)
+                        sendEvent("SHLD", name)
+                    end
+                    if not net.partnerExec[name] then
+                        local isExec = (st ~= nil and st:find("Executing", 1, true) ~= nil) or (playerExecTarget == name)
+                        local rec = net.ownExec[name]
+                        if isExec then
+                            local mpath, mpos = "-", 0
+                            if api.moves then
+                                local ai = api.moves.animOf(actor)
+                                local m = ai and ai:GetCurrentActiveMontage()
+                                if valid(m) then
+                                    local p = api.moves.pathOf(m)
+                                    if api.moves.allowedPath(p) then
+                                        mpath, mpos = p, ai:Montage_GetPosition(m) or 0
+                                    end
+                                end
+                            end
+                            if not rec or (rec.mpath == "-" and mpath ~= "-") then
+                                local yaw = 0
+                                pcall(function() yaw = actor:K2_GetActorRotation().Yaw end)
+                                net.ownExec[name] = { at = rec and rec.at or now, addr = addr, mpath = mpath }
+                                sendEvent("EX", name, "1", string.format("%.1f", el.X), string.format("%.1f", el.Y),
+                                    string.format("%.1f", el.Z), string.format("%.1f", yaw), mpath, string.format("%.2f", mpos))
+                            end
+                        elseif rec then
+                            net.ownExec[name] = nil
+                            sendEvent("EX", name, "0")
+                            if net.deferredK[name] then
+                                net.deferredK[name] = nil
+                                handlers.K(name, nil, false)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- (Shields and protections (game.MIRROR_EFFECTS, exact names) kept the same in both worlds. Twice a
+    -- second the game that runs an enemy near its player looks at them; one gone is told, and the other game takes the
+    -- same one off its copy. net.MIRROR_EFFECTS_ON = false turns it off.)
+    net.MIRROR_EFFECTS_ON, net.geSeen, net.geLookAt = true, {}, 0
+    frameTicks.geMirror = function()
+        if not (net.enabled and net.MIRROR_EFFECTS_ON ~= false and game.mirrorEffectsOf and linked()) then
+            return
+        end
+        local now = os.clock()
+        if now < net.geLookAt then
+            return
+        end
+        net.geLookAt = now + 0.5
+        local origin = net.localLoc
+        if not origin then
+            return
+        end
+        local host, looked = isHost(), 0
+        for name, actor in pairs(enemyByName) do
+            if looked >= 12 then
+                break
+            end
+            local runsHere = (host and not net.guestRuns[name]) or (not host and net.mine[name])
+            if runsHere and valid(actor) and not (game.isDead and game.isDead(actor)) then
+                local okL, at = pcall(function() return actor:K2_GetActorLocation() end)
+                if okL and at and gap3d(origin, at) <= 4000 then
+                    looked = looked + 1
+                    local nowSet, before = game.mirrorEffectsOf(actor), net.geSeen[name]
+                    if before then
+                        for ge in pairs(before) do
+                            if not nowSet[ge] then
+                                sendEvent("GEOFF", name, ge)
+                                log("Shield/protection " .. ge .. " left " .. name .. ": told the other player.")
+                            end
+                        end
+                    end
+                    net.geSeen[name] = nowSet
+                end
+            end
+        end
+    end
+    handlers.GEOFF = function(rest, from)
+        local name, ge = (rest or ""):match("^(%S+) (%S+)$")
+        if not (name and ge and game.removeEffectNamed) then
+            return
+        end
+        local actor = enemyByName[name]
+        if valid(actor) and not (game.isDead and game.isDead(actor)) then
+            local n = game.removeEffectNamed(actor, ge)
+            if n > 0 then
+                log("The other player's " .. name .. " lost " .. ge .. ": taken off here too.")
+            end
+        end
+    end
+
+    -- Frame-0 trigger called by moves.lua the instant the local player starts an execution montage.
+    net.onLocalExecStart = function()
+        frameTicks.execLock(true)
+    end
+
     -- pbz.lua's cameras, every frame while one runs: the finishing move's (game.cinemaTick) and the downed player's watch
     -- (game.spectateTick). A key of its own made here at load: made as one started, from a stage inside the frame loop, it
     -- was a new key in the middle of that loop's traversal, which Lua leaves undefined (the review of 1.7.0).
@@ -5227,7 +5885,6 @@ return function(api)
     local function watchSlowly(now)
         local pawn = localPawn()
         if pawn == nil then
-            game.watchPickupCard(nil)
             return
         end
         if game.getHealth and slow.hpAt ~= net.frameNow then       -- (only when this frame's read had none: sendPlayer)
@@ -5244,7 +5901,6 @@ return function(api)
                 reach.list, reach.at, reach.near = {}, 1, {}
                 net.matchSticky = {}    -- (the old map's addresses are free for new enemies: a late K must not find them)
                 net.deadBodies = {}
-                net.livedAt, net.livedAs, net.metDeadAt, net.metDeadAs = {}, {}, {}, {}
                 if game.forgetActors then
                     game.forgetActors()
                 end
@@ -5293,21 +5949,20 @@ return function(api)
                         net.mirrorOn[name] = { actor = boss, addr = boss:GetAddress(),
                             fname = select(2, pcall(function() return boss:GetFName():ToString() end)) }
                     end
-                    game.keepBossBar(boss)
+                    if game.isMirrorBar and game.isMirrorBar(boss) then
+                        game.keepBossBar(boss)
+                    end
                     -- (One the game hasn't started in this world, a figure on the player's own side: no blow landed
-                    -- on it, none of its own on this player. pbz.lua's game.enemySide. Normally this is a guest's copy.
-                    -- The guest-driven Dragon Pillar fight also needs this on the host's mirror while it follows.
-                    -- On a guest, only one that follows the host's
+                    -- on it, none of its own on this player. pbz.lua's game.enemySide. A guest's copy only: the
+                    -- host's is its own game's to start and to run. And only one that follows the host's
                     -- fight: a party guest's own copy of another guest's fight follows no moves, and on the
                     -- enemy's side it was a figure that never fought back, whose death was the boss's everywhere.
                     -- And only while that fight is told as on there, as stillFought has it: a bar that only
                     -- blinked there tells none, and blows here till 344's end went to a figure in no fight there.)
-                    local fromHost = isClient() and net.hostBosses[name]
-                    local dragonMirror = handover.dragonPillarFight(name) and game.isMirrorBar and game.isMirrorBar(boss)
-                    local fromGuest = not net.party and isHost() and dragonMirror and net.guestRuns[name]
-                    if (fromHost or fromGuest) and game.enemySide and api.puppets and api.puppets.follows(boss:GetAddress())
+                    if isClient() and game.enemySide and net.hostBosses[name] and api.puppets
+                        and api.puppets.follows(boss:GetAddress())
                         and (net.party and peerOf(net.fightOf[name] or 1).fights or (not net.party and net.partnerFighting))
-                        and game.enemySide(boss, dragonMirror) == "put" then
+                        and game.enemySide(boss) == "put" then
                         log(name .. " isn't started in this world: on the enemy's side while the other player's fight with it lasts.")
                     end
                 end
@@ -5350,9 +6005,12 @@ return function(api)
         if game.pickupShares and #game.pickupShares > 0 and not game.isDead(pawn) and not net.arena then
             game.pickupSharesDue(pawn)
         end
-        game.watchPickupCard(not quiet and cine == 0 and slow.hp > 0 and not net.arena and pawn or nil)
-        if game.tipsWanted and not quiet and cine == 0 and not game.isDead(pawn) and not net.arena then
+        if game.tipsWanted and not game.isDead(pawn) and not net.arena then
             game.showPickupTips(pawn)       -- (a card waiting from before isn't put up in a PvP match)
+        end
+        if game.watchStuckCards and now >= (slow.cardWatchAt or 0) and not game.isDead(pawn) then
+            slow.cardWatchAt = now + 1.0
+            game.watchStuckCards(pawn)
         end
         if game.watchGear and now >= (slow.gearAt or 0) and not net.arena then
             slow.gearAt = now + GEAR_S
@@ -5495,7 +6153,6 @@ return function(api)
         -- a fight of their own too. A host restarting while the guest stays linked still does.)
         net.hostWorld = nil
         net.hostLethal, net.deadBodies = {}, {}
-        net.livedAt, net.livedAs, net.metDeadAt, net.metDeadAs = {}, {}, {}, {}
         net.everHeard, net.gapped, net.retellAt = nil, nil, nil
         net.bagSent, net.bagDue, net.bagWaiting = false, nil, nil
         net.remoteEnemies = {}
@@ -5519,7 +6176,14 @@ return function(api)
         net.bossAsk = {}
         net.joinedBoss, net.joinedWith, net.farFight, net.bossOverAt, net.lastFarFight = nil, nil, nil, nil, nil
         net.healTicks = {}
-        net.lethalPending = {}
+        net.lethalPending, net.ownExec, net.partnerExec, net.deferredK, net.parrySharedAt = {}, {}, {}, {}, {}
+        if net.clearDynSpawned then net.clearDynSpawned() end
+        net.dynSent, net.dynTried, net.dynPending, net.shieldSent, net.classCache, net.ownSummons = {}, {}, {}, {}, {}, {}
+        for _, s in pairs(net.remoteSummons or {}) do
+            if s.addr and game.visualSummons then game.visualSummons[s.addr] = nil end
+            if valid(s.actor) then pcall(function() s.actor:K2_DestroyActor() end) end
+        end
+        net.remoteSummons = {}
         net.capped = {}
         net.bossFell, net.extraBossWatch, net.watchGaveUp, net.watchHeldAt = {}, {}, nil, nil
         net.fellInFight = {}
@@ -5781,8 +6445,8 @@ return function(api)
         end
         pcall(sendEvent, "BYE")
         net.enabled = false
-        game.watchPickupCard(nil)
         net.partnerFighting, net.toldFighting = false, nil
+        if game.setDownBody then game.setDownBody(select(2, getPlayer1()), false) end
         game.holdRespawn(nil, false)
         net.holdLooking, net.holdWanted, net.respawnHeld, net.deadSince, net.struck = false, false, false, nil, {}
         net.finisherSince, net.finisherSaySince, net.floorRefused = nil, nil, {}
@@ -6067,6 +6731,11 @@ return function(api)
             for name in pairs(net.partnerBosses) do
                 if whose == nil or net.fightOf[name] == whose then
                     log("The other player's fight with " .. name .. " is over there: over here too.")
+                    local otherBoss = false
+                    for bn in pairs(net.partnerBosses) do
+                        if bn ~= name then otherBoss = true; break end
+                    end
+                    if net.clearDynSpawned and not otherBoss then net.clearDynSpawned(true) end
                     -- (Asked before its end here: whether this player is in it is known till then. handover.lost.)
                     local boss = enemyByName[name]
                     local alone = isHost() and net.joinedBoss ~= name and not net.struck[name]
@@ -6516,6 +7185,7 @@ return function(api)
             end
             net.holdLooking, net.holdWanted, net.respawnHeld, net.finisherSince = false, false, false, nil
             net.floorRefused = {}       -- (that fight's over for this player: a note of it means nothing in the next)
+            if game.setDownBody then game.setDownBody(pawn, false) end
             game.holdRespawn(pawn, false)
         end
     end
@@ -6582,6 +7252,10 @@ return function(api)
                 net.finisherSaid(os.clock(), false)
             end
             holdForFight(pawn)
+            if net.holdWanted and game.setDownBody and os.clock() - net.deadSince >= 0.8 then
+                local livePartner = isHost() and upPartner() or nil
+                game.setDownBody(pawn, true, livePartner and livePartner.ghost or nil)
+            end
             local up = upPartner()      -- (whom the camera follows: a figure that's shown)
             if up and os.clock() - net.deadSince >= SPECTATE_AFTER_S and not game.isSpectating() then
                 if game.spectate(up.ghost) then
@@ -6597,6 +7271,9 @@ return function(api)
                 log("The other player is down or gone too: camera back on you.")
             end
         else
+            if game.setDownBody and game.downBodyOff then
+                game.setDownBody(pawn, false)
+            end
             if net.deadSince ~= nil then
                 net.upAt = os.clock()       -- (see onLocalSit)
                 if game.downAt then
@@ -6614,6 +7291,7 @@ return function(api)
             end
             if net.holdLooking then
                 net.holdLooking, net.holdWanted, net.respawnHeld = false, false, false
+                if game.setDownBody then game.setDownBody(pawn, false) end
                 game.holdRespawn(nil, false)
             end
             if game.bossFightActive() then
@@ -6627,6 +7305,9 @@ return function(api)
                         net.fightNames[enemyName(a, a:GetAddress())] = true
                     end
                 end
+            elseif net.fightNames and next(net.fightNames) ~= nil
+                and os.clock() - (net.fightSeenAt or 0) > IN_FIGHT_S then
+                net.fightNames = {}
             end
             -- What a boss of this world paid while this player was down, given once they're up and settled (pbz.lua's
             -- payOwed): past the respawn's quiet and the wallet's, so a dust rise goes to the partners as earned, as at a

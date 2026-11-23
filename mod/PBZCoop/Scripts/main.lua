@@ -6,7 +6,7 @@
 -- F8  spawn player 2: a second local player + a copy of player 1's character (F8-F11 need PBZCOOP_DEBUG=1)
 -- F9  remove player 2
 
-local VERSION = "1.7.5"
+local VERSION = "1.7.6"
 -- The relay these scripts are written for: native/relay.hpp's PROTOCOL, the two bumped together (openLink asks main.dll's).
 local PROTOCOL = 5
 local TAG = "[PBZCoop] "
@@ -663,8 +663,6 @@ PBZ = {
     status = api.status,
     loadout = api.loadout,
     playlog = api.playlog,
-    localcoop = api.localcoop,
-    puppets = api.puppets,
 }
 
 -- Command file: lets a developer drive tests from outside the game. Write one command per line
@@ -797,19 +795,6 @@ LoopInGameThreadWithDelay(500, function()
     end
     return false
 end)
-
--- Lua's collector, sooner: a round begins once the mod's memory has grown by half, not doubled (its pause 150, where
--- Lua ships 200). Nearly all the mod's memory is garbage, most of it the objects UE4SS makes for every game object the
--- mod looks at, each with something to close; the collector's one step that can't be split pays for those by how
--- many there are, and it fell in whatever was running: a step of 35-56 ms about every 20 s in the user's play log of
--- 11-19 (178 of them in 64 minutes, a frame of 40-80 ms each time, in a boss's fight too), 25-48 ms on the bench.
--- At 150 a round has a tenth as much to free: 17-26 ms there, 10 of it the slow look's own, and the mod's time a
--- second about the same. (Sooner still costs more than it saves: at 110 the mod took 110 ms a second for 76. A
--- slower collector changes nothing at 200, and at step 12 it never caught up, the memory past 200 MB; Lua's
--- generational way was worse. The bench, run247 to run249.) The old setter is for a Lua with no such word. 409.
-if not pcall(collectgarbage, "incremental", 150, 100) then
-    pcall(collectgarbage, "setpause", 150)
-end
 
 log("Loaded (instance " .. INSTANCE .. ", v" .. VERSION .. ", files in " .. modDir() .. "). F6 PvP" .. (DEV_KEYS and " | F7 nearby | F8 P2 clone | F9 remove P2 | F10 P2 controller only | F11 P2 plain pawn" or "") .. " | cmd.txt enabled")
 

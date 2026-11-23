@@ -92,7 +92,7 @@ return function(api)
         if rows.marks then
             return rows.marks
         end
-        local marks = { column("t"), column("g"), column("m"), column("u") }
+        local marks = { column("t"), column("g"), column("m") }
         local finds = { column("f"), column("b") }
         local function any(cols, i)
             for _, c in ipairs(cols) do
@@ -385,7 +385,7 @@ return function(api)
     -- A bell is the player's to ring, or comes by its own id (b) or tag. What a row hands out (weapons, items, loot) isn't: a player's own finds, and what
     -- the story needs comes with the host's bag. Returns how many of its parts the game took, and how many it was given.
     -- A branch it finishes leaves the flags its tasks wait for in owed (branchFlags), raised after the batch.
-    local function applyRow(row, nc, ep, bells, ui, owed)
+    local function applyRow(row, nc, ep, bells, ui, owed, allowUi)
         local took, tried = 0, 0
         local function try(f)
             tried = tried + 1
@@ -424,7 +424,7 @@ return function(api)
                 try(function() bells:ActivateBellByID(FName(id)) end)
             end
         end
-        if valid(ui) then
+        if allowUi and valid(ui) then
             for _, tag in ipairs(split(row.u)) do
                 try(function() ui:ActivateUIVisibilityTag({ TagName = FName(tag) }) end)
             end
@@ -433,7 +433,7 @@ return function(api)
     end
 
     -- Table rows (by their number) applied with the game's own calls, in order. False if the game took none of it.
-    local function applyRows(pawn, list, why)
+    local function applyRows(pawn, list, why, allowUi)
         local nc = narrative()
         local ep, bells, ui = FindFirstOf("EventPipelineManager"), FindFirstOf("BellManager"), FindFirstOf("UIVisibilityManager")
         if not (nc and DATA and DATA.rows) then
@@ -445,7 +445,7 @@ return function(api)
         for _, i in ipairs(list) do
             local row = DATA.rows[i]
             if row then
-                local t, n = applyRow(row, nc, ep, bells, ui, owed)
+                local t, n = applyRow(row, nc, ep, bells, ui, owed, allowUi == true)
                 took, tried = took + t, tried + n
             end
         end
@@ -473,7 +473,143 @@ return function(api)
             for i = from, math.min(to, #DATA.rows) do
                 list[#list + 1] = i
             end
-            log(string.format("Story jump: rows %d to %d: %s.", from, to, tostring(applyRows(pawn, list, "the story jump"))))
+            log(string.format("Story jump: rows %d to %d: %s.", from, to, tostring(applyRows(pawn, list, "the story jump", true))))
+        end
+
+        -- uitags: inspect UIVisibilityManager methods/properties and all row.u UI unlock tags from storydata.lua
+        game.commands.uitags = function()
+            local ui = FindFirstOf("UIVisibilityManager")
+            if valid(ui) then
+                local fns, props = {}, {}
+                pcall(function()
+                    local cls = ui:GetClass()
+                    cls:ForEachFunction(function(fn)
+                        local n = fn:GetFName():ToString()
+                        if n and n ~= "" then fns[#fns + 1] = n end
+                    end)
+                    cls:ForEachProperty(function(pr)
+                        local n = pr:GetFName():ToString()
+                        if n and n ~= "" then props[#props + 1] = n end
+                    end)
+                end)
+                log("UIVisibilityManager funcs (" .. #fns .. "): " .. table.concat(fns, ", "))
+                log("UIVisibilityManager props (" .. #props .. "): " .. table.concat(props, ", "))
+                for _, pname in ipairs(props) do
+                    if pname:lower():find("tag", 1, true) then
+                        local vals = {}
+                        pcall(function()
+                            local container = ui[pname]
+                            if container and container.GameplayTags then
+                                container.GameplayTags:ForEach(function(_, t)
+                                    vals[#vals + 1] = t:get().TagName:ToString()
+                                end)
+                            elseif container and type(container.ForEach) == "function" then
+                                container:ForEach(function(k, v)
+                                    local ks, vs = "", ""
+                                    pcall(function() ks = k:get().TagName:ToString() end)
+                                    if ks == "" then pcall(function() ks = k:get():ToString() end) end
+                                    pcall(function() vs = tostring(v:get()) end)
+                                    vals[#vals + 1] = (ks ~= "" and (ks .. "=" .. vs) or vs)
+                                end)
+                            end
+                        end)
+                        if #vals > 0 then
+                            log("UIVisibilityManager." .. pname .. " (" .. #vals .. "): " .. table.concat(vals, ", "))
+                        end
+                    end
+                end
+            else
+                log("UIVisibilityManager not found.")
+            end
+            if DATA and DATA.rows then
+                local found = {}
+                for i = 1, math.min(350, #DATA.rows) do
+                    local row = DATA.rows[i]
+                    if row and row.u and row.u ~= "" then
+                        found[#found + 1] = string.format("[%d]%s", i, tostring(row.u))
+                    end
+                end
+                log("storydata row.u tags (1..350, " .. #found .. "): " .. table.concat(found, " | "))
+            end
+            local ep = FindFirstOf("EventPipelineManager")
+            if valid(ep) then
+                local efn = {}
+                pcall(function()
+                    ep:GetClass():ForEachFunction(function(fn)
+                        local n = fn:GetFName():ToString()
+                        if n and n:lower():find("tag", 1, true) then efn[#efn + 1] = n end
+                    end)
+                end)
+                log("EventPipelineManager tag funcs: " .. table.concat(efn, ", "))
+            end
+        end
+
+        -- hideui <tag1> [tag2 ...]: safely deactivate UIVisibilityManager tag(s) (or remove GlobalTag if prefixed ep:)
+        game.commands.hideui = function(args)
+            if type(args) ~= "string" or not args:find("%S") then
+                log("Usage: hideui <UIVisibilityTag> [more tags...]")
+                return
+            end
+            local ui = FindFirstOf("UIVisibilityManager")
+            local ep = FindFirstOf("EventPipelineManager")
+            local uiFns, epFns = {}, {}
+            if valid(ui) then
+                pcall(function()
+                    ui:GetClass():ForEachFunction(function(fn)
+                        uiFns[fn:GetFName():ToString()] = true
+                    end)
+                end)
+            end
+            if valid(ep) then
+                pcall(function()
+                    ep:GetClass():ForEachFunction(function(fn)
+                        epFns[fn:GetFName():ToString()] = true
+                    end)
+                end)
+            end
+            local candidates = {
+                "DeactivateUIVisibilityTag", "DeActiveUIVisibilityTag",
+                "RemoveUIVisibilityTag", "DisableUIVisibilityTag",
+                "UnActivateUIVisibilityTag", "UnRegisterUIVisibilityTag",
+                "ResetUIVisibilityTag", "ClearUIVisibilityTag",
+            }
+            for tag in args:gmatch("%S+") do
+                if tag:sub(1, 3) == "ep:" then
+                    local gt = tag:sub(4)
+                    local done = false
+                    if valid(ep) then
+                        for _, fn in ipairs({ "RemoveTagsByString", "RemoveTagByString", "RemoveGlobalTagByString" }) do
+                            if epFns[fn] then
+                                local ok, err = pcall(function() ep[fn](ep, gt) end)
+                                log(string.format("hideui ep:%s via %s -> ok=%s %s", gt, fn, tostring(ok), ok and "" or tostring(err)))
+                                done = true
+                                break
+                            end
+                        end
+                    end
+                    if not done then
+                        log("hideui ep:" .. gt .. " -> no RemoveTagsByString method found on EventPipelineManager (run uitags first).")
+                    end
+                elseif valid(ui) then
+                    local done = false
+                    for _, fn in ipairs(candidates) do
+                        if uiFns[fn] then
+                            local ok, err = pcall(function() ui[fn](ui, { TagName = FName(tag) }) end)
+                            if not ok then
+                                ok, err = pcall(function() ui[fn](ui, FName(tag)) end)
+                            end
+                            log(string.format("hideui %s via %s -> ok=%s %s", tag, fn, tostring(ok), ok and "" or tostring(err)))
+                            done = true
+                            break
+                        end
+                    end
+                    if not done then
+                        log("hideui " .. tag .. " -> no known deactivate method found on UIVisibilityManager (run uitags and share the funcs line).")
+                    end
+                else
+                    log("hideui: UIVisibilityManager not found.")
+                end
+            end
         end
     end
 
@@ -1045,7 +1181,7 @@ return function(api)
         -- (With the teller's point of the story, a number, or - where it has none read.)
         local on, x, y, z, map, point = rest:match("^on (%S+) (%S+) (%S+) (%S+) (%S+)%s*(%S*)$")
         x, y, z = tonumber(x), tonumber(y), tonumber(z)
-        if on and x and y and z and math.abs(x) < 1e7 and math.abs(y) < 1e7 and math.abs(z) < 1e7 then
+        if on and x and y and z and math.abs(x) < 1e8 and math.abs(y) < 1e8 and math.abs(z) < 1e8 then
             tog.on = { name = on, x = x, y = y, z = z, map = map, point = tonumber(point), at = os.clock() }
             tog.heard[on] = os.clock()
             return
@@ -1128,28 +1264,24 @@ return function(api)
             or (net.fightingHere and net.fightingHere(pawn)) then
             return false, "a boss fight was on"
         end
-        -- (On a guest the game's count alone isn't a fight: copies of the host's enemies that only noticed them hold
-        -- it for as long as they live, and by live enemies, at a boss's box or a bell, a guest was never set down or
-        -- rung for (the bench: counted in a fight by 3 copies within a second of arriving, for 8 s). Really in one:
-        -- lesson.fighting. The eleventh review.)
-        if game.inCombat and game.inCombat(pawn)
-            and (coop.isHost() or not (api.lesson and api.lesson.fighting) or api.lesson.fighting(pawn)) then
+        if game.inCombat and game.inCombat(pawn) then
             return false, "you were in a fight"
         end
         if (game.inDialogue and game.inDialogue()) or (api.qte and api.qte.active)
-            or (game.inPrologue and game.inPrologue()) then
-            return false, "you were in a talk or a scene's own step"
-        end
-        -- (Using something just now, a chest, a lever, a bell by their own E: not moved out of it. game.bellAt asks
-        -- the same before it rings, but by then joinBell had set the player down by the ringer.)
-        if game.usingSomething and game.usingSomething(pawn) then
-            return false, "you were using something"
+            or (game.inPrologue and game.inPrologue())
+            or (game.cardOpen and game.cardOpen())
+            or (game.flowerPickedAt and os.clock() - game.flowerPickedAt < 8.0) then
+            return false, "you were in a talk, item card, or flower scene"
         end
         local busy = true
         pcall(function()
+            local menuUp = false
+            if api.localcoop ~= nil then
+                menuUp = api.localcoop.bellMenuUp() or api.localcoop.screenUp()
+            end
             busy = pawn.CharacterMovement.MovementMode ~= 1         -- (walking: on their feet)
                 or api.gs():IsGamePaused(controller) == true
-                or (api.localcoop ~= nil and (api.localcoop.bellMenuUp() or api.localcoop.screenUp()))
+                or menuUp
         end)
         if busy then
             return false, "you weren't on your feet, or a menu was up"
@@ -1218,6 +1350,30 @@ return function(api)
             return
         end
         local spot, boxes = game.storyBox(s.x, s.y, s.z, tog.BOX_CM)
+        -- (A partner's flyover -- a level's own camera sweep, LD_..., no story box of its own -- is played
+        -- here too, as a picture only: the same sequence's actor in this world, started on its own player. Story
+        -- scenes still go only through their boxes: one played by hand would skip what its box does to the save.)
+        if not spot and story.shareFlyovers ~= false and tostring(s.name):find("^LD_") then
+            local played = false
+            for _, a in ipairs(FindAllOf("LevelSequenceActor") or {}) do
+                if not played and valid(a) then
+                    pcall(function()
+                        local sp = a.SequencePlayer
+                        local seq = valid(sp) and sp:GetSequence()
+                        if valid(seq) and seq:GetFName():ToString() == s.name and not sp:IsPlaying() then
+                            sp:Play()
+                            played = true
+                        end
+                    end)
+                end
+            end
+            log("Your partner's flyover " .. s.name .. (played and ": played here too."
+                or ": no copy of it in this world, nothing done."))
+            if played then
+                tog.joined[s.name] = true
+            end
+            return
+        end
         if not spot then
             log("Your partner's scene " .. s.name .. " began beside you: " .. ((boxes or 0) > 1
                 and (boxes .. " of the story's boxes are by that spot in this world, none taken on a guess.")
@@ -1339,7 +1495,7 @@ return function(api)
         local bx, by, bz, x, y, z, map = rest:match("^ring (%S+) (%S+) (%S+) (%S+) (%S+) (%S+) (%S+)$")
         bx, by, bz, x, y, z = tonumber(bx), tonumber(by), tonumber(bz), tonumber(x), tonumber(y), tonumber(z)
         if bx and by and bz and x and y and z and math.max(math.abs(bx), math.abs(by), math.abs(bz), math.abs(x),
-            math.abs(y), math.abs(z)) < 1e7 then
+            math.abs(y), math.abs(z)) < 1e8 then
             tog.bell = { bx = bx, by = by, bz = bz, x = x, y = y, z = z, map = map, at = os.clock() }
             tog.rang[from or 0] = { x = bx, y = by, z = bz, map = map, at = os.clock() }
         end
@@ -1392,7 +1548,8 @@ return function(api)
         end
         local l = pawn:K2_GetActorLocation()
         local d = math.sqrt((l.X - b.bx) ^ 2 + (l.Y - b.by) ^ 2 + (l.Z - b.bz) ^ 2)
-        if d > tog.NEAR_CM then
+        -- Never teleport the player across the map/room when a partner rings a bell: only auto-ring if already right beside it.
+        if d > 450 then
             return
         end
         local free, why = mayJoin(controller, pawn)
@@ -1410,19 +1567,6 @@ return function(api)
         if state ~= "asleep" then
             return
         end
-        -- (A pace behind where the ringer stands: their figure is at the bell. The bell's own walk up does the rest.
-        -- Only onto ground: with none found there, neither the set-down nor the ring, and the bell stays theirs.)
-        local dx, dy = b.x - b.bx, b.y - b.by
-        local n = math.sqrt(dx * dx + dy * dy)
-        if d > 400 and n > 1 then
-            local sx, sy = b.x + dx / n * 120, b.y + dy / n * 120
-            if not (game.floorUnder and game.floorUnder(pawn, sx, sy, b.z)) then
-                log("Your partner rang a bell beside you: no ground found behind them here, the bell left for your own ring.")
-                return
-            end
-            pawn:K2_SetActorLocation({ X = sx, Y = sy, Z = b.z }, false, {}, true)
-            pcall(function() pawn.CharacterMovement:StopMovementImmediately() end)
-        end
         local took, why = game.bellAt(b.bx, b.by, b.bz, pawn)
         if took == "rung" then
             tog.rungFor, story.rungAt = now, now
@@ -1436,28 +1580,10 @@ return function(api)
 
     -- (The pace each frame's own way, SCENE_S apart, not with the scenes' look below: that one rests in the quiet
     -- after a stall, and a rate raised just before stayed raised all through it.)
-    local paceAt, ringAt = 0, 0
-    -- A first ring's hook, and its telling: each frame's own way too, SCENE_S apart. The scenes' look below rests in
-    -- the quiet after a link's start, a load or a stall, and a first ring made in that quiet was not seen (the hook
-    -- was made by that look: the bench, 11-19, run236, a guest's ring 10 s into a link, the hook registered 2 s
-    -- after it) or, seen, was told too late (one older than 3 s is taken for a ring made with sync off): the
-    -- partner beside the bell rang their own. Neither searches the world, which is what the quiet is for.
-    local function ringLook(now)
-        if now >= touchHookAt and game.hookFirstTouch then
-            touchHookAt = now + 5
-            if game.hookFirstTouch() then
-                touchHookAt = math.huge         -- (hooked: once a game run)
-            end
-        end
-        tellBell(now)
-    end
+    local paceAt = 0
     if coop.frameTicks then
         coop.frameTicks.scenePace = function()
             local now = os.clock()
-            if now >= ringAt then
-                ringAt = now + SCENE_S
-                ringLook(now)
-            end
             if now >= paceAt and (tog.fast or next(tog.at) ~= nil) then
                 paceAt = now + SCENE_S
                 keepPace(now, game.sceneName())
@@ -1471,11 +1597,17 @@ return function(api)
             return
         end
         nextScene = now + SCENE_S
-        ringLook(now)           -- (here too, for a coop.lua with no frame ticks: twice does nothing more)
+        if now >= touchHookAt and game.hookFirstTouch then
+            touchHookAt = now + 5
+            if game.hookFirstTouch() then
+                touchHookAt = math.huge         -- (hooked: once a game run)
+            end
+        end
         local name = game.sceneName()
         -- (What this world's last scene gained by playing faster, keepPace: it ended that much early, and that's no skip.)
         local gained = tog.gained
         tellScene(now, name)
+        tellBell(now)
         joinScene(now, name)
         joinBell(now, name)
         watchSetDown(now, name)

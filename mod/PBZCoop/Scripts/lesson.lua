@@ -180,35 +180,6 @@ return function(api)
         end
     end
 
-    -- Whether a guest the game counts in a fight is really in one (story.lua's mayJoin). The count alone says little
-    -- on a guest: copies that only noticed them hold it for as long as they live (see the top). Really in one: something
-    -- of the host's went for them, they lost health or told a blow of their own in the last QUIET_S, or an enemy this
-    -- game runs itself stands in a fight by them. Nothing is touched here.
-    function lesson.fighting(pawn)
-        local now, struck = os.clock(), -1e9
-        for _, at in pairs(net.struckAt or {}) do       -- (this player's last blow on each enemy: coop.lua's, handover.byHere)
-            struck = math.max(struck, at)
-        end
-        if now - math.max(lesson.hurtAt or -1e9, net.aimedAt or -1e9, struck) < lesson.QUIET_S then
-            return true
-        end
-        local me = pawn:K2_GetActorLocation()
-        local list, addrs = game.enemiesSoFar()
-        for i, e in ipairs(list) do
-            local addr = addrs[i]
-            if valid(e) and not game.isDead(e) and not (api.puppets and api.puppets.follows(addr)) then
-                local l = e:K2_GetActorLocation()
-                if (l.X - me.X) ^ 2 + (l.Y - me.Y) ^ 2 + (l.Z - me.Z) ^ 2 <= lesson.CALM_CM ^ 2 then
-                    local state = game.aiState(e)
-                    if state and not state:find("Idle", 1, true) then
-                        return true
-                    end
-                end
-            end
-        end
-        return false
-    end
-
     LoopInGameThreadWithDelay(lesson.LOOK_MS, function()
         local ok, err = pcall(look)
         if not ok and err ~= lesson.lastError then

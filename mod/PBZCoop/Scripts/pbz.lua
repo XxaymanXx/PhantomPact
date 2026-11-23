@@ -68,6 +68,93 @@ return function(api)
 
     ------------------------------------------------------------------ enemies and health
 
+    -- Player-summoned allies (Ctrl boss powers like Weapon_KuYeSiZhuChuan -> BP_Monster_HuoTongRen_Fist_Summon_C):
+    -- Excluded from enemy sync so they aren't treated as host enemies, and synced visually via PSUM instead.
+    game.visualSummons = {}
+    function game.setupVisualSummon(actor)
+        if not valid(actor) then
+            return
+        end
+        game.visualSummons[actor:GetAddress()] = true
+        pcall(function()
+            actor:SetActorEnableCollision(false)
+            local cmc = actor.CharacterMovement
+            if valid(cmc) then
+                cmc:SetMovementMode(0, 0) -- MOVE_None: never falls through floor while collision is off
+            end
+            local set = actor.AttributeSetBase
+            if valid(set) then
+                set.Attack.BaseValue, set.Attack.CurrentValue = 0, 0
+                set.ShachiAttack.BaseValue, set.ShachiAttack.CurrentValue = 0, 0
+            end
+            -- Put visual ally on player's side so local player can NEVER aim/lock-on to it
+            local fc = game.factionOf and game.factionOf(actor)
+            if valid(fc) then
+                fc:SetFaction({ TagName = FName("Faction.Player") })
+            end
+            local ctrl = actor:GetController()
+            if valid(ctrl) then
+                pcall(function() ctrl:BlueprintSetGenericTeamId({ TeamID = 1 }) end)
+            end
+            local lockCls = StaticFindObject("/Script/AdvancedThirdPersonCamera.ATPCLockOnTargetLocationComponent")
+            if valid(lockCls) then
+                local lcs = actor:K2_GetComponentsByClass(lockCls)
+                for i = 1, #lcs do
+                    local lc = lcs[i]:get()
+                    if valid(lc) then
+                        pcall(function() lc:Deactivate() end)
+                        pcall(function() lc:SetActive(false, false) end)
+                        pcall(function() lc:SetComponentTickEnabled(false) end)
+                    end
+                end
+            end
+            local hm = actor.BP_PBZHatredManagerComponent
+            if valid(hm) then
+                hm.CanBeHatredNow = false
+            end
+        end)
+        if game.hideHealthBar then
+            pcall(game.hideHealthBar, actor)
+        end
+    end
+
+    function game.isPlayerSummon(actor, cn)
+        if not valid(actor) then
+            return false
+        end
+        if game.visualSummons[actor:GetAddress()] then
+            return true
+        end
+        cn = cn or className(actor)
+        -- (The earlier rule is back. Players' Ctrl summons are "..._Summon" classes too
+        -- (BP_Monster_Hun_Summon_Double, BP_Monster_HuoTongRen_Fist_Summon), so a narrower rule treated them as
+        -- enemies and the excess-copy prune deleted them about a second after they appeared.)
+        if cn:find("ForPlayer_C$") or (cn:find("Summon_C$") and not cn:find("For", 1, true)) then
+            return true
+        end
+        -- (And the player's own: the only summon in the player's folder (Mobs/000_Hun), the puppets of the bell's Ctrl
+        -- power. "Summon_Double_C" matches neither rule above, and with no owner set as it comes it was counted an enemy.)
+        if cn:find("^BP_Monster_Hun_Summon") then
+            return true
+        end
+        local ok, own = pcall(function() return actor:GetOwner() or actor.Instigator end)
+        if ok and valid(own) then
+            local ocn = className(own)
+            if ocn and ocn:find(PLAYER_CLASS_PREFIX, 1, true) then
+                return true
+            end
+        end
+        return false
+    end
+
+    function game.classPathOf(actor)
+        local ok, full = pcall(function() return actor:GetClass():GetFullName() end)
+        if ok and type(full) == "string" then
+            return (full:gsub("^%S+ ", ""))
+        end
+        return nil
+    end
+
     local function isEnemy(actor)
         if not valid(actor) then
             return false
@@ -81,6 +168,9 @@ return function(api)
         -- again and again for a puzzle (the Bomber that opens the way to the Red House: killed for good on the guest, the
         -- way stayed shut). Each world has its own, as alone.
         if cn:lower():find("npchelper", 1, true) or cn:find("Respawn_C$") then     -- (spelt NpcHelper and NPChelper)
+            return false
+        end
+        if game.isPlayerSummon(actor, cn) then
             return false
         end
         local ok, monster = pcall(function() return actor.BIsMonster end)
@@ -118,6 +208,9 @@ return function(api)
         local ok, X, Y, Z, Yaw, VX, VY, VZ, Mode, Hp, MaxHp, Posture = pcall(readSlowly, actor)
         if x == nil or not ok then
             return                  -- attached to something, say: no verdict
+        end
+        if X == 0 and Y == 0 and Z == 0 and Yaw == 0 then
+            return                  -- pooled/transitioning actor at origin: no verdict
         end
         local function same(a, b)
             return type(b) == "number" and math.abs(a - b) <= 0.5
@@ -242,29 +335,11 @@ return function(api)
     local actorNames = {}           -- address -> actor name, for the enemies without a spawner, kept for a pass
     local spawnedOffset = nil       -- where a spawner keeps SpawnedAI; false: it can't be read directly
 
-    -- A name the game gave an actor as it made it while running, not the level's own: "<class>_<a number of two
-    -- thousand million or more>" (the engine counts such names down from 2147483647; a level's own actors are
-    -- "..._UAID_<hex>_<n>" or carry a small number). It differs from PC to PC and from session to session: no id.
-    function game.runtimeName(name)
-        if type(name) ~= "string" or name:find("_UAID_", 1, true) then
-            return false
-        end
-        local n = tonumber(name:match("_(%d+)$"))
-        return n ~= nil and n >= 2000000000
-    end
-
-    -- (false, read once like a name: a spawner with no designer id that the game made as it ran, a mount's. Its own
-    -- name is this session's alone, "BP_AISpawner_C_2147456939" on the host and "..._2147449150" on the guest for
-    -- Jing Ye's horse (the bench, 11-20, run250), and taken for an id, "sp:" and all, a guest asked the host after
-    -- its own horse by a name the host never had: "no", and the horse was put out of the way, its rider left riding
-    -- nothing ("the horse boss riding doesn't appear to guest, only host can see it", players on 1.7.4). Its enemy
-    -- keeps its actor's name, this PC's alone, and is paired by its kind: coop.lua's matchRemoteEnemies. 410.)
     local function spawnerName(s, addr)
         local name = spawnerNames[addr]
         if name == nil then
             local id = s.SpawnerID:ToString()
-            local own = id == "None" and s:GetFName():ToString() or nil
-            name = not (own and game.runtimeName(own)) and "sp:" .. (own or id)
+            name = "sp:" .. (id ~= "None" and id or s:GetFName():ToString())
             spawnerNames[addr] = name
         end
         return name
@@ -291,7 +366,7 @@ return function(api)
             end
             local aiAddr = a:GetAddress()
             local name = spawnerName(s, addr)
-            spawnerIds[aiAddr] = name       -- (false: no id from this spawner, and none to look for: enemyId)
+            spawnerIds[aiAddr] = name
             into[aiAddr] = name
         end
     end
@@ -308,7 +383,7 @@ return function(api)
         end
         if spawnedOffset then
             local aiAddr = link.pointer(addr, spawnedOffset)
-            if aiAddr ~= 0 and spawnerNames[addr] ~= nil then
+            if aiAddr ~= 0 and spawnerNames[addr] then
                 spawnerIds[aiAddr] = spawnerNames[addr]
                 into[aiAddr] = spawnerNames[addr]
                 return
@@ -378,33 +453,80 @@ return function(api)
         return twin.at(addr, actor)
     end
 
+    game.SYNC_HORSES, game.horseIds = true, {}
+    function game.horseIdOf(horse, addr, cn)
+        local now = os.clock()
+        local c = game.horseIds[addr]
+        if c and c.cn == cn then
+            if c.id or now < c.retryAt then
+                return c.id
+            end
+        end
+        local found = nil
+        local function riderId(a)
+            if not valid(a) or a:GetAddress() == addr then
+                return nil
+            end
+            local okN, n = pcall(className, a)
+            if not okN or type(n) ~= "string" or n:find("Horse", 1, true) then
+                return nil
+            end
+            local rid = game.enemyId(a, a:GetAddress())
+            if type(rid) == "string" and rid:sub(1, 3) == "sp:" and not rid:find("^sp:BP_AISpawner_C_%d+$") then
+                return rid
+            end
+            return nil
+        end
+        pcall(function()
+            local att = {}
+            horse:GetAttachedActors(att, true, false)
+            for i = 1, #att do
+                local a = att[i]
+                pcall(function() a = a:get() end)
+                found = found or riderId(a)
+            end
+            if not found then
+                found = riderId(horse:GetAttachParentActor())
+            end
+        end)
+        found = found and (found .. ":Horse") or nil
+        game.horseIds[addr] = { cn = cn, id = found, retryAt = now + 1.0 }
+        return found
+    end
+
     -- addr: the actor's address, when the caller has it.
     function game.enemyId(actor, addr)
         addr = addr or actor:GetAddress()
-        local id = twin.at(addr, actor) or spawnerIds[addr]
+        local tw = twin.at(addr, actor)
+        if tw then
+            return tw
+        end
+        local id = spawnerIds[addr]
+        if id == nil or id:find("^sp:BP_AISpawner_C_%d+$") then
+            local ok, cn = pcall(className, actor)
+            if ok and cn == "BP_Monster_Horse_JingYe_C" then
+                return "sp:JingYe_Horse"
+            end
+            -- (The game has 14 horse classes -- Jing Ye's _H/_w, GuiChaiHorse, MonsterHorse, horse carts...
+            -- -- each spawned at run time under a spawner id that differs per PC, so the guest hid it as "not in the
+            -- host's world". A horse with a rider takes the rider's id. game.SYNC_HORSES = false turns this off.)
+            if ok and type(cn) == "string" and cn:find("^BP_Monster_Horse") and game.SYNC_HORSES ~= false then
+                local hid = game.horseIdOf(actor, addr, cn)
+                if hid then
+                    return hid
+                end
+            end
+        end
         if id then
             return id
         end
-        -- (Not one whose spawner gives it none, false: a mount's, 410. Taken for an enemy with no id yet, every
-        -- spawner was searched for again each second it was about.)
-        if id == nil then
-            idMissing = true
-        end
+        idMissing = true
         id = actorNames[addr]
         if id == nil then
             id = actor:GetFName():ToString()
             actorNames[addr] = id
         end
         return id
-    end
-
-    -- What a body rides: the address of the actor it's attached to (a rider on its horse), or nil.
-    function game.mountOf(actor)
-        local ok, addr = pcall(function()
-            local m = actor:GetAttachParentActor()
-            return valid(m) and m:GetAddress() or nil
-        end)
-        return ok and addr or nil
     end
 
     -- Guest copies of the host's enemies: their own AI stays out of it (puppets.lua). The game starts a stopped AI again
@@ -469,12 +591,8 @@ return function(api)
         return valid(fc) and fc or nil
     end
     -- "put" if it was put there now, true if it stood there already, false for one that isn't a figure (or can't be read).
-    function game.enemySide(actor, allowIdleMirror)
-        if not valid(actor) or game.isDead(actor) then
-            return false
-        end
-        local state = game.aiState(actor)
-        if state ~= "None" and not (allowIdleMirror and state == "AI.State.Idle") then
+    function game.enemySide(actor)
+        if not valid(actor) or game.isDead(actor) or game.aiState(actor) ~= "None" then
             return false
         end
         local ok, how = pcall(function()
@@ -483,31 +601,14 @@ return function(api)
                 return false
             end
             local now = fc:GetCurrnetFaction().TagName:ToString()
-            if now == game.ENEMY_SIDE and not allowIdleMirror then
+            if now == game.ENEMY_SIDE then
                 return true
             end
             local controller = actor:GetController()
-            if not valid(controller) then
-                return false
-            end
             local team = controller.Team.TeamID
-            if type(team) ~= "number" then
-                return false
-            end
-            if now == game.ENEMY_SIDE and team == game.ENEMY_TEAM then
-                return true
-            end
-            local addr, fname = actor:GetAddress(), actor:GetFName():ToString()
-            local was = game.sided[addr]
-            if not was or was.fname ~= fname then
-                game.sided[addr] = { fname = fname, faction = now, team = team, allowIdleMirror = allowIdleMirror }
-            end
-            if not allowIdleMirror or now ~= game.ENEMY_SIDE then
-                fc:SetFaction({ TagName = FName(game.ENEMY_SIDE) })
-            end
-            if not allowIdleMirror or team ~= game.ENEMY_TEAM then
-                controller:BlueprintSetGenericTeamId({ TeamID = game.ENEMY_TEAM })
-            end
+            fc:SetFaction({ TagName = FName(game.ENEMY_SIDE) })
+            controller:BlueprintSetGenericTeamId({ TeamID = game.ENEMY_TEAM })
+            game.sided[actor:GetAddress()] = { fname = actor:GetFName():ToString(), faction = now, team = team }
             return "put"
         end)
         return ok and how or false
@@ -521,11 +622,8 @@ return function(api)
         local was = game.sided[addr]
         game.sided[addr] = nil
         -- (Its name first: the copy a bar went on is kept from before, and its address can be another object's now.)
-        if not was or select(2, pcall(function() return actor:GetFName():ToString() end)) ~= was.fname or game.isDead(actor) then
-            return false
-        end
-        local state = game.aiState(actor)
-        if state ~= "None" and not (was.allowIdleMirror and state == "AI.State.Idle") then
+        if not was or select(2, pcall(function() return actor:GetFName():ToString() end)) ~= was.fname
+            or game.isDead(actor) or game.aiState(actor) ~= "None" then
             return false
         end
         local ok, done = pcall(function()
@@ -1102,6 +1200,15 @@ return function(api)
         return enemyCache or {}, enemyAddrs or {}
     end
 
+    function game.isPooled(actor)
+        local ok, hidden = pcall(function() return actor.bHidden == true end)
+        if not (ok and hidden) then
+            return false
+        end
+        local okL, l = pcall(locationOf, actor)
+        return okL and l ~= nil and l.X == 0 and l.Y == 0 and l.Z == 0
+    end
+
     -- The enemies, and their addresses in the same order.
     function game.listEnemies(fresh)
         local now = os.clock()
@@ -1114,19 +1221,21 @@ return function(api)
         end
         local out, addrs = {}, {}
         for _, ch in ipairs(FindAllOf("PBZCharacter_NPC") or {}) do
-            local addr = ch:GetAddress()
-            local enemy = knownEnemy[addr]
-            if enemy == nil then
-                enemy = isEnemy(ch)
-                knownEnemy[addr] = enemy
-                if enemy and layout then
-                    local cn = className(ch)
-                    layoutChecked[cn] = layoutChecked[cn] or checkLayout(ch, addr)
+            if not game.isPooled(ch) then
+                local addr = ch:GetAddress()
+                local enemy = knownEnemy[addr]
+                if enemy == nil then
+                    enemy = isEnemy(ch)
+                    knownEnemy[addr] = enemy
+                    if enemy and layout then
+                        local cn = className(ch)
+                        layoutChecked[cn] = layoutChecked[cn] or checkLayout(ch, addr)
+                    end
                 end
-            end
-            if enemy then
-                out[#out + 1] = ch
-                addrs[#addrs + 1] = addr
+                if enemy then
+                    out[#out + 1] = ch
+                    addrs[#addrs + 1] = addr
+                end
             end
         end
         enemyCache, enemyAddrs, enemyCacheAt = out, addrs, now
@@ -1201,23 +1310,85 @@ return function(api)
     -- fight of its own here). Asked about once a second while such a fight goes on.
     local BAR_TRIES = 3
     local barTries = {}
+    game.barShownAt = {}
+    game.shownBarWidget = {}
+    game.barVis = {}
+    function game.collapseBar(bar)
+        local baddr = bar:GetAddress()
+        if game.barVis[baddr] == nil then
+            local okV, v = pcall(function() return bar:GetVisibility() end)
+            if okV and type(v) == "number" and v ~= 1 and v ~= 2 then
+                game.barVis[baddr] = v
+            else
+                game.barVis[baddr] = 4 -- SelfHitTestInvisible
+            end
+        end
+        pcall(function() bar:SetVisibility(1) end)
+    end
+    function game.restoreBarVis(bar)
+        local baddr = bar:GetAddress()
+        local saved = game.barVis[baddr]
+        if saved == nil then
+            return -- never force-show a bar widget we did not collapse ourselves
+        end
+        game.barVis[baddr] = nil
+        local okV, vis = pcall(function() return bar:IsVisible() end)
+        if not okV or not vis then
+            pcall(function() bar:SetVisibility(saved) end)
+        end
+    end
     function game.keepBossBar(boss)
+        if not valid(boss) or (game.isDead and game.isDead(boss)) then
+            if valid(boss) and game.hideBossBar then
+                game.hideBossBar(boss)
+            end
+            return false
+        end
+        local cn = className(boss)
+        if cn and cn:find("_Stand_C$") then
+            return false
+        end
         local addr = boss:GetAddress()
-        local shown = false
+        if not (game.isMirrorBar and game.isMirrorBar(boss)) then
+            return true             -- native game boss bar: never tear down or fight the game's own HUD
+        end
+        local _, pawn = api.getPlayer1()
+        local okM, mode = pcall(function() return valid(pawn) and pawn.CharacterMovement.MovementMode end)
+        if okM and mode and mode ~= 1 then
+            return true             -- falling/gliding into sky arena: wait until landed before touching HUD bars
+        end
+        if os.clock() - (game.barShownAt[addr] or 0) < 2.5 then
+            return true
+        end
         local hud = FindFirstOf("PBZHUDLayout")
         if not valid(hud) then
             return true             -- (no HUD, mid-load: asked again next time, not counted as a bar gone)
         end
-        pcall(function()
-            local bars = hud:GetBossHPBarInstances()
-            for i = 1, #bars do
-                local bar = bars[i]:get()
-                -- (A bar has no Character until its Init has run.)
-                if valid(bar) and (not valid(bar.Character) or bar.Character:GetAddress() == addr) then
-                    shown = true
-                end
+        local claimedOther = {}
+        for ba, wa in pairs(game.shownBarWidget) do
+            if ba ~= addr and bossActors[ba] then
+                claimedOther[wa] = true
             end
-        end)
+        end
+        local shown, wantBar = false, game.shownBarWidget[addr]
+        for _, bar in ipairs(bossBarList(hud)) do
+            local baddr = bar:GetAddress()
+            local okW, who = pcall(function() return bar.Character end)
+            local whoAddr = (okW and valid(who)) and who:GetAddress() or nil
+            if whoAddr == addr or (wantBar and baddr == wantBar and not claimedOther[baddr])
+                or (not whoAddr and not claimedOther[baddr]) then
+                shown = true
+                game.shownBarWidget[addr] = baddr
+                if whoAddr ~= addr then
+                    pcall(function()
+                        bar:Init(boss)
+                        game.noInternalName(bar, boss)
+                    end)
+                end
+                game.restoreBarVis(bar)
+                break
+            end
+        end
         if shown then
             barTries[addr] = nil
         else
@@ -1226,6 +1397,7 @@ return function(api)
             if barTries[addr] > BAR_TRIES then
                 return false
             end
+            game.shownBarWidget[addr] = nil
             bosses[addr] = nil
             game.showBossBar(boss)
             local hp, maxhp = game.getHealth(boss)
@@ -1242,11 +1414,27 @@ return function(api)
     -- (Its attributes asked first, here and for its floor below: a destroyed body, still listed till collection, has
     -- none. A field set on nothing throws no error, but each is an error line in the game's log, and a copy's floor is
     -- written every turn: the bench, 11-18, ten lines in a second as a stand-in dropped 22 s before was collected.)
+    -- Guard against double-scaling a boss's Health_Max when a boss swaps actors mid-fight (e.g. ZhangMeng1a / BiHai).
+    game.bossMaxCap = {}
     function game.setMaxHealth(actor, maxhp)
         pcall(function()
             local set = actor.AttributeSetBase
             if not valid(set) then
                 return
+            end
+            local addr = actor:GetAddress()
+            if game.isBoss and game.isBoss(actor, addr) and game.enemyId then
+                local id = game.enemyId(actor, addr)
+                if id and id:sub(1, 3) == "sp:" then
+                    local curMax = tonumber(set.Health_Max.CurrentValue) or 0
+                    local rec = game.bossMaxCap[id]
+                    if not rec and curMax > 100 then
+                        game.bossMaxCap[id] = { base = curMax, scaled = maxhp }
+                    elseif rec and maxhp > rec.scaled * 1.35 and curMax >= rec.base * 1.3 then
+                        -- Actor already carried scaled maxhp from previous swap; do not multiply a second time!
+                        maxhp = rec.scaled
+                    end
+                end
             end
             local mx = set.Health_Max
             mx.BaseValue = maxhp
@@ -1326,7 +1514,8 @@ return function(api)
 
     -- Everyone respawned: no fight goes on, and a bar we put up ourselves doesn't go by itself.
     function game.resetBosses()
-        local hud = next(bossActors) and FindFirstOf("PBZHUDLayout")
+        game.barShownAt, game.bossUnregAt, game.bossMaxCap, game.shownBarWidget = {}, {}, {}, {}
+        local hud = FindFirstOf("PBZHUDLayout")
         for _, actor in pairs(bossActors) do
             if valid(hud) and valid(actor) then
                 pcall(function() hud:UnRegisterBossHPBar(actor) end)
@@ -1334,6 +1523,9 @@ return function(api)
         end
         bosses, bossActors = {}, {}
         barTries = {}       -- (by address: three tries failed on the old boss kept the next one there without a bar)
+        if game.cleanBossBars then
+            game.cleanBossBars(true, hud)
+        end
     end
 
     -- Health_Min: the floor native damage can't push health below. The client holds its copies of the host's
@@ -1394,7 +1586,310 @@ return function(api)
         end)
     end
 
+    -- Execution lock: when a partner starts an E finisher on a mob or boss, immediately remove any
+    -- Execute/Break/CanLowHealthExecute GameplayEffects and raise posture (Shachi) above 0 so PBZ hides
+    -- the E prompt on this player's screen and blocks simultaneous double-executions.
+    game.execLocks = {}
+    function game.execLock(actor, on)
+        if not valid(actor) then
+            return
+        end
+        local addr = actor:GetAddress()
+        local rec = game.execLocks[addr]
+        if not on then
+            game.execLocks[addr] = nil
+            if rec then
+                pcall(function()
+                    if actor:GetFName():ToString() == rec.fname and game.hitStateOf and game.clearHitState then
+                        local st = game.hitStateOf(actor)
+                        if st and st:find("Executing", 1, true) then
+                            game.clearHitState(actor)
+                        end
+                    end
+                end)
+            end
+            return
+        end
+        -- (A boss is never touched here. Stripping its break/groggy effects and refilling its posture while
+        -- the partner finished it left the host's boss standing while the guest's showed a finisher.)
+        if (game.isBoss and game.isBoss(actor, addr)) or (game.bossTwin and game.bossTwin(actor, addr)) then
+            return
+        end
+        pcall(function()
+            local bl = lib("/Script/GameplayAbilities.Default__AbilitySystemBlueprintLibrary")
+            local asc = valid(bl) and bl:GetAbilitySystemComponent(actor) or nil
+            if valid(asc) then
+                local handles = {}
+                pcall(function()
+                    asc.ActiveGameplayEffects.GameplayEffects_Internal:ForEach(function(_, effect)
+                        pcall(function()
+                            local ef = effect:get()
+                            local n = (ef.Spec.Def:GetClass():GetFName():ToString() or ""):lower()
+                            if n:find("exec", 1, true) or n:find("break", 1, true) or n:find("groggy", 1, true)
+                                or n:find("finish", 1, true) or n:find("canlowhealth", 1, true) then
+                                handles[#handles + 1] = ef.Handle
+                            end
+                        end)
+                    end)
+                end)
+                for _, h in ipairs(handles) do
+                    pcall(function() asc:RemoveActiveGameplayEffect(h, -1) end)
+                end
+            end
+            if game.getPosture and game.setPosture then
+                local pcur = game.getPosture(actor)
+                local pmax = (game.postureMax and game.postureMax(actor)) or 200
+                if pcur ~= nil and pcur <= math.max(10, pmax * 0.15) then
+                    game.setPosture(actor, math.max(50, pmax * 0.5))
+                end
+            end
+            if not rec then
+                game.execLocks[addr] = { fname = actor:GetFName():ToString() }
+                local isBoss = (game.isBoss and game.isBoss(actor, addr)) or (game.bossTwin and game.bossTwin(actor, addr))
+                if not isBoss and game.setHitState then
+                    game.setHitState(actor, "CharacterState.Hitreact.State.Executing", 3.0)
+                end
+            end
+        end)
+    end
+
+    -- Fast, zero-hitch enemy shield-break detection (montage-only, no PrimitiveComponent reflection scan)
+    function game.isShieldBroken(actor)
+        if not valid(actor) then
+            return false
+        end
+        local broken = false
+        pcall(function()
+            local ai = actor.Mesh and actor.Mesh:GetAnimInstance()
+            local m = valid(ai) and ai:GetCurrentActiveMontage()
+            if valid(m) then
+                local mn = (m:GetFName():ToString() or ""):lower()
+                if (mn:find("shield", 1, true) or mn:find("dun", 1, true))
+                    and (mn:find("break", 1, true) or mn:find("broken", 1, true) or mn:find("shatter", 1, true) or mn:find("drop", 1, true)) then
+                    broken = true
+                end
+            end
+        end)
+        return broken
+    end
+
+    -- (Enemy shields and protections by their exact names in the game's files (the golden-mask boss's
+    -- DamageFilter and ReflectResistance, BiHai's shield, the shield troops' HasShield). The game that runs an enemy
+    -- tells when one goes; the other removes the same one from its copy, never anything the runner still has.)
+    game.MIRROR_EFFECTS = {
+        GE_MoYuan_LongZhu_01_DamageFilter = true, GE_MoYuan_LongZhu_04_DamageFilter = true,
+        GE_LongZhu_01_ReflectResistance = true, GE_BiHai_ShieldDuration = true, GE_BiHai_ShieldDuration_P3 = true,
+        GE_CanQu_BiHai_Shield = true, GE_HasShield = true, GE_HasShield_Field = true, GE_HasShield_NonKnock = true,
+        GE_HasShield_ZhuoBi = true,
+    }
+    local function effectNames(actor, wanted, removeName)
+        local found, handles = {}, {}
+        pcall(function()
+            local bl = lib("/Script/GameplayAbilities.Default__AbilitySystemBlueprintLibrary")
+            local asc = valid(bl) and bl:GetAbilitySystemComponent(actor) or nil
+            if not valid(asc) then
+                return
+            end
+            asc.ActiveGameplayEffects.GameplayEffects_Internal:ForEach(function(_, effect)
+                pcall(function()
+                    local ef = effect:get()
+                    local n = (ef.Spec.Def:GetClass():GetFName():ToString() or ""):gsub("_C$", "")
+                    if wanted[n] then
+                        found[n] = true
+                        if removeName == n then
+                            handles[#handles + 1] = ef.Handle
+                        end
+                    end
+                end)
+            end)
+            for _, h in ipairs(handles) do
+                pcall(function() asc:RemoveActiveGameplayEffect(h, -1) end)
+            end
+        end)
+        return found, #handles
+    end
+    function game.mirrorEffectsOf(actor)
+        if not valid(actor) then
+            return {}
+        end
+        return (effectNames(actor, game.MIRROR_EFFECTS))
+    end
+    function game.removeEffectNamed(actor, name)
+        if not (valid(actor) and game.MIRROR_EFFECTS[name]) then
+            return 0
+        end
+        local _, n = effectNames(actor, game.MIRROR_EFFECTS, name)
+        return n
+    end
+
+    function game.breakEnemyShield(actor)
+        if not valid(actor) then
+            return
+        end
+        pcall(function()
+            local bl = lib("/Script/GameplayAbilities.Default__AbilitySystemBlueprintLibrary")
+            local asc = valid(bl) and bl:GetAbilitySystemComponent(actor) or nil
+            if valid(asc) then
+                local handles = {}
+                pcall(function()
+                    asc.ActiveGameplayEffects.GameplayEffects_Internal:ForEach(function(_, effect)
+                        pcall(function()
+                            local ef = effect:get()
+                            local n = (ef.Spec.Def:GetClass():GetFName():ToString() or ""):lower()
+                            if n:find("shield", 1, true) or n:find("dun", 1, true) then     -- (Not "block"/"guard": those are its guarding)
+                                handles[#handles + 1] = ef.Handle
+                            end
+                        end)
+                    end)
+                end)
+                for _, h in ipairs(handles) do
+                    pcall(function() asc:RemoveActiveGameplayEffect(h, -1) end)
+                end
+            end
+            local cls = StaticFindObject("/Script/Engine.PrimitiveComponent")
+            if valid(cls) then
+                local comps = actor:K2_GetComponentsByClass(cls)
+                for i = 1, #comps do
+                    local c = comps[i]:get()
+                    if valid(c) then
+                        local cn = (c:GetFName():ToString() or ""):lower()
+                        if (cn:find("shield", 1, true) or cn:find("dun", 1, true)) and not cn:find("capsule", 1, true) then
+                            pcall(function() c:SetVisibility(false, true) end)
+                            pcall(function() c:SetHiddenInGame(true, true) end)
+                            pcall(function() c:SetCollisionEnabled(0) end)
+                        end
+                    end
+                end
+            end
+            local att = {}
+            pcall(function() actor:GetAttachedActors(att, true, true) end)
+            for i = 1, #att do
+                local a = att[i]
+                pcall(function() a = a:get() end)
+                if valid(a) then
+                    local an = (a:GetFName():ToString() or ""):lower()
+                    if an:find("shield", 1, true) or an:find("dun", 1, true) then
+                        pcall(function() a:SetActorHiddenInGame(true) end)
+                        pcall(function() a:SetActorEnableCollision(false) end)
+                    end
+                end
+            end
+            if game.setHitState then
+                game.setHitState(actor, "CharacterState.Hitreact.State.Break", 1.5)
+            end
+        end)
+    end
+
+    -- Shared boss parry/vulnerability window
+    game.PARRY_STRIPS_EFFECTS = false     -- (Set true for the old behaviour)
+    function game.shareParryWindow(actor, hitTag)
+        if not valid(actor) then
+            return
+        end
+        pcall(function()
+            local bl = lib("/Script/GameplayAbilities.Default__AbilitySystemBlueprintLibrary")
+            local asc = valid(bl) and bl:GetAbilitySystemComponent(actor) or nil
+            if valid(asc) then
+                local handles = {}
+                pcall(function()
+                    asc.ActiveGameplayEffects.GameplayEffects_Internal:ForEach(function(_, effect)
+                        pcall(function()
+                            local ef = effect:get()
+                            local n = (ef.Spec.Def:GetClass():GetFName():ToString() or ""):lower()
+                            if n:find("invuln", 1, true) or n:find("immune", 1, true) or n:find("nodamage", 1, true)
+                                or n:find("block", 1, true) or n:find("shield", 1, true) or n:find("evade", 1, true)
+                                or n:find("dodge", 1, true) or n:find("unhit", 1, true) or n:find("parry", 1, true)
+                                or n:find("guard", 1, true) or n:find("deflect", 1, true) then
+                                -- (Off by default. Stripping a boss's invulnerability/armor/guard effects
+                                -- every time its partner copy guarded made bosses easy, froze them and broke grabs.)
+                                if game.PARRY_STRIPS_EFFECTS then
+                                    handles[#handles + 1] = ef.Handle
+                                end
+                            end
+                        end)
+                    end)
+                end)
+                for _, h in ipairs(handles) do
+                    pcall(function() asc:RemoveActiveGameplayEffect(h, -1) end)
+                end
+            end
+            if hitTag and hitTag ~= "" and hitTag ~= "-" and hitTag ~= "None" and game.setHitState then
+                game.setHitState(actor, hitTag, 1.2)
+            end
+        end)
+    end
+
+    -- When a mob OR boss dies remotely (GE_Kill_C with no local hit impulse), PBZ often leaves it frozen upright.
+    -- Wait briefly (longer for bosses in case a death cutscene or fall animation starts), then collapse via ragdoll.
+    function game.collapseStandingDead(actor, isBoss)
+        if not valid(actor) then
+            return
+        end
+        local addr = actor:GetAddress()
+        local fname = select(2, pcall(function() return actor:GetFName():ToString() end))
+        if not fname then
+            return
+        end
+        game.after(isBoss and 0.45 or 0.20, function()
+            if isBoss and game.sequenceOn and game.sequenceOn() then
+                return
+            end
+            local target = nil
+            for _, a in pairs(game.listEnemies() or {}) do
+                if valid(a) and a:GetAddress() == addr
+                    and select(2, pcall(function() return a:GetFName():ToString() end)) == fname then
+                    target = a
+                    break
+                end
+            end
+            if not valid(target) or not game.isDead(target) then
+                return
+            end
+            pcall(function()
+                local mesh = target.Mesh
+                if not valid(mesh) then
+                    return
+                end
+                local ai = mesh:GetAnimInstance()
+                local cur = valid(ai) and ai:GetCurrentActiveMontage()
+                if valid(cur) then
+                    local mn = (cur:GetFName():ToString() or ""):lower()
+                    if mn:find("dead", 1, true) or mn:find("die", 1, true) or mn:find("death", 1, true)
+                        or mn:find("exec", 1, true) or mn:find("finish", 1, true) then
+                        return
+                    end
+                    pcall(function() ai:Montage_Stop(0.05, cur) end)
+                end
+                pcall(function()
+                    local cmc = target.CharacterMovement
+                    if valid(cmc) then
+                        cmc:StopMovementImmediately()
+                        cmc:DisableMovement()
+                    end
+                end)
+                pcall(function()
+                    local cap = target.CapsuleComponent
+                    if valid(cap) then
+                        cap:SetCollisionEnabled(0)
+                    end
+                end)
+                pcall(function() mesh:SetCollisionProfileName(FName("Ragdoll")) end)
+                pcall(function() mesh:SetCollisionEnabled(3) end)
+                pcall(function() mesh:SetAllBodiesSimulatePhysics(true) end)
+                pcall(function() mesh:SetPhysicsBlendWeight(1.0) end)
+                pcall(function() mesh:SetSimulatePhysics(true) end)
+                pcall(function() mesh:WakeAllRigidBodies() end)
+                pcall(function()
+                    local yaw = math.rad(target:K2_GetActorRotation().Yaw)
+                    local push = isBoss and 3500.0 or 4500.0
+                    mesh:AddImpulse({ X = -math.cos(yaw) * push, Y = -math.sin(yaw) * push, Z = 1200.0 }, FName("None"), true)
+                end)
+            end)
+        end)
+    end
+
     function game.kill(actor)
+        game.execLock(actor, false)
         game.hideHealthBar(actor)
         local boss = game.isBoss and game.isBoss(actor)
         -- (A boss's ghost twin is no boss to the mod, but it's a boss to the game: it shrugs off the game-logic reason
@@ -1425,7 +1920,7 @@ return function(api)
     -- own death (its kill effect) pays this player its dust a moment later, whatever the enemy's level, and the host's
     -- kill already reaches them as shared dust. So: the quiet kill, then the game's death dissolve on each skeletal mesh
     -- of its body and what it holds (as the game puts it there), and the body hidden as the dissolve takes it.
-    local DISSOLVE = { PATH = "/PBZVFXPack/VFX/BattleFX/Common/NS_DeathDissolve_001.NS_DeathDissolve_001", HIDE_S = 1.6 }
+    local DISSOLVE = { PATH = "/PBZVFXPack/VFX/BattleFX/Common/NS_DeathDissolve_001.NS_DeathDissolve_001", HIDE_S = 0.6 }
 
     function DISSOLVE.meshes(actor)
         local out = {}
@@ -1454,6 +1949,7 @@ return function(api)
 
     function game.dissolveKill(actor)
         game.kill(actor)
+        pcall(function() actor:SetActorEnableCollision(false) end)
         pcall(function()
             local sys = StaticFindObject(DISSOLVE.PATH)
             if not valid(sys) and type(LoadAsset) == "function" then
@@ -1500,73 +1996,86 @@ return function(api)
         end)
     end
 
-    game.pickupCard = { nextLook = 0 }
-
-    function game.pickupCard.onScreen()
-        local card
-        for _, w in ipairs(FindAllOf("W_pickupgear_C") or {}) do
-            local ok, visible = pcall(function()
-                if not (valid(w) and w:IsVisible()) then
-                    return false
+    -- A loot card the game put up and never finished: no button to focus, so no key confirms it, and the player is stuck
+    -- behind it. Seen when a boss of the partner's world was ended here the moment its fight began: its reward's card came up
+    -- in the middle of that. The backpack holds no card by then and the item is in it already; the card's own confirm closes
+    -- it. A card the backpack still holds, or one with its button, is left alone. Returns how many were closed.
+    function game.cardOpen()
+        local up = false
+        pcall(function()
+            for _, w in ipairs(FindAllOf("W_pickupgear_C") or {}) do
+                if valid(w) and w:IsInViewport() and w:IsVisible() then
+                    up = true
+                    return
                 end
-                if w:IsActivated() or w:IsInViewport() then
-                    return true
-                end
-                local parent = w:GetParent()
-                return valid(parent) and parent:IsVisible()
-            end)
-            if ok and visible then
-                if card then
-                    return true, nil       -- More than one card is visible. Let the game's own stack settle.
-                end
-                card = w
-            end
-        end
-        return card ~= nil, card
-    end
-
-    -- When a card's focus object is missing, give the backpack a chance to enable confirmation on a card it
-    -- still owns. A card can remain usable without that focus object, so only the player confirms it.
-    function game.watchPickupCard(pawn)
-        local state, now = game.pickupCard, os.clock()
-        if not valid(pawn) then
-            state.visible, state.address, state.nextLook = false, nil, 0
-            return
-        end
-        if now < state.nextLook then
-            return
-        end
-        if now - state.nextLook > 2 then
-            state.address = nil
-        end
-        local visible, w = state.onScreen()
-        state.visible, state.nextLook = visible, now + (visible and 1 or 2)
-        local ok, address = pcall(function()
-            if w and not valid(w.CurrentFocusButton) and not game.localMoveRecent(2) then
-                return w:GetAddress()
             end
         end)
-        if not ok or not address then
-            state.address = nil
-            return
+        return up
+    end
+
+    game.stuckCardSince = {}
+    function game.watchStuckCards(pawn)
+        local now = os.clock()
+        local seen = {}
+        local bp = valid(pawn) and game.backpackOf and game.backpackOf(pawn) or nil
+        local showing = true
+        if valid(bp) then
+            pcall(function() showing = bp.bShowPickItemWidget == true end)
         end
-        local bp = game.backpackOf(pawn)
-        local read, showing = pcall(function() return bp.bShowPickItemWidget end)
-        if not read or showing ~= true then
-            state.address = nil
-            return
+        pcall(function()
+            for _, w in ipairs(FindAllOf("W_pickupgear_C") or {}) do
+                if valid(w) and w:IsInViewport() and w:IsVisible() then
+                    local addr = w:GetAddress()
+                    if not valid(w.CurrentFocusButton) then
+                        seen[addr] = true
+                        local rec = game.stuckCardSince[addr]
+                        local age = rec and (now - rec.at) or 0
+                        if not rec then
+                            game.stuckCardSince[addr] = { at = now, nudges = 0 }
+                        elseif (not showing and age >= 2.0) or age >= 4.5 then
+                            game.stuckCardSince[addr] = nil
+                            pcall(function() w:ClickBackKey() end)
+                            if valid(bp) then
+                                pcall(function() bp.bShowPickItemWidget = false end)
+                            end
+                            log("Closed an unclickable item card (no Continue focus): item is already in the backpack.")
+                        elseif (rec.nudges == 0 and age >= 1.2) or (rec.nudges == 1 and age >= 2.5) then
+                            rec.nudges = rec.nudges + 1
+                            if valid(bp) then
+                                pcall(function() bp:ReadyToPlayConfirmUI() end)
+                            end
+                        end
+                    end
+                end
+            end
+        end)
+        for addr in pairs(game.stuckCardSince) do
+            if not seen[addr] then
+                game.stuckCardSince[addr] = nil
+            end
         end
-        if address ~= state.address then
-            state.address, state.since, state.rearmed = address, now, false
-            return
+    end
+
+    function game.closeStuckCards(pawn)
+        local bp = valid(pawn) and game.backpackOf(pawn)
+        local showing = true
+        pcall(function() showing = bp.bShowPickItemWidget == true end)
+        if not bp or showing then
+            return 0
         end
-        if state.rearmed or now - state.since < 3
-            or (api.localcoop and (api.localcoop.screenUp() or api.localcoop.bellMenuUp())) then
-            return
+        local n = 0
+        for _, w in ipairs(FindAllOf("W_pickupgear_C") or {}) do
+            pcall(function()
+                if valid(w) and w:IsVisible() and not valid(w.CurrentFocusButton) then
+                    w:ClickBackKey()
+                    n = n + 1
+                end
+            end)
         end
-        state.rearmed = true
-        local ready = pcall(function() bp:ReadyToPlayConfirmUI() end)
-        log("Pickup card has no focus button; asked the backpack to enable confirmation: " .. tostring(ready))
+        if n > 0 then
+            log(n .. " item card(s) the game left without buttons, closed: the item is in the backpack.")
+        end
+        return n
     end
 
     function game.killPlayer(pawn)
@@ -1595,6 +2104,13 @@ return function(api)
             level.BaseValue = 0
             level.CurrentValue = 0
         end)
+        game.execLock(actor, false)
+        if not boss and game.hitStateOf and game.clearHitState then
+            local st = game.hitStateOf(actor)
+            if st and st:find("Executing", 1, true) then
+                game.clearHitState(actor)
+            end
+        end
         stopSwing(actor)
         game.setMinHealth(actor, 0)
         syncing = true
@@ -1602,6 +2118,7 @@ return function(api)
         syncing = false
         local hp = game.getHealth(actor)
         if ok and hp ~= nil and hp <= 0 then
+            game.collapseStandingDead(actor, boss)
             forgetBoss(actor)
             -- (A copy's own death can pay this player its dust all the same, its level at 0 or not: on the bench a guest
             -- had its copy's own on top of the share of the host's. The death was the partner's, and their share of it
@@ -1913,6 +2430,8 @@ return function(api)
         end
         if left <= 0 and real then
             local was = bosses[actor:GetAddress()]
+            local isBoss = was or (game.isBoss and game.isBoss(actor))
+            game.execLock(actor, false)
             forgetBoss(actor)
             stopSwing(actor)
             game.setMinHealth(actor, 0)
@@ -1921,6 +2440,7 @@ return function(api)
             syncing = false
             local after = game.getHealth(actor)
             if ok and after ~= nil and after <= 0 then
+                game.collapseStandingDead(actor, isBoss)
                 return true
             end
             if game.isBoss and game.isBoss(actor) then
@@ -1941,6 +2461,7 @@ return function(api)
             syncing = true
             pcall(function() actor:Kill(DIE_DAMAGED) end)
             syncing = false
+            game.collapseStandingDead(actor, game.isBoss and game.isBoss(actor))
         end
         return false
     end
@@ -2059,9 +2580,7 @@ return function(api)
             -- player report, 11-06: the other player saw nothing of what their partner found). game.granting keeps the
             -- notice's own report from going back.
             local line = not quiet and counted and not game.isNarrative(itemId)
-            -- The broken pipa is also handed out by this world's scene after the partner's share can arrive.
-            -- Let that scene own its card. The shared item and its held flag are still granted here.
-            local card = not quiet and not line and itemId ~= "I_02001" and (before == 0 or game.isNarrative(itemId))
+            local card = not quiet and not line and (before == 0 or game.isNarrative(itemId))
             local held = 0
             if line and before == 0 then
                 -- (A thing new to this player gets the card, not the line, and the card takes the screen in a game that isn't
@@ -2115,9 +2634,6 @@ return function(api)
     game.tipsWanted, game.cardIds, game.CARD_AGAIN_S, game.cardAt = false, {}, 5, -1e9
     game.CARD_TRIES, game.cardTries = 6, 0
     function game.showPickupTips(pawn)
-        if game.pickupCard.visible then
-            return
-        end
         local bp = valid(pawn) and worldSubsystem(pawn, "/Script/ProjectPBZ.PBZBackPackSubsystem")
         if not bp then
             return
@@ -2151,19 +2667,17 @@ return function(api)
             -- (Put up that many times and still waiting: left for the game's own next pickup, as it was before.)
             game.tipsWanted, game.cardTries, game.cardCalm.from = false, 0, nil
             log("A partner's find's card still waits after " .. game.CARD_TRIES .. " tries: left for the next pickup here.")
-        elseif free and os.clock() - game.cardAt >= game.CARD_AGAIN_S and game.calmForCard(pawn) then
-            -- (Both calls, as the game's own pickup makes them. Never over a card that's up: from the first call till the
-            -- last card waiting is closed the bag can't push (CanPushPickupUI), the game putting each next one up by itself
-            -- after Space (the bench, 11-12). What a second pair does over an open card is unknown, maybe a card with no
-            -- button: with two partner cards it ran every few seconds over the first, still open (a
-            -- review of 18d340e). Again a while on only if none came up. The lines go once the last is closed.)
-            game.cardAt = os.clock()
-            if game.pickupCard.onScreen() then
-                return
-            end
-            game.cardTries = game.cardTries + 1
+        elseif free and not game.cardOpen() and os.clock() - game.cardAt >= game.CARD_AGAIN_S and game.calmForCard(pawn) then
+            game.cardAt, game.cardTries = os.clock(), game.cardTries + 1
             pcall(function() bp:TryToPushPickupUI() end)
             pcall(function() bp:ReadyToPlayConfirmUI() end)
+            if game.after then
+                game.after(0.45, function()
+                    if valid(bp) and game.cardOpen() then
+                        pcall(function() bp:ReadyToPlayConfirmUI() end)
+                    end
+                end)
+            end
             local again = game.cardTries > 1 and (" (again: " .. game.cardTries .. ")") or ""
             log("A partner's find's card put up, the game's way" .. again .. ".")
         end
@@ -2218,7 +2732,8 @@ return function(api)
 
     function game.isBoss(actor, addr)
         addr = addr or actor:GetAddress()
-        if twin.at(addr, actor) then
+        local tw = twin.at(addr, actor)
+        if tw and tw:match("^tw%d+:") then
             return false
         end
         if game.bossAt(addr, actor) then
@@ -2252,7 +2767,8 @@ return function(api)
     -- fought back either.
     function game.bossTwin(actor, addr)
         addr = addr or actor:GetAddress()
-        if not twin.at(addr, actor) then
+        local tw = twin.at(addr, actor)
+        if not (tw and tw:match("^tw%d+:")) then
             return false
         end
         return game.isBossClass(className(actor)) == true
@@ -2273,19 +2789,41 @@ return function(api)
                 -- started first had the host's own fight taken for a mirror, ended with the guest's: walls open, bar gone,
                 -- the boss alive, its kill the host's alone.)
                 mirroredAt[boss:GetAddress()] = nil
-                local side = game.sided[boss:GetAddress()]
-                if side and side.allowIdleMirror then
-                    game.sided[boss:GetAddress()] = nil
-                end
                 if api.coop and api.coop.ownFightOn then
                     api.coop.ownFightOn(boss)
                 end
-            elseif valid(boss) and not game.bossAt(boss:GetAddress(), boss) and not twin.at(boss:GetAddress(), boss) then
-                bosses[boss:GetAddress()] = boss:GetFName():ToString()
-                bossActors[boss:GetAddress()] = boss
-                log("Boss fight: " .. boss:GetFName():ToString())
-                if api.coop and not showingRemoteBoss then
-                    -- The same cross-PC id the snapshots use (sp:<SpawnerID> for spawner bosses).
+            elseif valid(boss) and not game.bossAt(boss:GetAddress(), boss)
+                and not (twin.at(boss:GetAddress(), boss) or ""):match("^tw%d+:") then
+                local baddr = boss:GetAddress()
+                local flicker = game.bossUnregAt and (os.clock() - (game.bossUnregAt[baddr] or 0) < 0.8)
+                bosses[baddr] = boss:GetFName():ToString()
+                bossActors[baddr] = boss
+                -- RegisterHook fires BEFORE C++ RegisterBossHPBar finishes, so uncollapse any reused pooled bar widget just after
+                if game.after then
+                    local targetAddr = baddr
+                    local function uncollapseRegistered()
+                        if not bossActors[targetAddr] then
+                            return
+                        end
+                        pcall(function()
+                            local hud = FindFirstOf("PBZHUDLayout")
+                            if valid(hud) then
+                                for _, bar in ipairs(bossBarList(hud)) do
+                                    local okW, who = pcall(function() return bar.Character end)
+                                    if okW and valid(who) and who:GetAddress() == targetAddr then
+                                        game.restoreBarVis(bar)
+                                    end
+                                end
+                            end
+                        end)
+                    end
+                    game.after(0.05, uncollapseRegistered)
+                    game.after(0.35, uncollapseRegistered)
+                end
+                if not flicker then
+                    log("Boss fight: " .. boss:GetFName():ToString())
+                end
+                if api.coop and not showingRemoteBoss and not flicker then
                     game.refreshEnemyIds(true)
                     api.coop.announceBoss(boss)
                 end
@@ -2302,9 +2840,17 @@ return function(api)
                 if bosses[addr] then
                     log("Boss fight over: " .. boss:GetFName():ToString())
                 end
+                game.bossUnregAt = game.bossUnregAt or {}
+                game.bossUnregAt[addr] = os.clock()
+                if game.shownBarWidget then
+                    game.shownBarWidget[addr] = nil
+                end
                 mirroredAt[addr] = nil
                 bosses[addr] = nil
                 bossActors[addr] = nil
+                if not game.cleaningBars and game.after and game.cleanBossBars then
+                    game.after(0.35, function() game.cleanBossBars(false) end)
+                end
             end
         end)
     end)
@@ -2334,8 +2880,54 @@ return function(api)
 
     -- The other player's game started a fight with this boss: show its health bar here too (our copy of the
     -- boss mirrors the host's health, so the bar follows the real fight).
+    -- Sweep dead, duplicate, or orphaned boss HP bars from PBZHUDLayout so a dead boss bar never stays stuck on screen.
+    game.cleaningBars = false
+    function game.cleanBossBars(forceAll, hud)
+        if game.cleaningBars then
+            return
+        end
+        hud = valid(hud) and hud or FindFirstOf("PBZHUDLayout")
+        if not valid(hud) then
+            return
+        end
+        game.cleaningBars = true
+        local foeSet = {}
+        for _, baddr in pairs(foeBars) do
+            if type(baddr) == "number" then
+                foeSet[baddr] = true
+            end
+        end
+        local seenChar = {}
+        for _, bar in ipairs(bossBarList(hud)) do
+            local baddr = bar:GetAddress()
+            local okVis, isVis = pcall(function() return bar:IsVisible() end)
+            if not foeSet[baddr] and (forceAll or (okVis and isVis == true)) then
+                local okW, who = pcall(function() return bar.Character end)
+                local wValid = okW and valid(who)
+                local wAddr = wValid and who:GetAddress() or nil
+                local wDead = wValid and game.isDead and game.isDead(who)
+                local dup = wAddr and seenChar[wAddr]
+                if forceAll or wDead or dup or (not wValid and next(bossActors) == nil) then
+                    if wValid and (okVis and isVis == true) then
+                        pcall(function() hud:UnRegisterBossHPBar(who) end)
+                    end
+                    if forceAll or next(bossActors) == nil then
+                        game.collapseBar(bar)
+                    end
+                elseif wAddr then
+                    seenChar[wAddr] = true
+                end
+            end
+        end
+        game.cleaningBars = false
+    end
+
     function game.showBossBar(boss)
-        if not valid(boss) or game.bossAt(boss:GetAddress(), boss) then
+        if not valid(boss) or (game.isDead and game.isDead(boss)) or game.bossAt(boss:GetAddress(), boss) then
+            return
+        end
+        local cn = className(boss)
+        if cn and cn:find("_Stand_C$") then
             return
         end
         local hud = FindFirstOf("PBZHUDLayout")
@@ -2343,36 +2935,70 @@ return function(api)
             log("No HUD layout to show the boss bar on.")
             return
         end
+        game.cleanBossBars(false, hud)
+        local addr = boss:GetAddress()
+        local wantBar = game.shownBarWidget[addr]
         local before = {}
         for _, bar in ipairs(bossBarList(hud)) do
-            before[bar:GetAddress()] = true
+            local baddr = bar:GetAddress()
+            before[baddr] = true
+            local okW, who = pcall(function() return bar.Character end)
+            local whoAddr = (okW and valid(who)) and who:GetAddress() or nil
+            if whoAddr == addr or (wantBar and baddr == wantBar and (not whoAddr or not bossActors[whoAddr])) then
+                if whoAddr ~= addr then
+                    pcall(function()
+                        bar:Init(boss)
+                        game.noInternalName(bar, boss)
+                    end)
+                end
+                game.restoreBarVis(bar)
+                game.shownBarWidget[addr] = baddr
+                mirroredAt[addr] = true
+                bosses[addr] = boss:GetFName():ToString()
+                bossActors[addr] = boss
+                game.barShownAt[addr] = os.clock()
+                return
+            end
         end
+        if os.clock() - (game.barShownAt[addr] or 0) < 2.0 then
+            return
+        end
+        game.barShownAt[addr] = os.clock()
         showingRemoteBoss = true
         local ok, err = pcall(function() hud:RegisterBossHPBar(boss) end)
         showingRemoteBoss = false
-        -- The new bar started with the boss (Init), as the game starts the bar of a fight of its own and local co-op starts
-        -- player 2's: unstarted, its gold posture strip never moved, not even at this player's own blows (its health the
-        -- HUD follows by itself). The bench, 11-11, issue #16. Any bar that isn't this boss's already: the HUD hands back a
-        -- bar it took down, its Character and name as they were (a pool), and one still on the boss before (his body in the
-        -- world, or the copy a pairing swapped out) was left on him, his name over this boss and its health and strip still.
-        -- Init names it too, as the codex does: the elite swordsman "Jagged Steel, the Frenzied Brute". A boss the codex has
-        -- no row for it names by its internal name (the Gold-Masked One's BP_Monster_GoldMaskMan_C_...): that one has none.
         if ok then
+            local boundBar = nil
             for _, bar in ipairs(bossBarList(hud)) do
-                if not before[bar:GetAddress()] then
+                local baddr = bar:GetAddress()
+                if not before[baddr] then
+                    boundBar = baddr
                     pcall(function()
                         local who = bar.Character
-                        if not (valid(who) and who:GetAddress() == boss:GetAddress()) then
+                        if not (valid(who) and who:GetAddress() == addr) then
                             bar:Init(boss)
                             game.noInternalName(bar, boss)
                         end
+                        game.restoreBarVis(bar)
                     end)
+                else
+                    local okW, who = pcall(function() return bar.Character end)
+                    if okW and valid(who) and who:GetAddress() == addr then
+                        game.restoreBarVis(bar)
+                        boundBar = boundBar or baddr
+                    end
                 end
             end
+            if boundBar then
+                game.shownBarWidget[addr] = boundBar
+            end
         end
-        mirroredAt[boss:GetAddress()] = true
-        bosses[boss:GetAddress()] = boss:GetFName():ToString()
-        bossActors[boss:GetAddress()] = boss
+        mirroredAt[addr] = true
+        bosses[addr] = boss:GetFName():ToString()
+        bossActors[addr] = boss
+        if ok then
+            game.cleanBossBars(false, hud)
+        end
         log(ok and ("Showing boss bar for " .. boss:GetFName():ToString()) or ("Boss bar failed: " .. tostring(err)))
     end
 
@@ -2763,8 +3389,23 @@ return function(api)
     function game.hideBossBar(boss)
         local hud = FindFirstOf("PBZHUDLayout")
         if valid(boss) and valid(hud) then
+            local addr = boss:GetAddress()
+            local wantBar = game.shownBarWidget and game.shownBarWidget[addr]
+            if game.shownBarWidget then
+                game.shownBarWidget[addr] = nil
+            end
             pcall(function() hud:UnRegisterBossHPBar(boss) end)
             forgetBoss(boss)
+            if next(bossActors) == nil then
+                for _, bar in ipairs(bossBarList(hud)) do
+                    local baddr = bar:GetAddress()
+                    local okW, who = pcall(function() return bar.Character end)
+                    if (okW and valid(who) and who:GetAddress() == addr) or (wantBar and baddr == wantBar) then
+                        game.collapseBar(bar)
+                    end
+                end
+            end
+            game.cleanBossBars(false, hud)
         end
     end
 
@@ -3549,6 +4190,17 @@ return function(api)
         end
         local asc = abilitySystem(actor)
         local cls = StaticFindObject(classPath)
+        if not valid(cls) and type(LoadAsset) == "function" then
+            game.abilityLoadTried = game.abilityLoadTried or {}
+            if not game.abilityLoadTried[classPath] then
+                game.abilityLoadTried[classPath] = true
+                local pkg = classPath:match("^([^%.]+)")
+                if pkg then
+                    pcall(LoadAsset, pkg)
+                    cls = StaticFindObject(classPath)
+                end
+            end
+        end
         if not (asc and valid(cls) and game.isAbilityClass(cls, classPath)) then
             return false
         end
@@ -3569,6 +4221,28 @@ return function(api)
         -- boss among them.)
         if was and start() then
             return true
+        end
+        local running = {}
+        forEachSpec(asc, function(spec)
+            if (tonumber(spec.ActiveCount) or 0) > 0 then
+                for _, list in ipairs({ spec.NonReplicatedInstances, spec.ReplicatedInstances }) do
+                    pcall(function()
+                        list:ForEach(function(_, i)
+                            running[#running + 1] = i:get()
+                        end)
+                    end)
+                end
+            end
+        end)
+        if #running > 0 then
+            for _, inst in ipairs(running) do
+                if valid(inst) then
+                    pcall(function() inst:K2_CancelAbility() end)
+                end
+            end
+            if start() then
+                return true
+            end
         end
         if was then
             game.clearCooldown(asc, cls, was)
@@ -3966,6 +4640,21 @@ return function(api)
             set.Attack.CurrentValue = game.GHOST_ATTACK
             set.ShachiAttack.BaseValue = 0
             set.ShachiAttack.CurrentValue = 0
+        end)
+        -- (The engine animates a far-off figure less often to save time, and the partner's figure walked in
+        -- jerks seen from a distance. Its body and clothes are animated every frame, as the player's own are.)
+        pcall(function()
+            local cls = StaticFindObject("/Script/Engine.SkeletalMeshComponent")
+            local list = valid(cls) and ghost:K2_GetComponentsByClass(cls) or {}
+            for i = 1, #list do
+                pcall(function()
+                    local m = list[i]:get()
+                    if valid(m) then
+                        m.bEnableUpdateRateOptimizations = false
+                        m.VisibilityBasedAnimTickOption = 0
+                    end
+                end)
+            end
         end)
         game.lockPointOnBody(ghost)
     end
@@ -4649,6 +5338,87 @@ return function(api)
         end
     end
 
+    game.downBodyOff = nil
+    game.downBodyResp = nil
+    function game.setDownBody(pawn, down, partnerGhost)
+        if not valid(pawn) then
+            if not down then
+                game.downBodyOff, game.downBodyResp = nil, nil
+            end
+            return
+        end
+        local addr = pawn:GetAddress()
+        if down then
+            if game.downBodyOff == addr then
+                return
+            end
+            game.downBodyOff = addr
+            pcall(function()
+                -- Ignore Pawn channel on capsule ONLY (never SetActorEnableCollision(false) or MOVE_NONE,
+                -- which fires EndOverlap on boss arena volumes and resets/despawns the boss while spectating!)
+                local cap = pawn.CapsuleComponent
+                if valid(cap) then
+                    local okR, prev = pcall(function() return cap:GetCollisionResponseToChannel(2) end)
+                    if okR and type(prev) == "number" and prev > 0 then
+                        game.downBodyResp = prev
+                        cap:SetCollisionResponseToChannel(2, 0) -- ECC_Pawn -> ECR_Ignore
+                    elseif not okR then
+                        game.downBodyResp = 2
+                        cap:SetCollisionResponseToChannel(2, 0)
+                    else
+                        game.downBodyResp = nil -- PBZ already set ECC_Pawn to Ignore on death: don't overwrite on wake
+                    end
+                end
+            end)
+            -- Only redirect enemy hatred on Host when a living partner ghost is present (add ghost FIRST
+            -- so hatred list is never emptied and the boss encounter never resets/despawns).
+            if valid(partnerGhost) and game.enemiesSoFar then
+                pcall(function()
+                    local hm = pawn.BP_PBZHatredManagerComponent
+                    if valid(hm) then
+                        hm.CanBeHatredNow = false
+                    end
+                end)
+                for _, actor in pairs(game.enemiesSoFar() or {}) do
+                    if valid(actor) and not game.isDead(actor) then
+                        pcall(function()
+                            local hatred = actor.BP_PBZHatredManagerComponent
+                            if valid(hatred) then
+                                hatred:AddActorToHatredList(partnerGhost, {})
+                                -- (The dead body itself comes off the list too, once the ghost is on it: setting
+                                -- CanBeHatredNow false only stops new hatred, so a boss kept hitting the corpse.)
+                                pcall(function() hatred:RemoveActorFromHatredList(pawn) end)
+                                local picker = targetPicker(actor)
+                                if valid(picker) then
+                                    picker.LastSwitchTime = 0
+                                    picker:TrySwitchTarget()
+                                end
+                            end
+                        end)
+                    end
+                end
+            end
+        else
+            if game.downBodyOff == nil then
+                return
+            end
+            local prevAddr, restore = game.downBodyOff, game.downBodyResp
+            game.downBodyOff, game.downBodyResp = nil, nil
+            pcall(function()
+                if restore and restore > 0 and addr == prevAddr then
+                    local cap = pawn.CapsuleComponent
+                    if valid(cap) then
+                        cap:SetCollisionResponseToChannel(2, restore)
+                    end
+                end
+                local hm = pawn.BP_PBZHatredManagerComponent
+                if valid(hm) then
+                    hm.CanBeHatredNow = true
+                end
+            end)
+        end
+    end
+
     ------------------------------------------------------------------ bells and refreshes
 
     -- The player's respawn after death runs a "Respawn Refresh Monster" step, which calls the game mode's "Refresh Monster".
@@ -4850,18 +5620,6 @@ return function(api)
     -- rung from here: its first ring, with its scene and the story's steps, stays the player's own. Says "rung"
     -- when the game took the ring, "refused" and why when it didn't (busy with something of their own: the bell
     -- stays theirs to ring).
-    -- Whether this player is using something just now, a chest, a lever, a bell by their own E: their interact
-    -- component has an actor in hand (nothing when idle, the bell while its menu is up: the bench, run230, run236).
-    function game.usingSomething(pawn)
-        local busy = false
-        pcall(function()
-            local class = StaticFindObject("/Script/ProjectPBZ.PBZInteractComponent")
-            local ic = valid(pawn) and valid(class) and pawn:GetComponentByClass(class) or nil
-            busy = valid(ic) and valid(ic:GetInteractingActor())
-        end)
-        return busy
-    end
-
     function game.bellAt(x, y, z, pawn)
         local out, why = nil, nil
         for _, b in ipairs(FindAllOf("MelodiousBell") or {}) do
@@ -5441,6 +6199,21 @@ return function(api)
                 and b.bWasInitializedWithParentBullet ~= true
         end)
         return ok and yes == true
+    end
+
+    -- Boss/enemy bullet on the host: returns owner actor if b is a live non-child enemy projectile.
+    function game.enemyShotOwner(b, playerAddr)
+        local ok, own = pcall(function()
+            if not (b:IsA(lib(BULLET_ACTOR)) and valid(b.BulletOwnerAvatar) and b.bWasInitializedWithParentBullet ~= true) then
+                return nil
+            end
+            local o = b.BulletOwnerAvatar
+            if o:GetAddress() == playerAddr then
+                return nil
+            end
+            return isEnemy(o) and o or nil
+        end)
+        return ok and own or nil
     end
 
     function game.isBulletData(d)
@@ -6891,6 +7664,7 @@ return function(api)
         if not petal or fl.told[key] then
             return
         end
+        game.flowerPickedAt = os.clock()
         fl.told[key], fl.owed[key] = true, nil      -- (gone here by this pick: a word for it from a partner is old news)
         if fl.report then
             fl.report(p.name, petal, p.flags)
@@ -7557,8 +8331,7 @@ return function(api)
     -- it, its middle too (a player runs on a few metres in the 2 s before the scene: out of a small box. A big one
     -- still holds whoever its scene is for, and one only near its side is another's: a talk's scene told 10 m outside
     -- an arena's box set the partner down in it, the boss's scene and fight begun in their world alone. The eleventh
-    -- review. Such a one isn't counted either: beside it, the one small box by the place is still the only one in
-    -- reach). The spot is the place itself where the box
+    -- review). The spot is the place itself where the box
     -- holds it, else the box's nearest point a pace inside. With two or more in reach and not just one holding the
     -- place: nil, and how many (in Zhengdaodaying's underground they stand 6 to 12 m apart: nobody is set down on a
     -- guess). A world that has played a scene mostly has no box for it, but one can stay (run101). The eleventh
@@ -7585,7 +8358,7 @@ return function(api)
                 local ox, oy = math.max(math.abs(lx) - ex.X, 0), math.max(math.abs(ly) - ex.Y, 0)
                 local oz = math.max(math.abs(dz) - ex.Z, 0)
                 local out = math.sqrt(ox * ox + oy * oy + oz * oz)
-                if out > cm or (out > 0 and math.sqrt(dx * dx + dy * dy + dz * dz) > cm) then
+                if out > cm then
                     return
                 end
                 n = n + 1
@@ -7599,7 +8372,8 @@ return function(api)
                 end
                 local spot = { X = l.X + px * math.cos(yaw) - py * math.sin(yaw),
                     Y = l.Y + px * math.sin(yaw) + py * math.cos(yaw),
-                    Z = out > 0 and math.max(l.Z - ex.Z, math.min(l.Z + ex.Z, z)) or z, out = out }
+                    Z = out > 0 and math.max(l.Z - ex.Z, math.min(l.Z + ex.Z, z)) or z, out = out,
+                    far = math.sqrt(dx * dx + dy * dy + dz * dz) > cm }
                 if out == 0 then
                     holds[#holds + 1] = spot
                 end
@@ -7611,7 +8385,7 @@ return function(api)
         if #holds == 1 then
             return holds[1], n
         end
-        if n == 1 then
+        if n == 1 and not near.far then
             return near, n
         end
         return nil, n
@@ -7718,6 +8492,33 @@ return function(api)
             actor:K2_SetActorLocationAndRotation(t.Translation, { Pitch = 0.0, Yaw = yaw, Roll = 0.0 }, false, {}, true)
         end
         return actor
+    end
+
+    -- Generic Blueprint character spawner for dynamic boss summons (ForDangHuiSummon, ForBiHai, etc.)
+    -- and player Ctrl summons (BP_Monster_HuoTongRen_Fist_Summon_C).
+    game.spawnClassTried = {}
+    function game.spawnByClass(classPath, x, y, z, yaw)
+        if type(classPath) ~= "string" or not classPath:match("^/[%w_/%-]+%.[%w_%-]+$") or #classPath > 256 then
+            return nil
+        end
+        local cls = StaticFindObject(classPath)
+        if not valid(cls) and type(LoadAsset) == "function" and not game.spawnClassTried[classPath] then
+            game.spawnClassTried[classPath] = true
+            local pkg = classPath:match("^([^%.]+)")
+            if pkg then
+                pcall(LoadAsset, pkg)
+                cls = StaticFindObject(classPath)
+            end
+        end
+        if not valid(cls) then
+            return nil
+        end
+        local okC, cn = pcall(function() return cls:GetFName():ToString() end)
+        if not (okC and type(cn) == "string" and cn:find("^BP_Monster")) then
+            return nil
+        end
+        local ok, actor = pcall(spawnAt, cls, { X = x, Y = y, Z = z }, yaw or 0)
+        return (ok and valid(actor)) and actor or nil
     end
 
     -- unlockall: every weapon and Phantom Edge weapon into the backpack, for testing moves and skills (PvP).
