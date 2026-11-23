@@ -96,6 +96,9 @@ plug in two pads (`Role = Local` in the ini does the same): see [docs/LOCAL_COOP
 - **[EXACG](https://github.com/EXACG)**, for the four-player design and code (PR #11): the host passing players on to
   each other, a ghost, a compass dot and a map pointer for each partner, tips for each partner, enemy health that grows
   with each player, the `units` check on the real game, and the check that every event has one handler
+- **[YCCCode](https://github.com/YCCCode)**, for the fixes and tests of PR #19: a pickup card left on screen with no
+  confirm prompt (the Broken Illusion Pipa), and the Gold-Masked One's Dragon Pillar fight for the player who arrives
+  second
 - **Vercadi**, for UE4SS for Phantom Blade Zero, which made modding this game possible
 - **The UE4SS team** ([RE-UE4SS](https://github.com/UE4SS-RE/RE-UE4SS))
 - **S-GAME and the game's developers** for Phantom Blade Zero
